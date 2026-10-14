@@ -1,0 +1,1 @@
+Scripted practice scenario; only included in automated test VPK.

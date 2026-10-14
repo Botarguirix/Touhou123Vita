@@ -1,0 +1,13 @@
+name: Host regression tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build-host -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build-host -j2
+      - name: Tests
+        run: ctest --test-dir build-host --output-on-failure

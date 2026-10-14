@@ -1,0 +1,17 @@
+build*/
+artifacts/
+local/
+assets/
+original/
+__pycache__/
+*.pyc
+*.exe
+*.dll
+*.dat
+*.vpk
+*.self
+*.elf
+*.gpr
+*.rep
+*.pf
+*.log
