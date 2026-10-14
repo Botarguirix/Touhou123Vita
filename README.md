@@ -50,3 +50,5 @@ Conservar las licencias de las herramientas por separado. No se integra código 
 | Volver | Círculo | C |
 
 Title ID de desarrollo: `THSV12301`. La demo interactiva no contiene `auto-test.txt`; el VPK de prueba sí, ejecuta 600 fotogramas y produce un reporte antes de salir.
+
+Tras preparar y ejecutar la prueba local, abrir la demo interactiva con `./tools/play.ps1`. Las pruebas de Vita3K y el estado exacto están documentados en `docs/STATUS.md`.

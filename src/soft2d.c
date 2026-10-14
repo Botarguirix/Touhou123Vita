@@ -14,10 +14,27 @@ int soft2d_init(void){
     }
     fb=buffers[0];return 0;
 }
-void soft2d_fini(void){for(int i=0;i<2;i++)if(ids[i]>=0)sceKernelFreeMemBlock(ids[i]);}
+void soft2d_fini(void){
+    /* Keep scanout buffers alive until process/session teardown. */
+    sceDisplayWaitVblankStart();sceDisplayWaitVblankStart();
+    /* Process exit reclaims the two allocations after the display session stops. */
+}
 void soft2d_start_drawing(void){fb=buffers[buffer_index];}
 void soft2d_clear_screen(void){memset(fb,0,960*544*4);}
 void soft2d_end_drawing(void){}
+static void le32(unsigned char *p,uint32_t v){for(int i=0;i<4;i++)p[i]=(unsigned char)(v>>(i*8));}
+int soft2d_capture(const char *path){
+    FILE *f=fopen(path,"wb");if(!f)return -1;
+    unsigned char header[54]={0};header[0]='B';header[1]='M';le32(header+2,54+960*544*3);le32(header+10,54);le32(header+14,40);
+    le32(header+18,960);le32(header+22,(uint32_t)-544);header[26]=1;header[28]=24;le32(header+34,960*544*3);
+    if(fwrite(header,1,54,f)!=54){fclose(f);return -1;}
+    unsigned char row[960*3];
+    for(int y=0;y<544;y++){
+        for(int x=0;x<960;x++){uint32_t p=fb[y*960+x];row[x*3]=(p>>16)&255;row[x*3+1]=(p>>8)&255;row[x*3+2]=p&255;}
+        if(fwrite(row,1,sizeof row,f)!=sizeof row){fclose(f);return -1;}
+    }
+    fclose(f);return 0;
+}
 void soft2d_swap_buffers(void){
     SceDisplayFrameBuf frame={sizeof(SceDisplayFrameBuf),fb,960,SCE_DISPLAY_PIXELFORMAT_A8B8G8R8,960,544};
     sceDisplaySetFrameBuf(&frame,SCE_DISPLAY_SETBUF_NEXTFRAME);buffer_index^=1;

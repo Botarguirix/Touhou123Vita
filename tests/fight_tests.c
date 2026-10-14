@@ -20,6 +20,12 @@ int main(void) {
     for(int i=0;i<40;i++) fight_step(&g,0);
     CHECK(g.p[1].hp==945);
     fight_step(&g,IN_RESET);CHECK(g.p[0].hp==1000 && g.p[1].hp==1000);
+    fight_reset(&g);g.ai=1;g.frame=55;g.p[1].x=250;
+    for(int i=0;i<6;i++)fight_step(&g,IN_GUARD);
+    CHECK(g.p[0].hp==982 && g.p[1].hits==1);
+    fight_reset(&g);g.ai=0;g.p[1].hp=10;g.p[1].x=250;fight_step(&g,IN_MELEE);
+    for(int i=0;i<5;i++)fight_step(&g,0);
+    CHECK(g.p[1].hp==0);
     Fight a,b;enter(&a);enter(&b);a.ai=b.ai=1;
     for(int i=0;i<3600;i++){unsigned in=i%80<35?IN_RIGHT:IN_LEFT;if(i%47==0)in|=IN_SHOT;fight_step(&a,in);fight_step(&b,in);}
     CHECK(fight_digest(&a)==fight_digest(&b));

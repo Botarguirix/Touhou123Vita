@@ -5,8 +5,8 @@ Cada hito se cierra con evidencia, no con un porcentaje estimado de código escr
 | Hito | Trabajo | Criterio para cerrar | Estado inicial |
 |---|---|---|---|
 | M0: referencias | Inventario, versión, hashes, fuentes y análisis Ghidra | Ejecutable identificado, análisis guardado, límites documentados | Análisis inicial realizado; análisis automático parcial por timeout |
-| M1: plataforma | C11 portable, VitaSDK, VPK, controles, framebuffer, CI | Compilación host y ARM, pruebas host y arranque Vita3K | Compilación y pruebas host completadas; Vita3K en validación |
-| M2: demo de práctica | Menú, práctica, movimiento, salto, golpe, disparo, guardia, CPU, reset | Escenario automático y controles manuales en Vita3K | Implementado con reglas propias; no equivale al juego original |
+| M1: plataforma | C11 portable, VitaSDK, VPK, controles, framebuffer, CI | Compilación host y ARM, pruebas host y arranque Vita3K | Host/ARM y arranque automático Vita3K verificados |
+| M2: demo de práctica | Menú, práctica, movimiento, salto, golpe, disparo, guardia, CPU, reset | Escenario automático y controles manuales en Vita3K | Prueba automática y framebuffer revisados; teclado manual pendiente; reglas propias |
 | M3: recursos originales | Paquetes, paletas, CV2/CV3, PAT, capas de escenario, caché | Importador reproducible; sprites/animaciones/audio verificados contra PC | Extracción y conversión inicial; layout y animación pendientes |
 | M4: combate original mínimo | Recuperar selección, práctica, estados, gravedad, colisiones y acciones de dos personajes | Práctica original reconstruida; secuencias PC/Vita comparadas fotograma a fotograma | Pendiente |
 | M5: sistema completo | Cartas, clima, spirit, combos, estados especiales, todos los personajes | Replays representativos sin desincronización contra referencia | Pendiente |

@@ -3,6 +3,7 @@ param(
  [Parameter(Mandatory)][string]$Config,
  [Parameter(Mandatory)][string]$VitaFS,
  [Parameter(Mandatory)][string]$Vpk,
+ [ValidateSet('qt','sdl')][string]$Frontend='qt',
  [int]$TimeoutSeconds=90
 )
 $ErrorActionPreference='Stop'
@@ -11,6 +12,10 @@ $vpkPath=(Resolve-Path -LiteralPath $Vpk).Path
 $fsPath=(Resolve-Path -LiteralPath $VitaFS).Path
 $report=Join-Path $fsPath 'ux0/data/touhou123vita-smoke.json'
 New-Item -ItemType Directory -Force (Split-Path $report -Parent) | Out-Null
+foreach($scene in @('menu','practice','fight')){
+ $capture=Join-Path $fsPath "ux0/data/touhou123vita-$scene.bmp"
+ if(Test-Path $capture){Move-Item -LiteralPath $capture -Destination "$capture.$([DateTime]::UtcNow.Ticks).previous"}
+}
 # Archive stale evidence; never accept a previous run's report.
 if(Test-Path $report){Move-Item -LiteralPath $report -Destination "$report.$([DateTime]::UtcNow.Ticks).previous"}
 $content=Get-Content -LiteralPath $Config -Raw
@@ -31,13 +36,14 @@ try {
 [System.IO.Compression.ZipFile]::ExtractToDirectory($vpkPath,$appRoot,$true)
 # Vita3K validates -r against its default config before parsing --config-location.
 # Keep a local copy of the requested emulator so its default config is isolated too.
-$emulatorCopy=Join-Path $root 'local/vita3k'
+$emulatorCopy=Join-Path $root "local/vita3k-$Frontend"
 if(!(Test-Path (Join-Path $emulatorCopy 'Vita3K.exe'))){
  Copy-Item -LiteralPath (Split-Path $Vita3K -Parent) -Destination $emulatorCopy -Recurse
 }
 Set-Content -LiteralPath (Join-Path $emulatorCopy 'config.yml') -Value $content
 $runnerExe=Join-Path $emulatorCopy 'Vita3K.exe'
 $args=@('--load-config','--keep-config','--config-location',('"'+$testConfig+'"'),'--log-level','2','--installed-path','THSV12301')
+if($Frontend -eq 'sdl'){$args=@('--frontend','sdl')+$args}
 $started=[DateTime]::UtcNow
 $p=Start-Process -FilePath $runnerExe -ArgumentList $args -WorkingDirectory $emulatorCopy -WindowStyle Hidden -PassThru -RedirectStandardOutput "$root/artifacts/vita3k-test.stdout.log" -RedirectStandardError "$root/artifacts/vita3k-test.stderr.log"
 $deadline=$started.AddSeconds($TimeoutSeconds)
@@ -48,6 +54,16 @@ if(!(Test-Path $report)){
 }
 $result=Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
 if($result.schema -ne 2 -or $result.status -ne 'passed' -or $result.frames -ne 600 -or !$result.menu -or !$result.practice -or !$result.fight -or !$result.jump -or $result.hits -le 0 -or $result.cpu_hp -ge 1000){throw 'Guest practice validation failed'}
+$p.WaitForExit(5000) | Out-Null
+$runtimeLog=Get-Content "$root/artifacts/vita3k-test.stdout.log" -Raw
+if($runtimeLog -match 'EXCEPTION_ACCESS_VIOLATION|\|C\||Assertion failed'){throw 'Vita3K runtime logged a critical failure'}
+if($p.HasExited -and $p.ExitCode -ne 0){throw "Vita3K exited with code $($p.ExitCode)"}
+New-Item -ItemType Directory -Force "$root/artifacts/screenshots" | Out-Null
+foreach($scene in @('menu','practice','fight')){
+ $capture=Join-Path $fsPath "ux0/data/touhou123vita-$scene.bmp"
+ if(!(Test-Path $capture)){throw "Guest framebuffer capture missing: $scene"}
+ Copy-Item -LiteralPath $capture -Destination "$root/artifacts/screenshots/$scene.bmp" -Force
+}
 $result | Add-Member -NotePropertyName vpk_sha256 -NotePropertyValue (Get-FileHash $vpkPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $result | Add-Member -NotePropertyName started_utc -NotePropertyValue $started.ToString('o')
 $result | ConvertTo-Json | Set-Content "$root/artifacts/vita3k-result.json"

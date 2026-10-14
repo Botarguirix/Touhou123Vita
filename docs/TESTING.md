@@ -23,6 +23,12 @@ En Windows, usar un VitaFS de pruebas con copia del firmware ya instalado:
 
 El guest pasa por menú y práctica, mueve al jugador, salta y ataca durante 600 frames. El runner archiva el reporte anterior y solo acepta evidencia nueva, con escena de pelea alcanzada, salto, impactos y pérdida de vida del oponente. Guarda hash del VPK, fecha UTC y resultado. Un timeout o una ventana de instalación no equivale a un pase.
 
+Para automatización reproducible se recomienda una versión de Vita3K con `--frontend sdl` y añadir `-Frontend sdl` al runner. No usar `--console` para ejecutar por Title ID: es un modo de instalación. El runner mantiene una copia local del emulador y su configuración predeterminada, porque Vita3K valida `-r` antes de aplicar `--config-location`. No modifica la instalación del usuario.
+
+`tools/run-all.ps1` encadena pruebas host, compilación Vita, VPK automático y validación Vita3K en una sola ejecución. Requiere font/assets y VitaFS preparados. `tools/play.ps1` instala la variante interactiva en el VitaFS local, retira conservando el indicador de autoprueba y abre una ventana para jugar.
+
+También exige las tres capturas del framebuffer guest, revisa errores críticos del runtime y el código de salida, y guarda evidencia bajo `artifacts/`. Los contratos host incluyen guardia y KO. Un reporte de pelea seguido de un crash no se considera aprobado.
+
 La variante automática sale después del reporte; la interactiva queda disponible para jugar. Solo el runner puede cerrar su propio proceso hijo en caso de timeout. No interrumpe procesos de otros proyectos.
 
 ## Verificación manual y futura

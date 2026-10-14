@@ -9,6 +9,7 @@ void soft2d_fini(void);
 void soft2d_start_drawing(void);
 void soft2d_clear_screen(void);
 void soft2d_end_drawing(void);
+int soft2d_capture(const char *path);
 void soft2d_swap_buffers(void);
 void soft2d_draw_rectangle(float x,float y,float w,float h,uint32_t color);
 void soft2d_draw_fill_circle(float x,float y,float r,uint32_t color);

@@ -9,7 +9,7 @@ static soft2d_texture *sprites[2],*background;
 static const float scale=544.0f/480.0f;
 static float sx(float x){return 117.33f+x*scale;}
 static void rect(float x,float y,float w,float h,unsigned c){soft2d_draw_rectangle(sx(x),y*scale,w*scale,h*scale,c);}
-static void text(int x,int y,const char *s,unsigned c){soft2d_pgf_draw_text(font,sx(x),y*scale,c,0.85f,s);}
+static void text(int x,int y,const char *s,unsigned c){soft2d_pgf_draw_text(font,sx(x),y*scale,c,1.15f,s);}
 #define WHITE RGBA8(235,240,250,255)
 #define GOLD RGBA8(255,215,125,255)
 static uint32_t controls(unsigned b){
@@ -99,7 +99,11 @@ int main(void){
         if(g.scene==SCENE_PRACTICE)practice_seen=1;
         if(g.scene==SCENE_FIGHT)fight_seen=1;
         if(g.p[0].y>0)jump_seen=1;
-        soft2d_start_drawing();soft2d_clear_screen();draw(&g,automated);soft2d_end_drawing();soft2d_swap_buffers();sceDisplayWaitVblankStart();
+        soft2d_start_drawing();soft2d_clear_screen();draw(&g,automated);soft2d_end_drawing();
+        if(automated && f==5)soft2d_capture("ux0:data/touhou123vita-menu.bmp");
+        if(automated && f==20)soft2d_capture("ux0:data/touhou123vita-practice.bmp");
+        if(automated && f==180)soft2d_capture("ux0:data/touhou123vita-fight.bmp");
+        soft2d_swap_buffers();sceDisplayWaitVblankStart();
         if(automated && ++f==600){
             int pass=menu_seen&&practice_seen&&fight_seen&&jump_seen&&g.p[0].hits>0&&g.p[1].hp<1000;
             FILE *r=fopen("ux0:data/touhou123vita-smoke.json","w");
