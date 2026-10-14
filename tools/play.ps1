@@ -13,5 +13,5 @@ if(Test-Path $flag){Move-Item -LiteralPath $flag -Destination (Join-Path $root "
 $args=@('--load-config','--keep-config','--config-location',('"'+(Join-Path $root 'artifacts/vita3k-test.yml')+'"'),'--installed-path','THSV12301','--log-level','2')
 if($Frontend -eq 'sdl'){$args=@('--frontend','sdl')+$args}
 # A visible window is required for the user to interact with the delivered demo.
-$p=Start-Process -FilePath $emulator -ArgumentList $args -WorkingDirectory (Split-Path $emulator -Parent) -WindowStyle Normal -PassThru
+$p=Start-Process -FilePath $emulator -ArgumentList $args -WorkingDirectory (Split-Path $emulator -Parent) -WindowStyle Normal -PassThru -RedirectStandardOutput "$root/artifacts/vita3k-play.stdout.log" -RedirectStandardError "$root/artifacts/vita3k-play.stderr.log"
 Write-Output "Playable demo launched; process $($p.Id). X -> X enters practice."
