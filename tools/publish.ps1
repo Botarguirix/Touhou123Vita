@@ -1,4 +1,4 @@
-param([string]$Owner='Botarguirix',[string]$Name='Touhou123Vita')
+param([string]$Owner='Botarguirix',[string]$Name='Touhou123Vita',[string]$CommitMessage='Update Vita prototype and validation')
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $env:GIT_CONFIG_COUNT='1'
@@ -33,7 +33,7 @@ foreach($path in $staged){
 Write-Output 'Verified staged source paths:'
 $staged | Write-Output
 git -C $root diff --cached --quiet
-if($LASTEXITCODE -eq 1){git -C $root commit -m 'Initialize Vita practice prototype, research roadmap and automated validation'}
+if($LASTEXITCODE -eq 1){git -C $root commit -m $CommitMessage}
 git -C $root push -u origin main
 if($LASTEXITCODE -ne 0){throw 'git push failed'}
 Write-Output $repo.html_url
