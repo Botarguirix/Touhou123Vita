@@ -64,6 +64,11 @@ soft2d_texture *soft2d_load_texture(const char *path){
     if(!t->pixels||fread(t->pixels,1,size,f)!=size){free(t->pixels);free(t);fclose(f);return NULL;}
     fclose(f);return t;
 }
+soft2d_texture *soft2d_load_dat(T123Resources *bank,const char *name,const char *palette){
+    T123Bitmap image;if(t123_resource_bitmap(bank,name,palette,&image))return NULL;
+    soft2d_texture *t=malloc(sizeof *t);if(!t){t123_bitmap_free(&image);return NULL;}
+    t->w=image.width;t->h=image.height;t->pixels=image.pixels;return t;
+}
 void soft2d_free_texture(soft2d_texture *t){if(t){free(t->pixels);free(t);}}
 unsigned soft2d_texture_get_width(const soft2d_texture *t){return t->w;}
 unsigned soft2d_texture_get_height(const soft2d_texture *t){return t->h;}

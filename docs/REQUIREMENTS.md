@@ -10,11 +10,11 @@
 
 ## Arquitectura
 
-`src/fight.c`: modelo determinista del prototipo, sin APIs Windows. `src/vita_main.c`: escenas, controles y escenario automático. `src/soft2d.c`: framebuffer y texturas RGBA. El mundo lógico provisional usa 640x480 y se escala a 544 píxeles de alto con barras laterales; geometría y timings originales requieren confirmación posterior.
+`src/fight.c`: control provisional de práctica y colisiones sobre poses originales. `src/animation.c`: kernel original de poses validado con x86. `src/resources.c` y `src/pattern.c`: interpretación nativa DAT/CV2/PAL/PAT. `src/vita_main.c`: escenas, caché de texturas y autoprueba. `src/soft2d.c`: framebuffer. El mundo/cámara provisional usa 640x480 y escala de datos PAT 0.5; física/cámara originales requieren recuperación posterior.
 
 El exe original es PE32 x86. Las DLL de mods y llamadas a direcciones absolutas no pueden vincularse directamente al ejecutable ARM. Ghidra genera evidencia para reconstruir funciones, tipos y flujo; su pseudocódigo no es automáticamente código compilable ni una certificación de equivalencia.
 
-El primer renderizador copia texturas en CPU. Sirve para probar plataforma y controles; tendrá que reemplazarse o optimizarse para el juego completo. El fondo provisional usa una única pieza de un escenario, no su composición original. Los personajes muestran sprites de referencia, no animaciones o movesets recuperados.
+El renderizador copia texturas en CPU; requiere optimización/GPU para el juego completo. El fondo usa una única pieza de escenario, no su composición original. Los personajes reproducen poses y duraciones PAT originales con kernel recuperado; la máquina de estados completa sigue pendiente.
 
 ## Riesgos técnicos
 

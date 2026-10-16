@@ -4,6 +4,8 @@ Fecha de esta evaluación: 2026-10-13 (America/Mexico_City).
 
 ## Verificado
 
+**Estado actual: iteración 0.2.** Ver [ITERATION02.md](ITERATION02.md), [DATA.md](DATA.md) y [KERNEL.md](KERNEL.md). Lo descrito abajo corresponde a la línea base 0.1 para conservar su evidencia histórica.
+
 - Inventario local generado con SHA256 y metadatos PE.
 - Ejecutable aportado: 4,816,896 bytes, SHA256 `f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e`.
 - Ghidra identifica `x86:LE:32:default`; importaciones incluyen Direct3D 9, D3DX9, WinMM y Winsock.
@@ -28,6 +30,6 @@ Fecha de esta evaluación: 2026-10-13 (America/Mexico_City).
 
 ## Pendiente del port original
 
-Ninguna parte del combate original ha sido reconstruida y validada contra PC. El núcleo jugable actual es un prototipo propio. No están implementados los movimientos reales, decks, clima, animaciones originales, sonido, historia, netplay ni paridad de replays. PS Vita física no probada.
+El kernel de animación sí está recuperado y contrastado con x86; los DAT/PAT y 5A aportan poses, cajas y daño originales. La física, resolución completa de combate, decks, clima, audio, historia, netplay y paridad de replays siguen pendientes. PS Vita física no probada.
 
 Los resultados locales completos están bajo `artifacts/`; no se publican recursos comerciales ni pseudocódigo bruto.

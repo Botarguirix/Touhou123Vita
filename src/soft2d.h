@@ -1,6 +1,7 @@
 #ifndef SOFT2D_H
 #define SOFT2D_H
 #include <stdint.h>
+#include "t123/resources.h"
 #define RGBA8(r,g,b,a) ((uint32_t)(r)|((uint32_t)(g)<<8)|((uint32_t)(b)<<16)|((uint32_t)(a)<<24))
 typedef struct {unsigned w,h;uint32_t *pixels;} soft2d_texture;
 typedef soft2d_texture soft2d_pgf;
@@ -14,6 +15,7 @@ void soft2d_swap_buffers(void);
 void soft2d_draw_rectangle(float x,float y,float w,float h,uint32_t color);
 void soft2d_draw_fill_circle(float x,float y,float r,uint32_t color);
 soft2d_texture *soft2d_load_texture(const char *path);
+soft2d_texture *soft2d_load_dat(T123Resources *bank,const char *name,const char *palette);
 void soft2d_free_texture(soft2d_texture *t);
 unsigned soft2d_texture_get_width(const soft2d_texture *t);
 unsigned soft2d_texture_get_height(const soft2d_texture *t);

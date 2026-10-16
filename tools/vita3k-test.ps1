@@ -53,7 +53,7 @@ if(!(Test-Path $report)){
  throw 'Vita3K did not produce fresh guest evidence before timeout'
 }
 $result=Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
-if($result.schema -ne 2 -or $result.status -ne 'passed' -or $result.frames -ne 600 -or !$result.menu -or !$result.practice -or !$result.fight -or !$result.jump -or $result.hits -le 0 -or $result.cpu_hp -ge 1000){throw 'Guest practice validation failed'}
+if($result.schema -ne 3 -or $result.status -ne 'passed' -or $result.frames -ne 600 -or !$result.menu -or !$result.practice -or !$result.fight -or !$result.jump -or $result.hits -le 0 -or $result.cpu_hp -ge $result.max_hp -or $result.external_dat -ne 7 -or $result.textures_decoded -le 2){throw 'Guest DAT/animation validation failed'}
 $p.WaitForExit(5000) | Out-Null
 $runtimeLog=Get-Content "$root/artifacts/vita3k-test.stdout.log" -Raw
 if($runtimeLog -match 'EXCEPTION_ACCESS_VIOLATION|\|C\||Assertion failed'){throw 'Vita3K runtime logged a critical failure'}

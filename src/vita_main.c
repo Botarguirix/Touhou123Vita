@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <psp2/ctrl.h>
 #include <psp2/display.h>
 #include <psp2/kernel/processmgr.h>
@@ -6,6 +7,23 @@
 #include "t123/fight.h"
 static soft2d_pgf *font;
 static soft2d_texture *sprites[2],*background;
+static T123Resources resources;
+static T123Pattern patterns[2];
+static int data_ready;
+typedef struct {unsigned player,image,age;soft2d_texture *texture;} TextureSlot;
+static TextureSlot cache[64];static unsigned cache_age,loaded_textures;
+static const char *characters[]={"reimu","chirno"};
+static soft2d_texture *pose_texture(int player,unsigned image){
+    for(unsigned j=0;j<64;j++)if(cache[j].texture&&cache[j].player==(unsigned)player&&cache[j].image==image){cache[j].age=++cache_age;return cache[j].texture;}
+    if(image>=patterns[player].image_count)return NULL;
+    char filename[160],path[256],palette[256];snprintf(filename,sizeof filename,"%s",patterns[player].images[image]);
+    char *dot=strrchr(filename,'.');if(!dot)return NULL;strcpy(dot,".cv2");
+    snprintf(path,sizeof path,"data/character/%s/%s",characters[player],filename);
+    snprintf(palette,sizeof palette,"data/character/%s/palette000.pal",characters[player]);
+    soft2d_texture *t=soft2d_load_dat(&resources,path,palette);if(!t)return NULL;
+    unsigned slot=0;for(unsigned j=0;j<64;j++){if(!cache[j].texture){slot=j;break;}if(cache[j].age<cache[slot].age)slot=j;}
+    soft2d_free_texture(cache[slot].texture);cache[slot]=(TextureSlot){(unsigned)player,image,++cache_age,t};++loaded_textures;return t;
+}
 static const float scale=544.0f/480.0f;
 static float sx(float x){return 117.33f+x*scale;}
 static void rect(float x,float y,float w,float h,unsigned c){soft2d_draw_rectangle(sx(x),y*scale,w*scale,h*scale,c);}
@@ -31,16 +49,20 @@ static uint32_t scenario(int f){
     if(f<40)return 0;
     unsigned in=0;
     if(f>=40 && f<100)in|=IN_RIGHT;
-    if(f==70)in|=IN_JUMP;
+    if(f==45)in|=IN_JUMP;
     if(f%37==0)in|=IN_SHOT;
     if(f%29==0)in|=IN_MELEE;
     if(f>=220 && f<245)in|=IN_GUARD;
     return in;
 }
-static void fighter(const Fighter *p,int i){
+static void fighter(const Fight *g,int i){
+    const Fighter *p=&g->p[i];const T123Pose *pose=fight_pose(g,i);
     int ground=395-p->y;unsigned c=i?RGBA8(110,190,255,255):RGBA8(245,105,145,255);
     soft2d_draw_fill_circle(sx(p->x),398*scale,21*scale,RGBA8(20,22,40,200));
-    if(sprites[i]){
+    if(pose){
+        soft2d_texture *t=pose_texture(i,pose->image);
+        if(t){float x=p->face>0?sx(p->x-pose->ox*0.5f):sx(p->x+pose->ox*0.5f);soft2d_draw_texture_scale(t,x,(ground-pose->oy*0.5f)*scale,p->face*scale,scale);}
+    }else if(sprites[i]){
         float size=1.5f*scale,w=soft2d_texture_get_width(sprites[i])*size,h=soft2d_texture_get_height(sprites[i])*size;
         soft2d_draw_texture_scale(sprites[i],sx(p->x)+(p->face<0?w/2:-w/2),ground*scale-h,p->face*size,size);
     }else{
@@ -48,7 +70,7 @@ static void fighter(const Fighter *p,int i){
         soft2d_draw_fill_circle(sx(p->x),(ground-78)*scale,14*scale,c);
         rect(p->x-15,ground-22,10,22,c);rect(p->x+5,ground-22,10,22,c);
     }
-    if(p->attack)rect(p->x+p->face*22-(p->face<0?35:0),ground-55,35,12,GOLD);
+    if(p->attack&&!pose)rect(p->x+p->face*22-(p->face<0?35:0),ground-55,35,12,GOLD);
     if(p->guard)rect(p->x+p->face*28,ground-94,5,94,RGBA8(100,255,230,200));
     if(p->stun)soft2d_draw_fill_circle(sx(p->x),(ground-50)*scale,8*scale,GOLD);
 }
@@ -57,15 +79,16 @@ static void draw(const Fight *g,int automated){
     if(g->scene!=SCENE_FIGHT){
         rect(0,0,640,7,RGBA8(218,79,121,255));
         text(48,78,"TOUHOU123VITA",GOLD);
-        text(48,112,"Prototype 0.1 - native Vita practice arena",WHITE);
-        text(48,149,"Own engine; original gameplay not recovered yet",WHITE);
+        text(48,112,"Reconstruction 0.2 - external DAT resources",WHITE);
+        text(48,149,"Recovered animation + 5A data; physics still provisional",WHITE);
+        if(!data_ready){text(48,185,"Copy th123a/b/c.dat to ux0:data/touhou123vita/",GOLD);}
         if(g->scene==SCENE_MENU){
             rect(40,204,560,70,RGBA8(57,46,78,255));
             text(60,247,"> PRACTICE    [X / keyboard X]",GOLD);
-            text(48,331,"Prototype controls: arrows, Z, V, Q, E",WHITE);
+            text(48,331,"Arrows: move/jump | Z: original 5A data | E: guard",WHITE);
         }else{
             text(48,214,"PRACTICE SETUP",GOLD);
-            text(48,250,"Player 1 vs training CPU | 1000 HP",WHITE);
+            text(48,250,"Reimu vs Cirno | original PAT | 10000 HP",WHITE);
             text(48,285,"X: enter arena     Circle/C: back",GOLD);
             text(48,335,"L/Q: toggle CPU   SELECT/right Shift: reset",WHITE);
         }
@@ -74,27 +97,34 @@ static void draw(const Fight *g,int automated){
         else{rect(0,0,640,400,RGBA8(35,49,72,255));for(int i=0;i<12;i++)rect(i*60,200+(i%3)*20,28,180,RGBA8(24,39,58,255));}
         rect(0,395,640,85,RGBA8(48,37,60,255));
         rect(30,30,240,15,RGBA8(40,20,30,255));rect(370,30,240,15,RGBA8(20,25,40,255));
-        rect(30,30,g->p[0].hp*240.0f/1000,15,RGBA8(245,105,145,255));rect(370,30,g->p[1].hp*240.0f/1000,15,RGBA8(110,190,255,255));
+        rect(30,30,g->p[0].hp*240.0f/g->max_hp,15,RGBA8(245,105,145,255));rect(370,30,g->p[1].hp*240.0f/g->max_hp,15,RGBA8(110,190,255,255));
         char line[96];snprintf(line,sizeof line,"P1 %d HP",g->p[0].hp);text(30,24,line,WHITE);
         snprintf(line,sizeof line,"CPU %d HP",g->p[1].hp);text(370,24,line,WHITE);text(280,40,"PRACTICE",GOLD);
-        fighter(&g->p[0],0);fighter(&g->p[1],1);
+        fighter(g,0);fighter(g,1);
         for(int i=0;i<16;i++)if(g->shots[i].active)soft2d_draw_fill_circle(sx(g->shots[i].x),(395-g->shots[i].y)*scale,8*scale,g->shots[i].owner?RGBA8(90,200,255,255):RGBA8(255,110,170,255));
         if(!g->p[0].hp || !g->p[1].hp)text(210,170,"K.O. - SELECT to restart",GOLD);
         snprintf(line,sizeof line,"Hits: %u / %u    CPU: %s",g->p[0].hits,g->p[1].hits,g->ai?"ON":"OFF");text(30,428,line,WHITE);
-        text(30,453,"Arrows move/jump | Z melee | V shot | E guard | C back",WHITE);
-        text(30,475,"Prototype rules - original moves/cards/weather pending",GOLD);
+        text(30,453,"Arrows move/jump | Z: 5A | E guard | C back",WHITE);
+        text(30,475,"Original poses/boxes/damage - full battle engine pending",GOLD);
     }
-    if(automated)text(430,110,"AUTOMATED TEST",GOLD);
+    if(automated)text(430,190,"AUTOMATED TEST",GOLD);
 }
 int main(void){
     Fight g;fight_init(&g);sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
     if(soft2d_init()<0)return 1;
     font=soft2d_load_default_pgf();if(!font){soft2d_fini();return 2;}
-    sprites[0]=soft2d_load_texture("app0:assets/player.rgba");sprites[1]=soft2d_load_texture("app0:assets/cpu.rgba");background=soft2d_load_texture("app0:assets/stage.rgba");
+    if(t123_resources_open(&resources,"ux0:data/touhou123vita")==0 && resources.opened==7 &&
+       t123_resource_pattern(&resources,"data/character/reimu/reimu.pat",&patterns[0])==0 &&
+       t123_resource_pattern(&resources,"data/character/chirno/chirno.pat",&patterns[1])==0){
+        data_ready=1;fight_bind_patterns(&g,&patterns[0],&patterns[1]);
+        background=soft2d_load_dat(&resources,"data/background/bg10/0000_10.cv2",NULL);
+    }
     FILE *flag=fopen("app0:auto-test.txt","r");int automated=flag!=NULL;if(flag)fclose(flag);
     int f=0,menu_seen=0,practice_seen=0,fight_seen=0,jump_seen=0;
     for(;;){
-        SceCtrlData pad={0};sceCtrlPeekBufferPositive(0,&pad,1);fight_step(&g,automated?scenario(f):controls(pad.buttons));
+        SceCtrlData pad={0};sceCtrlPeekBufferPositive(0,&pad,1);uint32_t input=automated?scenario(f):controls(pad.buttons);
+        if(!data_ready)input=0;
+        fight_step(&g,input);
         if(g.scene==SCENE_MENU)menu_seen=1;
         if(g.scene==SCENE_PRACTICE)practice_seen=1;
         if(g.scene==SCENE_FIGHT)fight_seen=1;
@@ -105,13 +135,15 @@ int main(void){
         if(automated && f==180)soft2d_capture("ux0:data/touhou123vita-fight.bmp");
         soft2d_swap_buffers();sceDisplayWaitVblankStart();
         if(automated && ++f==600){
-            int pass=menu_seen&&practice_seen&&fight_seen&&jump_seen&&g.p[0].hits>0&&g.p[1].hp<1000;
+            int pass=data_ready&&menu_seen&&practice_seen&&fight_seen&&jump_seen&&g.p[0].hits>0&&g.p[1].hp<g.max_hp&&loaded_textures>2;
             FILE *r=fopen("ux0:data/touhou123vita-smoke.json","w");
-            if(r){fprintf(r,"{\"schema\":2,\"status\":\"%s\",\"frames\":600,\"menu\":%d,\"practice\":%d,\"fight\":%d,\"jump\":%d,\"hits\":%u,\"cpu_hp\":%d,\"digest\":%u,\"sprites\":%d}\n",pass?"passed":"failed",menu_seen,practice_seen,fight_seen,jump_seen,g.p[0].hits,g.p[1].hp,(unsigned)fight_digest(&g),sprites[0]!=NULL&&sprites[1]!=NULL);fclose(r);}
+            if(r){fprintf(r,"{\"schema\":3,\"status\":\"%s\",\"frames\":600,\"menu\":%d,\"practice\":%d,\"fight\":%d,\"jump\":%d,\"hits\":%u,\"cpu_hp\":%d,\"max_hp\":%d,\"digest\":%u,\"external_dat\":%u,\"textures_decoded\":%u}\n",pass?"passed":"failed",menu_seen,practice_seen,fight_seen,jump_seen,g.p[0].hits,g.p[1].hp,g.max_hp,(unsigned)fight_digest(&g),resources.opened,loaded_textures);fclose(r);}
             break;
         }
     }
     for(int i=0;i<2;i++)if(sprites[i])soft2d_free_texture(sprites[i]);
     if(background)soft2d_free_texture(background);
+    for(unsigned i=0;i<64;i++)soft2d_free_texture(cache[i].texture);
+    t123_pattern_free(&patterns[0]);t123_pattern_free(&patterns[1]);t123_resources_close(&resources);
     soft2d_free_pgf(font);soft2d_fini();sceKernelExitProcess(0);return 0;
 }

@@ -41,3 +41,11 @@ La variante automática sale después del reporte; la interactiva queda disponib
 - Repetir en Vita física antes de cerrar compatibilidad y rendimiento.
 
 GitHub Actions ejecuta pruebas host en pushes y PRs. Vita3K se ejecuta localmente con firmware y datos locales; no se descargan juegos ni firmware en CI público.
+
+## Iteración 0.2
+
+Preparar `ux0/data/touhou123vita/th123a.dat`, `th123b.dat` y `th123c.dat` en el VitaFS aislado. El VPK ya no lleva imágenes del juego. El reporte usa schema 3 y exige los tres DAT, más de dos texturas decodificadas y pérdida de vida respecto de `max_hp`.
+
+Los oráculos opcionales se generan con `tools/x86_animation_oracle.py` y las dependencias de `tools/requirements-oracle.txt`; los CSV locales activan contratos adicionales en CMake. En CI sin los ejecutables locales se ejecutan los contratos sintéticos, no el oráculo comercial.
+
+`tools/verify-dat.py` compara CSV generados por `resource_probe` con XML de Shady Packer y los píxeles RGBA independientes. Herramientas/resultados y DAT permanecen ignorados por Git.
