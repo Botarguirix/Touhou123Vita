@@ -6,11 +6,15 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
+### Gate de reconstrucción — Iteración 1.82
+
+Build VitaSDK fresco, VPK de 95,972 bytes, SHA-256 `d361adfe700db32c6789d8eb2288d4c39d723c8d020bc3a4b92ed9b22b830318`; Vita3K SDL aislado schema28 pasó 600 frames. La regresión confirma roster de recursos 20/20, cero fallos PAT/textura, combate de prototipo y BG34 (30+30 tiles, 4 assets estáticos, 30 objetos). No confirma 20 personajes jugables, un combate completo ni paridad; `a_hits=0`, los demás escenarios y sus mecánicas siguen pendientes. El VPK y la evidencia permanecen locales en `artifacts/`. Ver [ITERATION82.md](ITERATION82.md) y [STATUS.md](STATUS.md).
+
 ### Seguimiento activo de objetos — Iteración 1.81
 
 `GameObjectBase::BoxInfo` inicia en `object+0x1b4`: frameData `+0x1c0`, conteos hit/hurt `+0x1cb/+0x1cc`, hurt boxes `+0x1d0`, hit boxes `+0x220`, buffers rotados `+0x270` y punteros auxiliares `+0x320`. El PE fija `0x465e10` como sincronizador de vectores PAT al runtime. El manager ejecuta fases de pares en `0x47cb70/0x47ce20`; `0x47a5b0` prueba hit boxes contra hurt boxes y `0x47a740` hurt contra hurt, con helpers para formas rotadas y AABB. Falta la traza dinámica que conecte el action 808 con respuesta/daño. Ver [ITERATION80.md](ITERATION80.md) y [ITERATION81.md](ITERATION81.md).
 
-El handler 808 de seq.0 consulta el action del owner con `0x48ce90` y el suelo por separado con `0x4397f0`; el primero no es detección geométrica. El manager retira el objeto cuando `object+0x34c==0`, pero pool/handles/lista no están integrados dinámicamente en el harness. Siguiente: localizar por CFG/traza la resolución real del impacto y el ciclo de vida 808. El baseline compilado y validado en Vita3K SDL schema28/600 frames es [Touhou123Vita-TH75-review-current.vpk](../artifacts/Touhou123Vita-TH75-review-current.vpk), SHA-256 `c360c89d923e554bcff0cccf7c7ecb94164d3825f84958bcf7314e30daae9129`; conserva roster 20/20, BG34 y rutas existentes, pero no incluye mecánica 808 nueva. Ver [ITERATION79.md](ITERATION79.md), [ITERATION78.md](ITERATION78.md), [ITERATION76.md](ITERATION76.md), [ITERATION77.md](ITERATION77.md) y el reporte `artifacts/x86-suwako-808-factory-probe.json`.
+El handler 808 de seq.0 consulta el action del owner con `0x48ce90` y el suelo por separado con `0x4397f0`; el primero no es detección geométrica. El manager retira el objeto cuando `object+0x34c==0`, pero pool/handles/lista no están integrados dinámicamente en el harness. Siguiente: localizar por CFG/traza la resolución real del impacto y el ciclo de vida 808. La última regresión fresca es Iteración 1.82; no incluye la mecánica 808. Ver [ITERATION79.md](ITERATION79.md), [ITERATION78.md](ITERATION78.md), [ITERATION76.md](ITERATION76.md), [ITERATION77.md](ITERATION77.md) y el reporte `artifacts/x86-suwako-808-factory-probe.json`.
 
 La revisión TH75 recomienda instrumentación por evidencia, contratos ABI y watchdog; el prototipo semántico x86→C del chat solo pasó un smoke test sintético y su bootstrap VitaSDK no se validó. No importar runtime/renderer/imports ni datos TH075. Ver [TOUHOU75_REUSE_REVIEW.md](TOUHOU75_REUSE_REVIEW.md).
 

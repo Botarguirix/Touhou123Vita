@@ -2,6 +2,16 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.82: rebuild fresco y regresión Vita3K
+
+- `tools/build-vita-native.ps1 -Output artifacts/Touhou123Vita-current-auto.vpk -AutoTest` compiló desde las fuentes actuales con VitaSDK. VPK: 95,972 bytes, SHA-256 `d361adfe700db32c6789d8eb2288d4c39d723c8d020bc3a4b92ed9b22b830318`.
+- `tools/vita3k-test.ps1` ejecutó ese hash en Vita3K SDL aislado, con evidencia nueva de 600 frames y schema 28. Pasaron menú/galería/práctica/combate, prueba de salto, dash, rutas de objetos y skills 560/540/565/505. El roster reportó 20/20 PAT, sprites y tarjetas, máscaras completas y cero fallos de textura; se decodificaron 148 texturas. BG34 cargó 30+30 tiles, cuatro assets estáticos y 30 objetos animados.
+- La captura de combate muestra dos sprites y HUD funcionales. Esto valida una regresión del prototipo; no demuestra el combate completo ni la paridad con el original. La prueba es automatizada, solo cubre BG34, reportó `a_hits=0`, y los 20/20 representan carga de recursos, no 20 personajes jugables. Sigue pendiente integrar DAT de forma distribuible, roster/mecánicas completos, los otros 23 escenarios y su lógica. No incluye recursos comerciales en el VPK.
+- Artefactos locales ignorados por Git: `artifacts/Touhou123Vita-current-auto.vpk`, `artifacts/vita3k-result.json`, capturas en `artifacts/screenshots/`. La iteración 808 de análisis x86 no se añadió al runtime.
+- Siguiente: hacer que la galería cubra todas las secuencias/poses por personaje, y reconstruir por separado el pipeline de escenario desde DAT→layout→transformación→colisión; mantener el combate validado como baseline mientras se captura la respuesta de hit/daño original.
+
+Ver [ITERATION82.md](ITERATION82.md).
+
 ## Iteración 1.80: sincronización original de bounds 808
 
 - Se corrigió el layout: `BoxInfo` tiene conteo hit en `+0x1cb` y hurt en `+0x1cc` (no `+0x1ce/+0x1cf`); hurt array `+0x1d0`, hit array `+0x220`. El PE confirma que `setPose` solo selecciona descriptor PAT; la sincronización está en `0x465e10`, invocada por el manager en `0x47d1a7`.
