@@ -136,6 +136,7 @@ def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: i
                           (map_node, 0x100), (sequence_node, 0x100),
                           (frame_data, max(0x100, len(frames) * 0xA8))):
         uc.mem_write(address, bytes(size))
+    original_vtable = u32(uc, obj)
     vtable = OWNER + 0x1000
     uc.mem_write(vtable, bytes(0x100))
     for slot, target in ((2, ACTION_SETTER), (4, RESET_SEQUENCE),
@@ -208,6 +209,56 @@ def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: i
         raise RuntimeError(f"original action setter returned unexpected state: {state}")
     if u32(uc, obj + 0x158) != frame_data:
         raise RuntimeError(f"original pose selector chose unexpected PAT descriptor: {state}")
+    uc.mem_write(obj, struct.pack("<I", original_vtable))
+    state["restored_original_vtable"] = hex(original_vtable)
+    return state
+
+
+def run_original_character_update(probe: Suwako808FactoryProbe, obj: int) -> dict[str, object]:
+    """Run one original character update dispatch after the real action setter."""
+    uc = probe.uc
+    snapshot = bytes(uc.mem_read(obj, 0x1400))
+    entry_sp = STACK + 0xC000
+    uc.mem_write(entry_sp, struct.pack("<I", STOP))
+    uc.reg_write(UC_X86_REG_ESP, entry_sp)
+    uc.reg_write(UC_X86_REG_EBX, 1)
+    uc.reg_write(UC_X86_REG_EBP, 0)
+    uc.reg_write(UC_X86_REG_EDI, 0)
+    uc.reg_write(UC_X86_REG_ECX, obj)
+    uc.reg_write(UC_X86_REG_ESI, obj)
+    uc.reg_write(UC_X86_REG_EIP, MAIN_ACTION_COMPARE)
+    probe._code_trace.clear()
+    probe._trace_active = True
+    error = None
+    try:
+        uc.emu_start(MAIN_ACTION_COMPARE, STOP, count=100000)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}"
+    finally:
+        probe._trace_active = False
+    exit_address = uc.reg_read(UC_X86_REG_EIP)
+    termination_context = None
+    if probe.host_termination:
+        ebp = uc.reg_read(UC_X86_REG_EBP)
+        termination_context = {
+            "exception_code": hex(u32(uc, ebp - 0x80)),
+            "exception_address": hex(u32(uc, ebp - 0x80 + 0x0C)),
+        }
+    state = {
+        "entry": hex(MAIN_ACTION_COMPARE), "error": error,
+        "exit": hex(exit_address), "completed": error is None and exit_address in
+        (STOP, HANDLER_EPILOGUE, COMMON_UPDATE_EXIT),
+        "host_termination": probe.host_termination,
+        "termination_context": termination_context,
+        "action": struct.unpack("<H", uc.mem_read(obj + 0x13C, 2))[0],
+        "sequence": struct.unpack("<H", uc.mem_read(obj + 0x13E, 2))[0],
+        "pose": struct.unpack("<H", uc.mem_read(obj + 0x140, 2))[0],
+        "subframe": struct.unpack("<H", uc.mem_read(obj + 0x142, 2))[0],
+        "frame_descriptor": hex(u32(uc, obj + 0x158)),
+        "trace": [hex(pc) for pc in probe._code_trace[-50:]],
+    }
+    if not state["completed"]:
+        uc.mem_write(obj, snapshot)
     return state
 
 
@@ -448,6 +499,11 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         }
         defender_action_state = initialize_original_action(
             probe, defender, 602, defender_frames, int(defender_sequence["loop_mode"]))
+        # The common update dereferences this owning-player back-reference
+        # before dispatching the action handler; the pair setup below uses the
+        # same relationship for its two characters.
+        uc.mem_write(defender + 0x170, struct.pack("<I", PLAYER))
+        defender_update_state = run_original_character_update(probe, defender)
         neutral_descriptor = u32(uc, defender + 0x158)
         uc.mem_write(defender + 0xEC, struct.pack("<f", 403.0))
         uc.mem_write(defender + 0xF0, struct.pack("<f", 360.0))
@@ -538,6 +594,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "defender_pat_sequence": int(neutral_frame.get("sequence", 0)),
                 "defender_pat_frame": int(neutral_frame["frame"]),
                 "defender_action_setter_state": defender_action_state,
+                "defender_original_update_state": defender_update_state,
             }
             # Differentially open only the descriptor flag gate observed at
             # 0x47c990. object+0x1ac already came from the original character ctor.
@@ -757,6 +814,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "manager_setup": manager_state,
         "defender_constructor": defender_constructor if real_factory and child_factory else None,
         "defender_action_setter": defender_action_state if real_factory and child_factory else None,
+        "defender_original_update": defender_update_state if real_factory and child_factory else None,
         "input_fixture": {"position": [x, y], "facing": facing,
                           "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,

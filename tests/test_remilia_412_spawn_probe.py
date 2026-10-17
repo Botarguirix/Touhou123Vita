@@ -101,6 +101,16 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(report["defender_constructor"], {
             "function": "0x46b7f0", "field_1ac_after_constructor": 1,
         })
+        update = report["defender_original_update"]
+        self.assertFalse(update["completed"])
+        self.assertEqual(update["host_termination"]["api"], "TerminateProcess")
+        self.assertEqual(update["host_termination"]["exit_code"], "0xc000000d")
+        self.assertEqual(update["host_termination"]["return_address"], "0x81ff36")
+        self.assertEqual(update["termination_context"], {
+            "exception_code": "0xc000000d", "exception_address": "0x81ff7c",
+        })
+        self.assertEqual((update["action"], update["sequence"], update["pose"]),
+                         (602, 0, 0))
         self.assertEqual(pair["defender_hp_after"], 880)
         self.assertNotIn("gate_open_trial", pair)
         response = report["damage_response"]
