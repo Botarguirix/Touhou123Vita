@@ -125,6 +125,92 @@ def initialize_object_manager(probe: Suwako808FactoryProbe) -> dict[str, object]
     return {"crt": "0x824bfa", "manager_constructor": "0x783d70", "completed": True}
 
 
+def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: int,
+                               frames: list[dict[str, object]], loop_mode: int) -> dict[str, object]:
+    """Run the game's action setter/initializer against a controlled PAT map."""
+    uc = probe.uc
+    map_result, map_object, map_node = MAP_RESULT, MAP_OBJECT, MAP_NODE
+    sequence_node, frame_data = SEQUENCE_NODE, FRAME_DATA
+    frame_end = frame_data + len(frames) * 0xA8
+    for address, size in ((map_result, 0x100), (map_object, 0x100),
+                          (map_node, 0x100), (sequence_node, 0x100),
+                          (frame_data, max(0x100, len(frames) * 0xA8))):
+        uc.mem_write(address, bytes(size))
+    vtable = OWNER + 0x1000
+    uc.mem_write(vtable, bytes(0x100))
+    for slot, target in ((2, ACTION_SETTER), (4, RESET_SEQUENCE),
+                         (7, 0x00464B50), (15, INITIALIZE_ACTION)):
+        uc.mem_write(vtable + slot * 4, struct.pack("<I", target))
+    uc.mem_write(obj, struct.pack("<I", vtable))
+    uc.mem_write(obj + 0x160, struct.pack("<I", PAT_MAP + 0x7000))
+    uc.mem_write(map_result, struct.pack("<II", map_object, map_node))
+    uc.mem_write(map_object + 4, struct.pack("<I", map_node + 0x100))
+    uc.mem_write(map_node + 0x0C, struct.pack("<I", action))
+    uc.mem_write(map_node + 0x10, struct.pack("<I", sequence_node))
+    uc.mem_write(sequence_node + 4, struct.pack("<II", frame_data, frame_end))
+    uc.mem_write(sequence_node + 0x14, bytes((loop_mode & 0xFF,)))
+    uc.mem_write(sequence_node + 0x1C, struct.pack("<I", sequence_node))
+    for index, frame in enumerate(frames):
+        pose = frame_data + index * 0xA8
+        uc.mem_write(pose + 8, struct.pack("<H", int(frame["duration"])))
+        for offset, key in ((0x1C, "damage"), (0x20, "chip"),
+                            (0x2A, "hit_stop"), (0x2C, "enemy_stun"),
+                            (0x30, "block_stun")):
+            uc.mem_write(pose + offset, struct.pack("<H", int(frame.get(key, 0))))
+        for offset, key in ((0x4C, "frame_flags"), (0x50, "attack_flags")):
+            uc.mem_write(pose + offset, struct.pack("<I", int(frame.get(key, 0))))
+        collision = frame["collision_boxes"]
+        collision_ptr = PAT_MAP + 0x18000 + index * 0x100
+        if collision:
+            uc.mem_write(pose + 0x54, struct.pack("<I", collision_ptr))
+            uc.mem_write(collision_ptr, struct.pack("<4i", *collision[0]))
+        for offset, key, stride, data_base in (
+                (0x58, "hurt_boxes", 16, PAT_MAP + 0x19000),
+                (0x68, "attack_boxes", 16, PAT_MAP + 0x1A000)):
+            boxes = frame[key]
+            begin = data_base + index * 0x400
+            end = begin + len(boxes) * stride
+            uc.mem_write(pose + offset, struct.pack("<4I", 0, begin, end, end))
+            if boxes:
+                uc.mem_write(begin, b"".join(struct.pack("<4i", *box) for box in boxes))
+        extra_count = len(frame["attack_boxes"])
+        extra = PAT_MAP + 0x1B000 + index * 0x100
+        uc.mem_write(pose + 0x78,
+                     struct.pack("<4I", 0, extra, extra + extra_count * 4,
+                                 extra + extra_count * 4))
+
+    sp = STACK + 0xAF00
+    uc.mem_write(sp, struct.pack("<II", STOP, action))
+    uc.reg_write(UC_X86_REG_ECX, obj)
+    uc.reg_write(UC_X86_REG_ESI, obj)
+    uc.reg_write(UC_X86_REG_ESP, sp)
+    uc.reg_write(UC_X86_REG_EIP, ACTION_SETTER)
+    probe._code_trace.clear()
+    probe._trace_active = True
+    try:
+        uc.emu_start(ACTION_SETTER, STOP, count=200000)
+    finally:
+        probe._trace_active = False
+    if uc.reg_read(UC_X86_REG_EIP) != STOP:
+        raise RuntimeError(f"original action setter {action} stopped at {uc.reg_read(UC_X86_REG_EIP):#x}")
+    state = {
+        "setter": hex(ACTION_SETTER), "action": struct.unpack("<H", uc.mem_read(obj + 0x13C, 2))[0],
+        "sequence": struct.unpack("<H", uc.mem_read(obj + 0x13E, 2))[0],
+        "pose": struct.unpack("<H", uc.mem_read(obj + 0x140, 2))[0],
+        "pose_count": struct.unpack("<H", uc.mem_read(obj + 0x148, 2))[0],
+        "sequence_pointer": hex(u32(uc, obj + 0x15C)),
+        "original_pose_selector_reached": "0x464ae0" in [hex(pc) for pc in probe._code_trace],
+        "selected_frame_descriptor": hex(u32(uc, obj + 0x158)),
+        "trace": [hex(pc) for pc in probe._code_trace[-45:]],
+    }
+    if (state["action"], state["sequence"], state["pose"], state["pose_count"]) != (
+            action, 0, 0, len(frames)):
+        raise RuntimeError(f"original action setter returned unexpected state: {state}")
+    if u32(uc, obj + 0x158) != frame_data:
+        raise RuntimeError(f"original pose selector chose unexpected PAT descriptor: {state}")
+    return state
+
+
 def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int,
              real_factory: bool = False, resolve_damage: bool = False) -> dict[str, object]:
     probe = Suwako808FactoryProbe(ROOT / "original/th123.exe", dat_dir,
@@ -334,7 +420,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                                 "data/character/remilia/remilia.pat")[0]
         # Action 602 is Remilia's PAT stand/neutral pose with vulnerable-frame
         # bit 0x40, unlike the action-0 setup frame (0x31).
-        neutral_frame = action_sequence_metadata(defender_pat, 602)[0]["frames"][0]
+        defender_sequence = action_sequence_metadata(defender_pat, 602)[0]
+        defender_frames = defender_sequence["frames"]
+        neutral_frame = defender_frames[0]
         defender = LIST + 0x8800
         uc.mem_write(defender, bytes(0x1400))
         character_ctor_sp = STACK + 0x7000 - 4
@@ -358,26 +446,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             "function": "0x46b7f0",
             "field_1ac_after_constructor": uc.mem_read(defender + 0x1AC, 1)[0],
         }
-        neutral_descriptor = PAT_MAP + 0x60000
-        neutral_collision = PAT_MAP + 0x61000
-        neutral_hurt = PAT_MAP + 0x62000
-        uc.mem_write(neutral_descriptor, bytes(0xA8))
-        uc.mem_write(defender + 0x158, struct.pack("<I", neutral_descriptor))
-        if neutral_frame["collision_boxes"]:
-            uc.mem_write(neutral_collision,
-                         struct.pack("<4i", *neutral_frame["collision_boxes"][0]))
-            uc.mem_write(neutral_descriptor + 0x54,
-                         struct.pack("<I", neutral_collision))
-        hurt = neutral_frame["hurt_boxes"]
-        hurt_start = neutral_hurt
-        hurt_end = hurt_start + len(hurt) * 16
-        uc.mem_write(neutral_descriptor + 0x58,
-                     struct.pack("<4I", 0, hurt_start, hurt_end, hurt_end))
-        if hurt:
-            uc.mem_write(hurt_start, b"".join(struct.pack("<4i", *box) for box in hurt))
-        for offset, key in ((0x4C, "frame_flags"), (0x50, "attack_flags")):
-            uc.mem_write(neutral_descriptor + offset,
-                         struct.pack("<I", int(neutral_frame.get(key, 0))))
+        defender_action_state = initialize_original_action(
+            probe, defender, 602, defender_frames, int(defender_sequence["loop_mode"]))
+        neutral_descriptor = u32(uc, defender + 0x158)
         uc.mem_write(defender + 0xEC, struct.pack("<f", 403.0))
         uc.mem_write(defender + 0xF0, struct.pack("<f", 360.0))
         probe._sync_box_data(defender)
@@ -466,6 +537,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "defender_pat_action": 602,
                 "defender_pat_sequence": int(neutral_frame.get("sequence", 0)),
                 "defender_pat_frame": int(neutral_frame["frame"]),
+                "defender_action_setter_state": defender_action_state,
             }
             # Differentially open only the descriptor flag gate observed at
             # 0x47c990. object+0x1ac already came from the original character ctor.
@@ -684,6 +756,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "initialized_action": initialized_action,
         "manager_setup": manager_state,
         "defender_constructor": defender_constructor if real_factory and child_factory else None,
+        "defender_action_setter": defender_action_state if real_factory and child_factory else None,
         "input_fixture": {"position": [x, y], "facing": facing,
                           "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,

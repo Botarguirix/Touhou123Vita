@@ -91,6 +91,12 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(pair["defender_pat_action"], 602)
         self.assertEqual((pair["defender_pat_sequence"], pair["defender_pat_frame"]), (0, 0))
         self.assertEqual(pair["defender_frame_flags"], "0x3041")
+        action_state = pair["defender_action_setter_state"]
+        self.assertEqual((action_state["action"], action_state["sequence"],
+                          action_state["pose"], action_state["pose_count"]),
+                         (602, 0, 0, 8))
+        self.assertTrue(action_state["original_pose_selector_reached"])
+        self.assertIn("0x59aaa0", action_state["trace"])
         self.assertEqual(pair["defender_field_1ac_after_original_constructor"], 1)
         self.assertEqual(report["defender_constructor"], {
             "function": "0x46b7f0", "field_1ac_after_constructor": 1,

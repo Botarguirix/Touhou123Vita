@@ -1,0 +1,7 @@
+# Iteración 2.18: acción PAT vulnerable mediante setter y selector originales
+
+La sonda ya no copia directamente el frame 602 a `object+0x158`. Tras crear el defensor con el constructor original `0x46b7f0`, arma el PAT/map fixture para acción 602 y ejecuta el setter original `0x464930`, el initializer dispatcher `0x59aaa0` y la selección de pose original `0x464ae0`. El estado resultante es acción 602, seq.0, pose0, ocho frames; el selector publica el descriptor de frame PAT esperado, con `frameFlags=0x3041`, `attackFlags=0` y hurtboxes auténticos.
+
+Con el objeto así inicializado, `object+0x1ac=1` del constructor y las listas indexadas del manager, `0x47ce20` alcanza filtro, resolver, hit response y geometría. El PE resta 120 de HP (1000→880) a partir de Remilia 801 seq.0. La ejecución cae después en la llamada global nula de presentación. La suite verifica setter, initializer, selector, flags, geometría y mutación de vida.
+
+Esto cierra la selección PAT con rutinas originales, pero sigue siendo una invocación directa del setter por el harness: no se ejecuta el input handler completo para llegar a acción 602, el movimiento natural del frame ni un combate completo; posiciones y manager siguen controlados. Próximo: iniciar desde estado idle real y alimentar updates/input para producir el mismo estado, resolver el callback de efectos y observar reacción/hitstop. Sin cambios de runtime o VPK.
