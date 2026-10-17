@@ -3,9 +3,8 @@
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
 ## Iteración 2.07: CRT y siguiente enlace Remilia 412 → 801
-
-- El probe ya permite hasta 18 updates originales de Remilia 801 en el fixture controlado; +0x34c=0, seq.0 sincroniza una caja PAT y seq.1 no tiene caja.
-- Falta conectar dinámicamente argumentos de x58cce7 → 0x46eb30 y callback x464980, alimentar factory sin forzar secuencia y probar colisión/daño. No equivale a combate natural ni genera VPK. Ver [ITERATION107.md](ITERATION107.md).
+- El probe permite hasta 18 updates originales de Remilia 801 en el fixture controlado; `+0x34c=0`, seq.0 sincroniza una caja PAT y seq.1 no tiene caja.
+- El callsite desensamblado calcula el spawn 801 desde posición/facing del owner; `0x464980` indexa `object+0x164[EBX]`. Falta capturar esos valores al ejecutar el estado `+0x140==4` y probar callback, colisión y daño. Ver [ITERATION107.md](ITERATION107.md).
 
 - Se ejecuta el inicializador CRT original `0x824bfa` con contratos de host controlados para TLS/FLS y heap; el índice inválido `0xffffffff` y la terminación CRT desaparecen.
 - El factory crea action 801/seq.1 con dos poses. El dispatcher original completa 18 ticks hasta `+0x34c=0`; seq.0 sincroniza una caja ofensiva y seq.1 ninguna. No se demuestra manager cleanup ni impacto. Ver [ITERATION106.md](ITERATION106.md).

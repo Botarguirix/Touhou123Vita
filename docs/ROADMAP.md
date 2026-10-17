@@ -8,7 +8,7 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ### Remilia 412 → objeto 801 — Iteración 2.07
 
-El CRT ya permite hasta 18 updates originales del objeto 801 y el dispatcher termina con `+0x34c=0`; seq.0 sincroniza una caja PAT y seq.1 no tiene caja y se desvanece. La factory todavía usa posición controlada y el fixture de secuencias, así que no representa la creación natural de 412. Siguiente: capturar argumentos y callback en `0x58cce7 → 0x46eb30 → 0x464980`, alimentar esos valores al factory y seguir colisión/daño. No hay combate completo, runtime Vita ni VPK nuevo. Ver [ITERATION107.md](ITERATION107.md).
+El CRT ya permite hasta 18 updates originales del objeto 801 y el dispatcher termina con `+0x34c=0`; seq.0 sincroniza una caja PAT y seq.1 no tiene caja y se desvanece. La factory todavía usa posición controlada y el fixture de secuencias, así que no representa la creación natural de 412. El desensamblado fija estáticamente el spawn 801 con posición basada en `Player+0xEC/+0xF0` y facing; `0x464980` indexa `object+0x164` con EBX. Siguiente: capturar valores y callback al ejecutar el handler en `+0x140==4`, alimentar factory sin forzar secuencia y seguir colisión/daño. No hay combate completo, runtime Vita ni VPK nuevo. Ver [ITERATION107.md](ITERATION107.md).
 
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 
