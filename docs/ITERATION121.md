@@ -1,0 +1,7 @@
+# Iteración 2.21: ruta x86 de 5AA→5AAA y estado pendiente
+
+Se inspeccionó el CFG completo de `PlayerRemilia::handleInputs` (`0x59c010`) extraído del PE fijado (SHA-256 `f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e`), junto con una ejecución exploratoria bajo Unicorn. La tabla del handler confirma las acciones `0x140` (320, 5AA) y `0x141` (321, 5AAA). En el bloque `0x59d876–0x59d8ce`, cuando la acción actual es 320 y `Player+0x190` no vale 0 ni 3, la rama carga 321 y llama al setter virtual `vtable+8`; para el caso 321 con pose ≥8 existe una rama hermana que solicita 322.
+
+La ejecución de control fijó acción 320 con el setter original y luego escribió A y el bit `0x10` directamente en el estado de input. El handler `0x59c010` retornó sin cambiar la acción. Por tanto, estos valores aislados no alcanzan el bloque de combo y no son evidencia de una entrada natural. El objeto del harness tampoco tiene el estado completo de `PlayerRemilia` ni su ciclo legítimo de input/update; la prueba no permite inferir que `+0x190` baste por sí solo.
+
+Siguiente: reconstruir el ciclo que llena `Player+0x7c8`, obtiene el estado de move-lock/cancel y establece `Player+0x190` desde la pelea real; ejecutar la clase Remilia con constructor y vtable originales antes de volver a probar 5AA→5AAA. Después conectar hit-confirm al tick de combate y respuesta posterior. No se modificó el runtime ni el VPK.
