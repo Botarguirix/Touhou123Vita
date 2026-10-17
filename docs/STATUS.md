@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.92: candidato de callback de daño en Remilia
+
+- Se localizaron cinco callsites directos de `0x4799b0`; cuatro están en el flujo de colisión/respuesta. `0x47b1d0` también se invoca desde el wrapper `0x4649b0` (`0x4649d2`), que recibe personaje, rival y parámetros de daño.
+- Hay 25 referencias directas a `0x4649b0`, incluidas cuatro en rutinas de Remilia (`0x591f6b`, `0x591ff9`, `0x59243f`, `0x592498`). Son candidatas a ruta especial, pero todavía no se relacionan con action 412; los ejemplos muestran estados/temporizadores y daños distintos a los 750 de PAT.
+- Se añadieron `0x4649b0` y `0x47b1d0` a `ExportKernel.java`. Próximo: determinar si alguna condición/callback es alcanzable desde 412 y comparar frame/daño con PAT. Sin cambios de runtime/VPK. Ver [ITERATION92.md](ITERATION92.md).
+
 ## Iteración 1.91: respuesta de pares y límite de Remilia 2C
 
 - `0x47c770` llama a `0x47a040` para grab (`attackFlags & 0x80`) o `0x47a5b0` para hit-vs-hurt normal; solo después de un contacto geométrico evalúa `0x47b5d0`, `0x47b490`, `0x47c590` y `0x47aa50`.
