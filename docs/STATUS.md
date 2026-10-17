@@ -2,6 +2,13 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.91: respuesta de pares y límite de Remilia 2C
+
+- `0x47c770` llama a `0x47a040` para grab (`attackFlags & 0x80`) o `0x47a5b0` para hit-vs-hurt normal; solo después de un contacto geométrico evalúa `0x47b5d0`, `0x47b490`, `0x47c590` y `0x47aa50`.
+- La cadena posterior consulta flags/estado y termina procesando daño del frame, pero no produce hit boxes. Remilia 412 tiene flags `0x00204002`, `attackBoxes` vacío; esta ruta sigue sin explicar los 750 del PAT.
+- Desensamblado ampliado fijado al hash del PE en `artifacts/kernel/remilia-damage-route-followup.tsv` (ignorado). Se añadieron las cuatro rutinas posteriores a los objetivos de `ExportKernel.java`.
+- Siguiente: hallar el productor/callback alterno o la ruta real del descriptor 412; no portar una caja supuesta. Sin cambio de runtime/VPK ni nueva corrida Vita3K. Ver [ITERATION91.md](ITERATION91.md).
+
 ## Iteración 1.90: geometría PAT de Remilia 2C
 
 - La pose dañina 412/seq.0/pose5 declara 750 de daño, flags `0x00204002`, cero `attack_boxes` y una `collision_box` `[-20,-155,20,-1]` en el PAT efectivo de th123c.dat.
