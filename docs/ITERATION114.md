@@ -1,0 +1,7 @@
+# Iteración 2.14: respuesta original de impacto para Remilia 801
+
+La PAT real expone el daño de Remilia 801 seq.0 en el descriptor de frame (`+0x1c`): 120. La prueba del factory crea 801, sincroniza una hitbox y confirma contacto con una hurtbox mediante `0x47a5b0`. En modo opt-in, el PE original ejecuta después `0x47b660`: con la vida defensora sembrada en 1000, aplica 120 (1000→880), fija el cooldown ofensivo `+0x190=9` y procesa la prioridad/reacción. Esto confirma el cambio de vida del código original, no solo un modelo del port.
+
+La rutina continúa hacia un servicio de presentación/efectos global no inicializado en el harness; su callback indirecto salta a `0x0` **después** de la resta de vida. El informe registra esa falla y conserva la corrida normal de lifecycle sin respuesta de daño. La prueba se activa con `--real-factory --resolve-damage`; el test de daño es independiente del caso base de 55 ticks y 19 solicitudes. El análisis estático verifica bytes y campos fuente en `0x47b660`.
+
+Limitaciones: aún no se ejecuta el dispatch de pares del manager `0x47ce20` end-to-end, no están inicializados guardia, hitstop, efectos ni servicios de combate; tampoco se ha generado VPK ni probado en Vita3K en esta iteración. Próximo paso: instrumentar la fase real de pares y satisfacer de forma trazable el servicio global que falta, midiendo guardia, daño, reacción y hitstop antes de portar el resultado.

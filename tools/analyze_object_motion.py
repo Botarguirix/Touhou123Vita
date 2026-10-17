@@ -225,6 +225,9 @@ def main() -> int:
         "hurt_hurt_aabb_test": (0x47A7E1, bytes.fromhex("e8 2a f6 ff ff")),
         "projectile_pair_dispatch": (0x47CEFF, bytes.fromhex("e8 6c fb ff ff")),
         "character_pair_dispatch": (0x47CF28, bytes.fromhex("e8 63 fa ff ff")),
+        "hit_response_runs_geometry": (0x47B66F, bytes.fromhex("e8 3c ef ff ff")),
+        "hit_response_sets_attacker_cooldown": (0x47B694, bytes.fromhex("c7 86 90 01 00 00 09 00 00 00")),
+        "hit_response_reads_frame_damage": (0x47B6A9, bytes.fromhex("66 8b 50 1c 66 29 93 84 01 00 00")),
     }
     for name, (address, expected) in collision_pipeline_signatures.items():
         actual = code(address, len(expected))
@@ -245,6 +248,14 @@ def main() -> int:
             "tests": {"rotated": "0x47a110", "axis_aligned": "0x479e10"},
         },
         "pair_dispatch": {"projectile": "0x47ca70", "character": "0x47c990"},
+        "hit_response": {
+            "function": "0x47b660", "geometry_helper": "0x47a5b0",
+            "damage_source": "attacker.frameData (+0x1c0)+0x1c",
+            "defender_life_field": "defender+0x184 (16-bit subtraction)",
+            "attacker_cooldown_field": "attacker+0x190 = 9",
+            "target_reaction_field": "defender+0x194 = attacker+0x1bc-1",
+            "evidence_level": "pinned PE stores/subtract; dynamic Remilia 801 probe reduces controlled defender 1000->880",
+        },
         "evidence_level": "pinned PE bytes show manager pair phases and hit/hurt rectangle traversal; exact damage/guard/priority response still needs dynamic pair trace",
     }
     frame_selection_contract = {

@@ -445,6 +445,14 @@ class Suwako808FactoryProbe:
             for frame_index, frame_data in enumerate(frames):
                 pose = frame + frame_index * 0xA8
                 uc.mem_write(pose + 8, struct.pack("<H", int(frame_data["duration"])))
+                # PAT's 40-byte combat-traits block maps to CharacterFrameData
+                # starting at +0x1c (confirmed by the x86 response consumer).
+                for field_offset, key in ((0x1C, "damage"), (0x20, "chip"),
+                                          (0x2A, "hit_stop"),
+                                          (0x2C, "enemy_stun"),
+                                          (0x30, "block_stun")):
+                    uc.mem_write(pose + field_offset,
+                                 struct.pack("<H", int(frame_data.get(key, 0))))
                 # CharacterFrameData embeds three Soku vectors: hurt boxes
                 # at +0x58, attack boxes at +0x68, and extra-box pointers at
                 # +0x78. Their begin/end/capacity pointers start +4/+8/+0xc.

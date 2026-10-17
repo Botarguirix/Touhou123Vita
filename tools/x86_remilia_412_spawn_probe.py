@@ -126,7 +126,7 @@ def initialize_object_manager(probe: Suwako808FactoryProbe) -> dict[str, object]
 
 
 def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int,
-             real_factory: bool = False) -> dict[str, object]:
+             real_factory: bool = False, resolve_damage: bool = False) -> dict[str, object]:
     probe = Suwako808FactoryProbe(ROOT / "original/th123.exe", dat_dir,
                                   character="remilia", action_id=801)
     uc = probe.uc
@@ -317,6 +317,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     if not callback:
         raise RuntimeError(f"original indexed callback did not dispatch: {errors}")
     collision_matrix: list[dict[str, object]] = []
+    damage_response: dict[str, object] | None = None
     if real_factory and child_factory:
         child = int(child_factory["pointer"], 16)
         try:
@@ -372,6 +373,51 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                                          "transform_helpers": probe.box_transform_calls[transform_start:]})
         finally:
             probe.intercept_box_transforms = saved_intercept
+        if resolve_damage:
+            # Reach the original hit-response function after a verified PAT box overlap.
+            # Its presentation callback is outside this harness; keep this opt-in.
+            # Damage and cooldown execute from the PE; presentation service is absent.
+            uc.mem_write(child + 0xEC, struct.pack("<f", 403.0))
+            uc.mem_write(child + 0xF0, struct.pack("<f", 360.0))
+            probe._sync_box_data(child)
+            uc.mem_write(defender + 0x184, struct.pack("<H", 1000))
+            hp_before = struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
+            response_sp = STACK + 0xB000 - 12
+            uc.mem_write(response_sp, struct.pack("<3I", STOP, child, defender))
+            uc.reg_write(UC_X86_REG_ESP, response_sp)
+            uc.reg_write(UC_X86_REG_ECX, LIST)
+            uc.reg_write(UC_X86_REG_EIP, 0x0047B660)
+            probe._code_trace.clear()
+            probe._trace_active = True
+            response_error = None
+            try:
+                uc.emu_start(0x0047B660, STOP, count=250000)
+                if uc.reg_read(UC_X86_REG_EIP) != STOP:
+                    response_error = f"response returned at {uc.reg_read(UC_X86_REG_EIP):#x}"
+            except Exception as exc:
+                response_error = f"{type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}"
+            finally:
+                probe._trace_active = False
+            damage_response = {
+                "function": "0x47b660", "attacker": hex(child), "defender": hex(defender),
+                "pat_damage": int(probe.pat_fixture["sequences"][0]["frames"][0]["damage"]),
+                "attacker_frame_damage_field": struct.unpack("<H", uc.mem_read(
+                    u32(uc, child + 0x1C0) + 0x1C, 2))[0],
+                "attacker_hitbox_count": uc.mem_read(child + 0x1CB, 1)[0],
+                "defender_hurtbox_count": uc.mem_read(defender + 0x1CC, 1)[0],
+                "defender_hp_before": hp_before,
+                "defender_hp_after": struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0],
+                "damage_applied": struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
+                == hp_before - int(probe.pat_fixture["sequences"][0]["frames"][0]["damage"]),
+                "attacker_hit_priority_1bc": uc.mem_read(child + 0x1BC, 1)[0],
+                "defender_reaction_194": uc.mem_read(defender + 0x194, 1)[0],
+                "attacker_cooldown_190": u32(uc, child + 0x190),
+                "error": response_error,
+                "failure_after_damage": bool(response_error and
+                    struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0] < hp_before),
+                "external_callback_pointer": "0x0" if uc.reg_read(UC_X86_REG_EIP) == 0 else None,
+                "trace": [hex(pc) for pc in probe._code_trace[-35:]],
+            }
         # The factory inserts the child into the real list. Advance only via
         # the manager's virtual slot so its callback and removal gate remain in
         # the execution path throughout the lifecycle sample.
@@ -466,6 +512,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "factory_returns": factory_returns,
         "create_object_helper_calls": create_object_helper_calls,
         "collision_matrix": collision_matrix,
+        "damage_response": damage_response,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,
         "animation_tick_states": tick_states,
@@ -504,12 +551,14 @@ def main() -> None:
     parser.add_argument("--facing", type=int, choices=(-1, 1), default=1)
     parser.add_argument("--real-factory", action="store_true",
                         help="execute CRT startup, object manager, and the actual 801 factory")
+    parser.add_argument("--resolve-damage", action="store_true",
+                        help="run original hit response after overlap (requires real factory)")
     parser.add_argument("--callback-index", type=int, choices=(0, 1, 2, 3), default=1,
                         help="callback table slot preloaded with the fixture function pointer")
     parser.add_argument("--output", type=Path, default=ROOT / "artifacts/x86-remilia-412-spawn-probe.json")
     args = parser.parse_args()
     result = run_case(args.dat_dir, args.x, args.y, args.facing, args.callback_index,
-                      real_factory=args.real_factory)
+                      real_factory=args.real_factory, resolve_damage=args.resolve_damage)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))

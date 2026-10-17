@@ -4,6 +4,7 @@ Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
 ## Iteración 2.08: callsite Remilia 412 → objeto 801
 
+- **Iteración 2.14:** `0x47b660` ejecutada después del overlap PAT resta el daño real 120 (HP 1000→880) y fija cooldown 9; después el callback global de presentación termina en nulo. Prueba separada opt-in; pair dispatch manager y guardia/hitstop siguen pendientes. Ver [ITERATION114.md](ITERATION114.md).
 - **Iteración 2.13:** el dispatcher `0x7879da` de 801 seq.0 genera otro 801 cada tres frames por `vtable+0x44`; 19 requests salen del padre inicial durante sus 55 ticks y seis secundarios siguen activos tras su retiro. Se fijaron las firmas y la traza dinámica en tests. Sigue pendiente pair dispatch y daño. Ver [ITERATION113.md](ITERATION113.md).
 - **Iteración 2.12:** corregida la interfaz secundaria del manager (`LIST-4`). El update indirecto por slot4 corre 55 ticks desde el objeto recién creado, llega a `+0x34c=0` y elimina su nodo; quedan seis otros 801 activos y se observaron 19 retornos adicionales de factory. El crecimiento de objetos y el daño de parejas aún requieren explicación. Ver [ITERATION112.md](ITERATION112.md).
 - **Iteración 2.11 (supersedida):** al poner la factory sobre `LIST` en lugar de `LIST-4`, el iterador recorría la lista incorrecta y despachaba `ESI=1` en el tick18. La corrección está demostrada en Iteración 2.12. Ver [ITERATION111.md](ITERATION111.md).

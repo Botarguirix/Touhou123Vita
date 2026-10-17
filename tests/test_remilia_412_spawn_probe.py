@@ -80,6 +80,20 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual([row["this_pose"] for row in helper_calls],
                          [0, 3, 6, 9, 12, 15, 18, 1, 4, 7, 10, 13, 16, 19, 2, 5, 8, 11, 14])
 
+    def test_original_hit_response_applies_pat_damage_before_missing_effect_callback(self):
+        report = run_case(self.dat_dir, 320.0, 180.0, 1, 1,
+                          real_factory=True, resolve_damage=True)
+        response = report["damage_response"]
+        self.assertTrue(response["damage_applied"])
+        self.assertEqual(response["pat_damage"], 120)
+        self.assertEqual((response["defender_hp_before"], response["defender_hp_after"]),
+                         (1000, 880))
+        self.assertEqual(response["attacker_frame_damage_field"], 120)
+        self.assertEqual(response["attacker_cooldown_190"], 9)
+        self.assertTrue(response["failure_after_damage"])
+        self.assertEqual(response["external_callback_pointer"], "0x0")
+        self.assertIn("0x479cb0", response["trace"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,9 +6,9 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Remilia 412 → objeto 801 — Iteración 2.13
+### Remilia 412 → objeto 801 — Iteración 2.14
 
-La probe ejecuta el setter/initializer y temporizador original de 412, que solicita 801 al tick 16. La interfaz manager `LIST-4` ejecuta su lifecycle: 55 ticks y retiro del padre cuando `+0x34c=0`. El update original de seq.0 crea otro 801 cuando `object+0x144 % 3 == 0`; se confirman 19 requests desde el padre, con seis secundarios vivos al final. El helper PAT hit-vs-hurt confirma contacto a X 0/40/60, ninguno desde 70. Próximo: llevar el grupo de objetos por las fases de pares y seguir la primera respuesta de HP/guardia/hitstop. No se ha verificado combate completo, VPK ni Vita3K. Ver [ITERATION113.md](ITERATION113.md), [ITERATION112.md](ITERATION112.md), [ITERATION111.md](ITERATION111.md), [ITERATION110.md](ITERATION110.md), [ITERATION109.md](ITERATION109.md) y [ITERATION108.md](ITERATION108.md).
+La probe ejecuta el setter/initializer y temporizador original de 412, que solicita 801 al tick 16. La interfaz manager `LIST-4` ejecuta su lifecycle: 55 ticks y retiro del padre cuando `+0x34c=0`. El update original de seq.0 crea otro 801 cada tres frames: 19 requests y seis secundarios vivos al final. La geometría PAT confirma contacto a X 0/40/60, ninguno desde 70. La respuesta original `0x47b660`, invocada tras contacto, resta los 120 de daño de seq.0 a la vida y fija cooldown 9; después falla al llamar un servicio global de efectos nulo en el harness. El test opt-in aísla esta mutación y deja intacta la corrida base. Próximo: ejecutar el dispatch de pares desde manager e inicializar con evidencia el servicio de combate/efectos para observar guardia y hitstop. Sin combate completo, VPK ni prueba Vita3K en esta iteración. Ver [ITERATION114.md](ITERATION114.md), [ITERATION113.md](ITERATION113.md), [ITERATION112.md](ITERATION112.md), [ITERATION111.md](ITERATION111.md), [ITERATION110.md](ITERATION110.md), [ITERATION109.md](ITERATION109.md) y [ITERATION108.md](ITERATION108.md).
 
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 
