@@ -4,7 +4,7 @@ Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
 ## Iteración 2.08: callsite Remilia 412 → objeto 801
 
-- Probe x86 ejecuta `0x587bab → 0x58a3a1 → 0x58cce7` y el bloque original de subestado 4, capturando ID 801, coordenadas `(403,360)`/`(237,360)` para facing `+1`/`-1`, bloque temporal `[-70,12,0]` y callback índice 1 (EBX inicial del prólogo `0x5879cf`); los helpers originales reducen medidor 1000→800 y aumentan gauge 0→50. La comparación y dispatch de action corren, pero action/seq/subestado, EBX=1 (valor observado en `0x5879cf`), tabla, retorno del manager y dispatcher externo son fixtures; no prueba combate natural, actualización, impacto ni daño. Suite Python 40/40. Ver [ITERATION108.md](ITERATION108.md).
+- Probe x86 corre el setter/initializer original de 412 (pose0, 12 poses) y luego `0x587bab → 0x58a3a1 → 0x58cce7`; el bloque original de subestado 4, capturando ID 801, coordenadas `(403,360)`/`(237,360)` para facing `+1`/`-1`, bloque temporal `[-70,12,0]` y callback índice 1 (EBX inicial del prólogo `0x5879cf`); los helpers originales reducen medidor 1000→800 y aumentan gauge 0→50. Pose4, EBX=1 (valor del prólogo `0x5879cf`, sembrado), tabla, retorno del manager y dispatcher externo son fixtures; el avance de pose aún falta; no prueba combate natural, actualización, impacto ni daño. Suite Python 40/40. Ver [ITERATION108.md](ITERATION108.md).
 
 ## Iteración 2.07: CRT y siguiente enlace Remilia 412 → 801
 - El probe permite hasta 18 updates originales de Remilia 801 en el fixture controlado; `+0x34c=0`, seq.0 sincroniza una caja PAT y seq.1 no tiene caja.

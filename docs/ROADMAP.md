@@ -8,7 +8,7 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ### Remilia 412 → objeto 801 — Iteración 2.08
 
-La probe ejecuta desde la comparación del update `0x587bab` por los dispatchers `0x58a3a1 → 0x58cce7`, el callsite de subestado 4 y `0x464980`; EBX=1 procede del prólogo del update principal: objeto 801, spawn diferencial por facing y lectura del callback `object+0x164[EBX]` quedan medidos. El estado de entrada, índice/tabla de callback, manager y dispatcher externo siguen controlados. Siguiente: ejecución desde el update natural de 412 y callback real, seguida por factory/update/colisión del 801. No se ha probado combate ni daño. Ver [ITERATION108.md](ITERATION108.md).
+La probe encadena el setter/initializer original 412 hasta pose0/12 poses, y luego ejecuta desde la comparación del update `0x587bab`; pose4 se prepara en fixture hasta resolver el actualizador de animación por los dispatchers `0x58a3a1 → 0x58cce7`, el callsite de subestado 4 y `0x464980`; EBX=1 procede del prólogo del update principal: objeto 801, spawn diferencial por facing y lectura del callback `object+0x164[EBX]` quedan medidos. El estado de entrada, índice/tabla de callback, manager y dispatcher externo siguen controlados. Siguiente: ejecución desde el update natural de 412 y callback real, seguida por factory/update/colisión del 801. No se ha probado combate ni daño. Ver [ITERATION108.md](ITERATION108.md).
 
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 

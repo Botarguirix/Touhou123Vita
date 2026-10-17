@@ -22,36 +22,95 @@ from unicorn.x86_const import (
     UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EIP,
     UC_X86_REG_ESP, UC_X86_REG_ESI, UC_X86_REG_EBP, UC_X86_REG_EDI,
 )
-from tools.x86_suwako_808_factory_probe import LIST, OWNER, STACK, STOP, Suwako808FactoryProbe
+from tools.x86_remilia_412_box_sync_probe import effective_pat
+from tools.x86_remilia_412_action_setter_probe import (
+    ACTION_SETTER, ACTION_WRITE, RESET_SEQUENCE, INITIALIZE_ACTION,
+    INITIALIZER_BODY, ZERO_MOTION, PAT_LOOKUP, MAP_RESULT, MAP_OBJECT,
+    MAP_NODE, SEQUENCE_NODE, FRAME_DATA, SET_POSE_CAPTURE,
+)
+from tools.x86_suwako_808_factory_probe import LIST, OWNER, PAT_MAP, STACK, STOP, Suwako808FactoryProbe
 
 MAIN_ACTION_COMPARE = 0x00587BAB
 CREATE_OBJECT_WRAPPER = 0x0046EB30
-CALLBACK_LOOKUP = 0x00464980
 CALLBACK_DISPATCH = 0x00401D50
 HANDLER_EPILOGUE = 0x0058CDCC
 PLAYER = LIST + 0x8000
 CALLBACKS = OWNER + 0x100
-CALLBACK_INDEX = 3
-SPAWN_RETURN = STOP + 0x100
-CALLBACK_RETURN = STOP + 0x110
+
+
+def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[str, object]:
+    """Run the original setter/initializer chain and controlled PAT lookup."""
+    _archive, _digest, frames = effective_pat(dat_dir)
+    uc = probe.uc
+    uc.mem_write(PLAYER, bytes(0x1000))
+    uc.mem_write(OWNER, bytes(0x100))
+    for address, size in ((MAP_RESULT, 0x100), (MAP_OBJECT, 0x100),
+                          (MAP_NODE, 0x100), (SEQUENCE_NODE, 0x100),
+                          (FRAME_DATA, len(frames) * 0xA8)):
+        uc.mem_write(address, bytes(size))
+    uc.mem_write(PLAYER, struct.pack("<I", OWNER))
+    uc.mem_write(OWNER + 2 * 4, struct.pack("<I", ACTION_SETTER))
+    uc.mem_write(OWNER + 4 * 4, struct.pack("<I", RESET_SEQUENCE))
+    uc.mem_write(OWNER + 7 * 4, struct.pack("<I", SET_POSE_CAPTURE))
+    uc.mem_write(OWNER + 15 * 4, struct.pack("<I", INITIALIZE_ACTION))
+    uc.mem_write(PLAYER + 0x160, struct.pack("<I", PAT_MAP + 0x7000))
+    uc.mem_write(MAP_RESULT, struct.pack("<II", MAP_OBJECT, MAP_NODE))
+    uc.mem_write(MAP_OBJECT + 4, struct.pack("<I", MAP_NODE + 0x100))
+    uc.mem_write(MAP_NODE + 0x10, struct.pack("<I", SEQUENCE_NODE))
+    uc.mem_write(SEQUENCE_NODE + 4,
+                 struct.pack("<II", FRAME_DATA, FRAME_DATA + len(frames) * 0xA8))
+    uc.mem_write(SEQUENCE_NODE + 0x14, b"\x00")
+    uc.mem_write(SEQUENCE_NODE + 0x1C, struct.pack("<I", SEQUENCE_NODE))
+
+    reached: list[str] = []
+    def setup_hook(machine, address: int, _size: int, _user: object) -> None:
+        if address in (ACTION_SETTER, ACTION_WRITE, RESET_SEQUENCE,
+                       INITIALIZE_ACTION, INITIALIZER_BODY, ZERO_MOTION):
+            reached.append(hex(address))
+        esp = machine.reg_read(UC_X86_REG_ESP)
+        if address == PAT_LOOKUP:
+            ret = u32(machine, esp)
+            machine.reg_write(UC_X86_REG_EAX, MAP_RESULT)
+            machine.reg_write(UC_X86_REG_ESP, esp + 12)
+            machine.reg_write(UC_X86_REG_EIP, ret)
+        elif address == SET_POSE_CAPTURE:
+            ret, pose = struct.unpack("<II", machine.mem_read(esp, 8))
+            machine.mem_write(PLAYER + 0x140, struct.pack("<H", pose))
+            machine.reg_write(UC_X86_REG_ESP, esp + 8)
+            machine.reg_write(UC_X86_REG_EIP, ret)
+
+    uc.hook_add(UC_HOOK_CODE, setup_hook)
+    sp = STACK + 0xB000
+    uc.mem_write(sp, struct.pack("<II", STOP, 412))
+    uc.reg_write(UC_X86_REG_ECX, PLAYER)
+    uc.reg_write(UC_X86_REG_ESI, PLAYER)
+    uc.reg_write(UC_X86_REG_ESP, sp)
+    uc.reg_write(UC_X86_REG_EIP, ACTION_SETTER)
+    uc.emu_start(ACTION_SETTER, STOP, count=100000)
+    state = {
+        "action": struct.unpack("<H", uc.mem_read(PLAYER + 0x13C, 2))[0],
+        "sequence": struct.unpack("<H", uc.mem_read(PLAYER + 0x13E, 2))[0],
+        "pose": struct.unpack("<H", uc.mem_read(PLAYER + 0x140, 2))[0],
+        "pose_count": struct.unpack("<H", uc.mem_read(PLAYER + 0x148, 2))[0],
+        "initializer_chain": reached,
+    }
+    if (state["action"], state["sequence"], state["pose"], state["pose_count"]) != (412, 0, 0, len(frames)):
+        raise AssertionError(f"original action setter did not initialize 412/seq0: {state}")
+    return state
 
 
 def u32(uc, address: int) -> int:
     return struct.unpack("<I", uc.mem_read(address, 4))[0]
 
 
-def f32(uc, address: int) -> float:
-    return struct.unpack("<f", uc.mem_read(address, 4))[0]
-
-
 def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int) -> dict[str, object]:
     probe = Suwako808FactoryProbe(ROOT / "original/th123.exe", dat_dir)
     uc = probe.uc
-    uc.mem_write(PLAYER, bytes(0x1000))
+    initialized_action = initialize_action_412(probe, dat_dir)
     uc.mem_write(CALLBACKS, bytes(0x500))
     uc.mem_write(PLAYER + 0x164, struct.pack("<I", CALLBACKS))
-    uc.mem_write(PLAYER + 0x13C, struct.pack("<H", 412))
-    uc.mem_write(PLAYER + 0x13E, struct.pack("<H", 0))
+    # Pose 4 selects the original spawn branch; the player animation updater
+    # that advances pose 0 to pose 4 is still outside this probe.
     uc.mem_write(PLAYER + 0x140, struct.pack("<H", 4))
     uc.mem_write(PLAYER + 0x142, struct.pack("<H", 0))
     uc.mem_write(PLAYER + 0x104, struct.pack("<b", facing))
@@ -137,8 +196,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     if not callback:
         raise RuntimeError(f"original indexed callback did not dispatch: {errors}")
     return {
+        "initialized_action": initialized_action,
         "input_fixture": {"position": [x, y], "facing": facing,
-                          "action": 412, "sequence": 0, "substate": 4,
+                          "pose_override_after_initializer": 4,
                           "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,
         "callback_dispatch": callback,
@@ -149,7 +209,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             "gauge_5e4": struct.unpack("<H", uc.mem_read(PLAYER + 0x5E4, 2))[0],
         },
         "error": errors or None,
-        "scope": "Original main-update action load/threshold compare 0x587bab through dispatch 0x58a3a1 and table-selected handler 0x58cce7, original 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 callback-table lookup execute from the hash-pinned PE. Action/sequence/substate fields and EBX=1 are seeded (EBX matches the value loaded by the main update prologue at 0x5879cf; the prologue and earlier main-update gates are skipped); callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0/0x438c60 external status services return fixtures. Does not execute the entire 0x5879a0 main update, instantiate/update 801, run collision, or apply damage.",
+        "scope": "Original action setter/initializer chain 0x464930..0x59ad64 runs to produce action 412/seq.0/pose 0; a fixture advances pose to 4 because the player animation updater is unresolved. The original main-update action comparison 0x587bab, dispatch 0x58a3a1, handler 0x58cce7, 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 callback-table lookup execute. EBX=1 is seeded to match the value loaded by the skipped prologue at 0x5879cf; callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0/0x438c60 status services are fixtures. Does not execute full 0x5879a0 update, instantiate/update 801, run collision, or apply damage.",
     }
 
 

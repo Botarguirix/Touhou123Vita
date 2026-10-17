@@ -15,6 +15,13 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         plus = run_case(self.dat_dir, 320.0, 180.0, 1, 1)
         minus = run_case(self.dat_dir, 320.0, 180.0, -1, 1)
 
+        self.assertEqual(plus["initialized_action"]["action"], 412)
+        self.assertEqual(plus["initialized_action"]["sequence"], 0)
+        self.assertEqual(plus["initialized_action"]["pose"], 0)
+        self.assertEqual(plus["initialized_action"]["pose_count"], 12)
+        self.assertEqual(plus["initialized_action"]["initializer_chain"], [
+            "0x464930", "0x438ca0", "0x465370", "0x59aaa0", "0x59ad64", "0x4636b0"]
+        )
         self.assertEqual(plus["main_update_dispatch_trace"], ["0x587bab", "0x58a3a1", "0x58cce7"])
         self.assertEqual(plus["spawn_call"]["object_id"], 801)
         self.assertEqual(plus["spawn_call"]["x"], 403.0)
