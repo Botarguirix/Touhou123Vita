@@ -1,0 +1,9 @@
+# Iteración 1.89: handler x86 de 2C de Remilia
+
+Se regeneró el mapa de vtables y el CFG de los 20 handlers contra el PE SHA-256 `f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e`, con `max-span=0x8000`. La salida es local bajo `artifacts/kernel/<sha>/character-input/` e ignorada por Git. `disassemble_character_handlers.py` ahora agrega `local/python-deps` a `sys.path`, igual que los otros extractores del proyecto, para que el Python de runtime encuentre Capstone sin modificar el entorno global.
+
+El resumen actual de Remilia contiene dispatchs candidatos 400, 401, 402, 404, 406, 410, 412, 414 y 416; el handler consulta `getMoveLock(412)` (`0x489610`) en la entrada 2C. El bloque de selección alrededor de `0x59dd97–0x59de11` verifica límites de estado/tiempo y salta a la transición común que invoca `setAction(412)`. La acción se selecciona desde entrada; esa ruta no muestra una llamada directa al factory conocido `0x46eb30`. Esto no excluye callbacks indirectos ni creación durante actualización del personaje/objeto.
+
+La pasada de instrucciones sobre el PE completo halló solo una operación de comparación directa con `[reg+0x50]`, en `0x40a4bb`, entre 24 referencias totales a ese desplazamiento. Por sí sola no identifica el consumidor de `CharacterFrameData::attackFlags`: registros base y structs distintos comparten el mismo desplazamiento, y los lectores pueden formar la dirección por más de una instrucción. No se asignó semántica a `0x00204002` ni se cambió el runtime.
+
+Siguiente: seguir el callback de actualización de la acción 412 desde el cambio de pose de Remilia, identificar la carga de `CharacterFrameData`/los vectores PAT y ejecutar `0x465e10` en Unicorn con el descriptor real de Remilia 412. Luego conectar el objeto/personaje par y la respuesta a daño, antes de portar esa regla a Vita. La prueba existente del inventario PAT sigue pasando; este avance aún no produce una nueva validación Vita3K ni VPK.

@@ -2,6 +2,13 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.89: handler x86 de Remilia 2C
+
+- Regeneré CFG de los 20 handlers desde el PE fijado, span `0x8000`; Remilia `0x0059c010` consulta lock 412 y despacha 2C. La salida analítica permanece local/ignorada.
+- El desensamblador ahora resuelve Capstone desde `local/python-deps`. La búsqueda bruta por `[reg+0x50]` no identifica por sí misma lectores de `CharacterFrameData::attackFlags`; no se interpretó el flag ni se cambió runtime.
+- Siguiente: callback de update de 412 y ejecución de `0x465e10` con su descriptor PAT real en Unicorn, luego resolver la respuesta de combate.
+- Ver [ITERATION89.md](ITERATION89.md).
+
 ## Iteración 1.88: exportación reproducible de sincronización PAT
 
 - Se añadió `tools/disassemble_pe_windows.py`, fijado al SHA-256 del ejecutable original. El desensamblado local de `0x465e10`, `0x47a5b0` y `0x47a740` confirma que `frameFlags` (`+0x4c`) controla la publicación de buffers transformados; no interpreta `attackFlags` (`+0x50`).
