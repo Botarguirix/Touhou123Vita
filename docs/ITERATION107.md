@@ -1,0 +1,7 @@
+# Iteración 2.07: cierre del CRT y siguiente enlace Remilia 412 → 801
+
+Se corrige el estado del roadmap tras la Iteración 2.06: el CRT ya no termina el update de Remilia 801. La corrida parametrizada `x86_suwako_808_factory_probe.py --character remilia --action 801 --ticks 40` ejecuta el inicializador CRT original `0x824bfa`, la factory `0x784020` y hasta 18 updates del dispatcher `0x7876d0`, hasta `object+0x34c=0`, sin acceso inválido ni error. La prueba aún crea 801 con argumentos controlados (posición `(300,400)`) y el fixture selecciona seq.1; por tanto, no equivale a una invocación natural desde 412. Seq.0 publica una caja PAT tras `0x465e10`; seq.1 no publica caja y se desvanece.
+
+El siguiente enlace verificable es instrumentar el callsite real `0x58cce7 → 0x46eb30` y registrar los argumentos de creación y el índice del callback `0x464980` para estado `+0x140==4`. Después hay que pasar esos valores al factory/update sin forzar secuencia, resolver el callback, y ejecutar el sistema original de colisión antes de afirmar daño o paridad del 2C. El stub de APIs Windows/CRT, heap, PAT lookup/recursos, renderer y servicios externos siguen controlados; la probe no reproduce un combate nativo.
+
+No cambia el runtime Vita ni se genera un VPK en este hito. Validación heredada: regresión Suwako 808, Remilia 801 a 40 ticks y suite Python 39/39 pasan. La evidencia generada localmente bajo `artifacts/` está ignorada por Git; se versionan herramienta, documentos y pruebas, no los DAT/PE originales.

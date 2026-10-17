@@ -6,13 +6,9 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Contenedores auxiliares del objeto 801 — Iteración 2.05
+### Remilia 412 → objeto 801 — Iteración 2.07
 
-Con stubs de Windows/CRT el update de Remilia 801 supera la primera importación, pero termina por excepción CRT `0xc000000d`/`TerminateProcess`. La atribución anterior a contenedores del juego se corrigió: el supuesto cleanup recibía un `ECX` inválido en la ruta de error. Hay que completar el estado CRT/fixture para seguir update sin alterar el dispatcher de personaje. Ver [ITERATION105.md](ITERATION105.md).
-
-### Prueba de factory/pose del objeto 801 — Iteración 2.04
-
-La factory original crea Remilia action 801/seq.1 y el sincronizador PAT publica una caja ofensiva al seleccionar seq.0. Tres updates x86 de seq.1 corren; tick 4 requiere dependencias globales/servicios aún no montados en Unicorn, por lo que no se prueba vida ni daño natural. Resolver el servicio y el setup de secuencia emitido por 412. Ver [ITERATION104.md](ITERATION104.md).
+El CRT ya permite hasta 18 updates originales del objeto 801 y el dispatcher termina con `+0x34c=0`; seq.0 sincroniza una caja PAT y seq.1 no tiene caja y se desvanece. La factory todavía usa posición controlada y el fixture de secuencias, así que no representa la creación natural de 412. Siguiente: capturar argumentos y callback en `0x58cce7 → 0x46eb30 → 0x464980`, alimentar esos valores al factory y seguir colisión/daño. No hay combate completo, runtime Vita ni VPK nuevo. Ver [ITERATION107.md](ITERATION107.md).
 
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 

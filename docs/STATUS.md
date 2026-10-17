@@ -2,7 +2,10 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
-## Iteración 2.06: CRT y ciclo de vida de Remilia 801
+## Iteración 2.07: CRT y siguiente enlace Remilia 412 → 801
+
+- El probe ya permite hasta 18 updates originales de Remilia 801 en el fixture controlado; +0x34c=0, seq.0 sincroniza una caja PAT y seq.1 no tiene caja.
+- Falta conectar dinámicamente argumentos de x58cce7 → 0x46eb30 y callback x464980, alimentar factory sin forzar secuencia y probar colisión/daño. No equivale a combate natural ni genera VPK. Ver [ITERATION107.md](ITERATION107.md).
 
 - Se ejecuta el inicializador CRT original `0x824bfa` con contratos de host controlados para TLS/FLS y heap; el índice inválido `0xffffffff` y la terminación CRT desaparecen.
 - El factory crea action 801/seq.1 con dos poses. El dispatcher original completa 18 ticks hasta `+0x34c=0`; seq.0 sincroniza una caja ofensiva y seq.1 ninguna. No se demuestra manager cleanup ni impacto. Ver [ITERATION106.md](ITERATION106.md).
@@ -682,7 +685,7 @@ La revisión del handler seq.1 mostró que solo integra posición al alcanzar su
 
 ## Iteración 1.70: secuencia radial del objeto 808
 
-El selector de secuencia viene de customData[2] (contrato de initializeAction  0799000 documentado en ITERATION34), no del rg4 independiente de la fábrica. Los custom data del split terminan en 1; la ejecución Unicorn del initializer original confirma +0x13e=1 y el vector radial. La traza 24 callbacks se regeneró. El reloj externo, factory virtual, colisión/ciclo de vida siguen controlados/no probados end-to-end. Suite enfocada 7/7; el VPK sigue sin cambio. Ver [ITERATION70.md](ITERATION70.md).
+El selector de secuencia viene de customData[2] (contrato de initializeAction 0799000 documentado en ITERATION34), no del rg4 independiente de la fábrica. Los custom data del split terminan en 1; la ejecución Unicorn del initializer original confirma +0x13e=1 y el vector radial. La traza 24 callbacks se regeneró. El reloj externo, factory virtual, colisión/ciclo de vida siguen controlados/no probados end-to-end. Suite enfocada 7/7; el VPK sigue sin cambio. Ver [ITERATION70.md](ITERATION70.md).
 
 ## Iteración 1.71: alpha gobierna la integración del objeto 808
 
