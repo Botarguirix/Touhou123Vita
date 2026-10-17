@@ -1,0 +1,7 @@
+# Iteración 1.98: setter real de Remilia 2C hasta PAT seq.0
+
+El análisis del handler `0x59c010` ubica la rama 2C en `0x59dd59–0x59ddb1`: tras las restricciones de estado/recursos consulta `getMoveLock(412)` mediante `0x489610`, y la ruta exitosa pasa el id 412 al setter virtual `0x464930` por el bloque común `0x59d74e`. La tabla de Remilia confirma setter slot 2 `0x464930`, resetSequence slot 4 `0x465370` e initializer slot 15 `0x59aaa0`.
+
+La sonda `tools/x86_remilia_412_action_setter_probe.py` ejecuta en Unicorn los originales `0x464930 → 0x438ca0 → 0x465370 → 0x59aaa0 → 0x59ad64 → 0x4636b0`. La búsqueda asociativa del PAT (`0x43f2f0`) y la callback de pose/render son controladas; las 12 poses vienen de los metadatos locales efectivos de Remilia 412/seq.0. El reporte ignorado `artifacts/kernel/remilia-412-action-setter.json` confirma action 412, secuencia 0, nodo seleccionado, pose 0, pose count 12 y contadores/estado inicializados a cero.
+
+Esta es la cadena de setup después de los gates del handler; no ejecuta el cuerpo completo de input ni el lookup real de moveLock, la actualización por frame, fábricas, manager de colisión o la respuesta de daño. Siguiente: ejecutar el fragmento de input con el gate 412 satisfecho y callbacks de engine acotados, luego observar el update de Remilia y cualquier objeto/contacto; mantener sin cambios el runtime Vita hasta encontrar el origen del daño. Ver [ITERATION94.md](ITERATION94.md)–[ITERATION97.md](ITERATION97.md).

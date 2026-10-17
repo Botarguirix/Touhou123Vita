@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.98: setter de Remilia 2C hasta PAT seq.0
+
+- La ruta de input `0x59dd59–0x59ddb1` consulta moveLock(412) y, si los gates pasan, usa el setter virtual `0x464930`. La sonda ejecuta `0x464930 → 0x438ca0 → 0x465370 → 0x59aaa0 → 0x59ad64 → 0x4636b0`.
+- Resultado: acción 412, seq.0, pose 0, 12 poses PAT; reset de estado/contadores. La búsqueda PAT y la callback de pose/render son controladas; la prueba inicia después de los gates de input y no es combate. Reporte ignorado: `artifacts/kernel/remilia-412-action-setter.json`.
+- Siguiente: ejecutar el gate de moveLock y el update x86 completo de forma instrumentada para encontrar el productor de contacto/daño. Ver [ITERATION98.md](ITERATION98.md).
+
 ## Iteración 1.97: dispatch dinámico de action 412
 
 - La sonda ahora ejecuta el selector original `0x59ab40` con action 412; un hook confirma el salto a `0x59ad64` por el mapa/jump table. `0x4636b0` y el cuerpo también corren desde el PE; todos los campos centinela esperados quedan en cero.
