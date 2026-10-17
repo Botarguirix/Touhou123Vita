@@ -1,0 +1,7 @@
+# Iteración 1.94: sincronización x86 del PAT Remilia 412/seq.0/pose5
+
+La herramienta `tools/x86_remilia_412_box_sync_probe.py` carga el PAT efectivo de `th123c.dat` (SHA-256 `e5ae70d49562120fda4dca1007848cab70dd1a094a6b9a278295615753ba47cd`), instala el descriptor/vector de pose5 `attackBa002.bmp` en el layout `CharacterFrameData` y ejecuta la rutina original `0x465e10` del PE fijado por SHA-256 `f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e` bajo Unicorn.
+
+La corrida confirma daño 750, duración 3, una `collision_box` `[-20,-155,20,-1]`, cuatro hurt boxes y cero attack boxes. El sincronizador publica `hit_box_count=0`, `hurt_box_count=4` y un `collision_box_pointer` no nulo; también transforma la caja de colisión y las cuatro hurt boxes. El reporte reproducible está en `artifacts/kernel/remilia-412-box-sync.json` y se mantiene ignorado junto con los DAT y el PE.
+
+Alcance: los helpers de transformación `0x4640b0/0x464200` se interceptan como copias de coordenadas; el harness construye un objeto/descriptor controlado. No ejecuta el update completo del personaje, la pareja de colisión, la respuesta de combate ni un match nativo. Esto confirma la sincronización del PAT real, pero todavía no determina qué ruta del juego aplica los 750 de daño sin hitbox publicado. Siguiente: enlazar este estado con el manager real de pares/callbacks o hallar la ruta especial de daño. Ver [ITERATION91.md](ITERATION91.md), [ITERATION92.md](ITERATION92.md) y [ITERATION93.md](ITERATION93.md).

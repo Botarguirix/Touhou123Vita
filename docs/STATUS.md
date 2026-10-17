@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.94: PAT Remilia 412 sincronizado por x86 original
+
+- `tools/x86_remilia_412_box_sync_probe.py` instala pose5 `attackBa002.bmp` desde th123c.dat y ejecuta `0x465e10` en Unicorn sobre el PE fijado por hash.
+- Resultado: daño 750/duración 3; 1 collision box, 4 hurt boxes, 0 attack boxes; el sync publica conteo hit 0, hurt 4 y un puntero collision no nulo. Se interceptaron las conversiones geométricas como copias; no es match nativo ni prueba de aplicación del daño.
+- Reporte ignorado: `artifacts/kernel/remilia-412-box-sync.json`. Siguiente: conectar la salida al pair manager/callback de combate y localizar el camino del daño 750. Ver [ITERATION94.md](ITERATION94.md).
+
 ## Iteración 1.93: callbacks de Remilia fuera de 412/seq.0
 
 - Las llamadas a `0x4649b0` en `0x591f6b/0x591ff9` y `0x59243f/0x592498` están en rutinas que guardan secuencias 2 o 3; no coinciden con Remilia 412 seq.0 pose5/750.

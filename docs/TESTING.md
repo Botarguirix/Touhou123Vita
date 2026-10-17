@@ -31,6 +31,8 @@ Para inventariar poses con daño y flags de ataque usa `python tools/summarize_p
 
 Para exportar una ventana de desensamblado del ejecutable fijado, usa `python tools/disassemble_pe_windows.py --window 00465e10:240 --output artifacts/ghidra/selected-window.tsv`. Repite `--window VA:LENGTH` para incluir más direcciones. El script rechaza cualquier PE cuyo SHA-256 no coincida con la referencia documentada. Ver [ITERATION88.md](ITERATION88.md).
 
+Para ejecutar el sincronizador x86 sobre Remilia 412/seq.0/pose5 usa `python tools/x86_remilia_412_box_sync_probe.py`. Toma el PAT efectivo del DAT local y genera `artifacts/kernel/remilia-412-box-sync.json`; las transformaciones geométricas se sustituyen por copias, así que verifica conteos/layout y no un impacto en combate. Ver [ITERATION94.md](ITERATION94.md).
+
 Para automatización reproducible se recomienda una versión de Vita3K con `--frontend sdl` y añadir `-Frontend sdl` al runner. No usar `--console` para ejecutar por Title ID: es un modo de instalación. El modo portátil se activa con una carpeta `portable` al lado del ejecutable; el FAQ oficial describe esta disposición. La copia local conserva el nombre `Vita3K.exe` y no modifica la instalación compartida.
 
 `tools/run-all.ps1` encadena pruebas host, compilación Vita, VPK automático y validación Vita3K en una sola ejecución. Requiere font/assets y VitaFS preparados. `tools/play.ps1` instala la variante interactiva en el VitaFS local, retira conservando el indicador de autoprueba y abre una ventana para jugar.
