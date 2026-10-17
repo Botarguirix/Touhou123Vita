@@ -4,7 +4,7 @@ Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
 ## Iteración 2.04: factory x86 del objeto Remilia 801
 
-- Factory e initializer originales crean action 801/seq.1; `0x465e10` publica una hitbox al seleccionar seq.0 y ninguna en seq.1. El update avanza tres ticks, pero el cuarto falla al tocar una dependencia de host no inicializada (`EIP=0x4818c2`); ciclo de vida/daño aún no verificados.
+- Factory e initializer originales crean action 801/seq.1; `0x465e10` publica una hitbox al seleccionar seq.0 y ninguna en seq.1. El update avanza tres ticks; el cuarto intenta `KERNEL32!TlsGetValue` por IAT `0x857190`, cuyo puntero sin resolver (`0x8a896c0d`) provoca la excepción. Ciclo de vida/daño aún no verificados.
 - Se generalizó el harness y la regresión Suwako 808 completa ocho ticks. Falta preparar los servicios del tick 4 y alimentar el setup/seq que usa Remilia 412. Sin cambio Vita/VPK. Ver [ITERATION104.md](ITERATION104.md).
 
 ## Iteración 2.03: acción y hitboxes del objeto 801

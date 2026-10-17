@@ -20,8 +20,12 @@ sys.path.insert(0, str(ROOT))
 
 import pefile
 from tools.extract_pat_pose_metadata import action_sequence_metadata, read_pat
-from unicorn import Uc, UC_ARCH_X86, UC_HOOK_CODE, UC_MODE_32
-from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESP
+from unicorn import Uc, UC_ARCH_X86, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_MODE_32
+from unicorn.x86_const import (
+    UC_X86_REG_EAX, UC_X86_REG_EBP, UC_X86_REG_EBX, UC_X86_REG_ECX,
+    UC_X86_REG_EDI, UC_X86_REG_EDX, UC_X86_REG_EIP, UC_X86_REG_ESI,
+    UC_X86_REG_ESP,
+)
 
 REFERENCE_SHA256 = "f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e"
 LIST, OWNER, OWNER_DATA, PAT_MAP = 0x01000000, 0x01010000, 0x01020000, 0x01030000
@@ -71,11 +75,19 @@ class Suwako808FactoryProbe:
         self.intercept_box_transforms = intercept_box_transforms
         self._trace_active = False
         self._code_trace: list[int] = []
+        self._invalid_memory: list[dict[str, int]] = []
         self.dat_dir = dat_dir or ROOT / "original"
         self.character = character
         self.action_id = action_id
         self.pat_fixture: dict[str, object] = {}
         self.uc.hook_add(UC_HOOK_CODE, self._hook)
+        self.uc.hook_add(UC_HOOK_MEM_INVALID, self._invalid_mem_hook)
+
+    def _invalid_mem_hook(self, _uc: Uc, access: int, address: int, size: int,
+                          value: int, _user: object) -> bool:
+        self._invalid_memory.append({"access": access, "address": address,
+                                     "size": size, "value": value})
+        return False
 
     def _return(self, esp: int, cleanup: int = 0) -> None:
         uc = self.uc
@@ -258,6 +270,7 @@ class Suwako808FactoryProbe:
         self.events.clear()
         self.box_transform_calls.clear()
         self.box_transform_entries.clear()
+        self._invalid_memory.clear()
 
         # Execute the actual object-list/handle-manager constructor.
         sp = STACK + 0x7000 - 4
@@ -358,8 +371,13 @@ class Suwako808FactoryProbe:
                     uc.emu_start(0x007876D0, STOP, count=100000)
                 except Exception as exc:
                     trail = ",".join(hex(item) for item in self._code_trace[-24:])
+                    regs = {name: f"{uc.reg_read(register):#x}" for name, register in (
+                        ("eax", UC_X86_REG_EAX), ("ebx", UC_X86_REG_EBX),
+                        ("ecx", UC_X86_REG_ECX), ("edx", UC_X86_REG_EDX),
+                        ("esi", UC_X86_REG_ESI), ("edi", UC_X86_REG_EDI),
+                        ("ebp", UC_X86_REG_EBP), ("esp", UC_X86_REG_ESP))}
                     update_error = (f"tick {tick + 1}: {type(exc).__name__}: {exc}; "
-                                    f"EIP={uc.reg_read(UC_X86_REG_EIP):#x}; trace={trail}")
+                                    f"EIP={uc.reg_read(UC_X86_REG_EIP):#x}; regs={regs}; trace={trail}")
                     break
                 finally:
                     self._trace_active = False
@@ -412,6 +430,7 @@ class Suwako808FactoryProbe:
             "events": self.events,
             "box_transform_calls": self.box_transform_calls,
             "box_transform_entries": self.box_transform_entries,
+            "invalid_memory_accesses": self._invalid_memory,
             "box_sync": getattr(self, "box_sync", None),
             "pat_fixture": self.pat_fixture,
             "scope": "Original list constructor, object constructor, 0x784020 factory and 0x7876d0 update dispatcher execute from the PE when they return at STOP. The dispatcher probe stops on +0x34c==0; it does not invoke manager cleanup. PAT durations/hurt/attack boxes are decoded from the hashed local DAT and installed into CharacterFrameData vector layout; the original setPose and 0x465e10 box synchronizer execute for seq.0/1. The real action-808 descriptors do not reach 0x4640b0/0x464200 during this sync. Renderer, heap, locks, trig, RNG, stage floor and collision remain controlled. This is not a native game-loop or full scenario trace.",
