@@ -19,6 +19,7 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(plus["initialized_action"]["sequence"], 0)
         self.assertEqual(plus["initialized_action"]["pose"], 0)
         self.assertEqual(plus["initialized_action"]["pose_count"], 12)
+        self.assertEqual(plus["initialized_action"]["original_pose_advances"], [1, 2, 3, 4])
         self.assertEqual(plus["initialized_action"]["initializer_chain"], [
             "0x464930", "0x438ca0", "0x465370", "0x59aaa0", "0x59ad64", "0x4636b0"]
         )

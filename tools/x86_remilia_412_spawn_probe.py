@@ -60,6 +60,8 @@ def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[s
     uc.mem_write(SEQUENCE_NODE + 4,
                  struct.pack("<II", FRAME_DATA, FRAME_DATA + len(frames) * 0xA8))
     uc.mem_write(SEQUENCE_NODE + 0x14, b"\x00")
+    for index, frame in enumerate(frames):
+        uc.mem_write(FRAME_DATA + index * 0xA8 + 8, struct.pack("<H", int(frame["duration"])))
     uc.mem_write(SEQUENCE_NODE + 0x1C, struct.pack("<I", SEQUENCE_NODE))
 
     reached: list[str] = []
@@ -96,6 +98,21 @@ def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[s
     }
     if (state["action"], state["sequence"], state["pose"], state["pose_count"]) != (412, 0, 0, len(frames)):
         raise AssertionError(f"original action setter did not initialize 412/seq0: {state}")
+
+    advanced: list[int] = []
+    for _ in range(4):
+        sp = STACK + 0xB100
+        uc.mem_write(sp, struct.pack("<I", STOP))
+        uc.reg_write(UC_X86_REG_ESP, sp)
+        uc.reg_write(UC_X86_REG_ECX, PLAYER)
+        uc.reg_write(UC_X86_REG_EIP, 0x00464B70)  # Remilia vtable slot 8: advance pose
+        uc.emu_start(0x00464B70, STOP, count=10000)
+        if uc.reg_read(UC_X86_REG_EIP) != STOP:
+            raise RuntimeError(f"original pose advance failed at {uc.reg_read(UC_X86_REG_EIP):#x}")
+        advanced.append(struct.unpack("<H", uc.mem_read(PLAYER + 0x140, 2))[0])
+    if advanced != [1, 2, 3, 4]:
+        raise AssertionError(f"unexpected original pose progression: {advanced}")
+    state["original_pose_advances"] = advanced
     return state
 
 
@@ -109,9 +126,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     initialized_action = initialize_action_412(probe, dat_dir)
     uc.mem_write(CALLBACKS, bytes(0x500))
     uc.mem_write(PLAYER + 0x164, struct.pack("<I", CALLBACKS))
-    # Pose 4 selects the original spawn branch; the player animation updater
-    # that advances pose 0 to pose 4 is still outside this probe.
-    uc.mem_write(PLAYER + 0x140, struct.pack("<H", 4))
+    # The original vtable pose-advance method has already reached pose 4.
     uc.mem_write(PLAYER + 0x142, struct.pack("<H", 0))
     uc.mem_write(PLAYER + 0x104, struct.pack("<b", facing))
     uc.mem_write(PLAYER + 0xEC, struct.pack("<f", x))
@@ -198,7 +213,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     return {
         "initialized_action": initialized_action,
         "input_fixture": {"position": [x, y], "facing": facing,
-                          "pose_override_after_initializer": 4,
+                          "pose_after_original_advances": initialized_action["original_pose_advances"][-1],
                           "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,
         "callback_dispatch": callback,
@@ -209,7 +224,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             "gauge_5e4": struct.unpack("<H", uc.mem_read(PLAYER + 0x5E4, 2))[0],
         },
         "error": errors or None,
-        "scope": "Original action setter/initializer chain 0x464930..0x59ad64 runs to produce action 412/seq.0/pose 0; a fixture advances pose to 4 because the player animation updater is unresolved. The original main-update action comparison 0x587bab, dispatch 0x58a3a1, handler 0x58cce7, 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 callback-table lookup execute. EBX=1 is seeded to match the value loaded by the skipped prologue at 0x5879cf; callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0/0x438c60 status services are fixtures. Does not execute full 0x5879a0 update, instantiate/update 801, run collision, or apply damage.",
+        "scope": "Original action setter/initializer chain 0x464930..0x59ad64 runs to produce action 412/seq.0/pose 0; four original Remilia vtable pose-advance calls then reach pose 4. The original main-update action comparison 0x587bab, dispatch 0x58a3a1, handler 0x58cce7, 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 callback-table lookup execute. EBX=1 is seeded to match the value loaded by the skipped prologue at 0x5879cf; callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0/0x438c60 status services are fixtures. Does not execute full 0x5879a0 update, instantiate/update 801, run collision, or apply damage.",
     }
 
 
