@@ -69,9 +69,12 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     spawn: dict[str, object] = {}
     callback: dict[str, object] = {}
     errors: list[str] = []
+    original_helpers: list[str] = []
 
     def hook(machine, address: int, _size: int, _user: object) -> None:
         esp = machine.reg_read(UC_X86_REG_ESP)
+        if address in (0x0047A9E0, 0x00487870, 0x00820230):
+            original_helpers.append(hex(address))
         if address == CREATE_OBJECT_WRAPPER:
             words = struct.unpack("<8I", machine.mem_read(esp, 32))
             ptr = words[6]
@@ -106,16 +109,6 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             machine.reg_write(UC_X86_REG_EIP, ret)
         elif address == HANDLER_EPILOGUE:
             machine.emu_stop()
-        elif address == 0x0047A9E0:
-            # Preserve state setup and arithmetic while skipping the real
-            # resource/meter side effect outside this isolated spawn probe.
-            ret = u32(machine, esp)
-            machine.reg_write(UC_X86_REG_ESP, esp + 12)
-            machine.reg_write(UC_X86_REG_EIP, ret)
-        elif address == 0x00487870:
-            ret = u32(machine, esp)
-            machine.reg_write(UC_X86_REG_ESP, esp + 8)
-            machine.reg_write(UC_X86_REG_EIP, ret)
 
     uc.hook_add(UC_HOOK_CODE, hook)
     uc.mem_write(entry_sp, struct.pack("<I", STOP))
@@ -138,8 +131,13 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                           "callback_index_fixture": callback_index},
         "spawn_call": spawn,
         "callback_dispatch": callback,
+        "original_helpers_reached": original_helpers,
+        "post_spawn_fields": {
+            "meter_49e": struct.unpack("<H", uc.mem_read(PLAYER + 0x49E, 2))[0],
+            "gauge_5e4": struct.unpack("<H", uc.mem_read(PLAYER + 0x5E4, 2))[0],
+        },
         "error": errors or None,
-        "scope": "Original state-4 callsite instructions and original 0x464980 callback-table lookup execute from the hash-pinned PE. Entry state and EBX are fixtures; the object manager return and callback dispatcher are controlled boundaries. Does not prove natural reachability, instantiate/update 801, run collision, or apply damage.",
+        "scope": "Original 0x47a9e0/0x487870 helpers, state-4 spawn callsite instructions, and 0x464980 callback-table lookup execute from the hash-pinned PE. Entry state and EBX are fixtures; the object manager return and external 0x401d50 dispatcher are controlled boundaries. Does not prove natural reachability, instantiate/update 801, run collision, or apply damage.",
     }
 
 

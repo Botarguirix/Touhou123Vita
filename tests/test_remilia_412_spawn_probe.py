@@ -23,6 +23,8 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(plus["spawn_call"]["temporary_float_block"], [-70.0, 12.0, 0.0])
         self.assertEqual(plus["callback_dispatch"]["index"], 3)
         self.assertEqual(plus["callback_dispatch"]["selected_function_pointer"], "0x12345678")
+        self.assertEqual(plus["original_helpers_reached"], ["0x47a9e0", "0x487870", "0x820230"])
+        self.assertEqual(plus["post_spawn_fields"], {"meter_49e": 800, "gauge_5e4": 50})
         self.assertEqual(minus["callback_dispatch"]["action"], 412)
         self.assertEqual(minus["callback_dispatch"]["substate"], 4)
 
