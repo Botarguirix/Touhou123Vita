@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.93: callbacks de Remilia fuera de 412/seq.0
+
+- Las llamadas a `0x4649b0` en `0x591f6b/0x591ff9` y `0x59243f/0x592498` están en rutinas que guardan secuencias 2 o 3; no coinciden con Remilia 412 seq.0 pose5/750.
+- Sus funciones `0x591c24` y `0x5920d8` aparecen como punteros en datos locales alrededor de `0x5992c8`; el consumidor y la asociación action→índice faltan. No afirmar que sea tabla de action 412.
+- Siguiente: recuperar consumidor e índice de callbacks y contrastar la ruta 412 en x86. Sin cambio de runtime/VPK. Ver [ITERATION93.md](ITERATION93.md).
+
 ## Iteración 1.92: candidato de callback de daño en Remilia
 
 - Se localizaron cinco callsites directos de `0x4799b0`; cuatro están en el flujo de colisión/respuesta. `0x47b1d0` también se invoca desde el wrapper `0x4649b0` (`0x4649d2`), que recibe personaje, rival y parámetros de daño.
