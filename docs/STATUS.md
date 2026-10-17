@@ -2,6 +2,11 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 2.03: acción y hitboxes del objeto 801
+
+- El ID 801 resuelve por las tablas originales a initializer `0x7991a5` y update `0x7879da` (grupo 1 en ambos mapas). El PAT efectivo de Remilia define 801: seq.0 tiene 20 poses con daño 120 y caja ofensiva en todas; seq.1 no daña; seq.2 tiene 20 poses con daño 100 y caja ofensiva en todas.
+- 801 ya es un atacante confirmado por datos; queda probar su factory/update/ciclo de vida y si sus contactos explican el 2C 412/750. Sin runtime/VPK nuevo. Ver [ITERATION103.md](ITERATION103.md).
+
 ## Iteración 2.02: contrato del objeto 801
 
 - La llamada `0x46eb30` desde el handler especial de action 412 es el wrapper de `Player::createObject`: solicita el objeto 801 con coordenadas derivadas del jugador/facing. Después se invoca el callback indexado `0x464980`.

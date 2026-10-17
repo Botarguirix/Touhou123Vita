@@ -6,6 +6,10 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
+### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
+
+El ID 801 selecciona initializer `0x7991a5` y update `0x7879da`; el PAT de Remilia tiene seq.0 con daño 120/caja ofensiva durante 20 poses y seq.2 con daño 100/caja ofensiva durante 20 poses. La ruta 412 crea 801, así que ya hay un candidato atacante concreto. Falta correr factory/update/colisión y probar el daño acumulado frente al 750 del PAT dueño. Ver [ITERATION103.md](ITERATION103.md).
+
 ### Remilia 412: factory del objeto 801 — Iteración 2.02
 
 `0x46eb30` es el wrapper de `Player::createObject`; la rama especial de action 412 lo llama con ID 801 y posición relativa al jugador en el subestado 4. Le sigue el callback indexado `0x464980`. Esto da un objetivo claro para el siguiente tramo: resolver factory, initializer, update y colisión de 801, y comprobar el daño contra el oracle x86. El objeto aún no está probado como fuente de los 750 PAT. Ver [ITERATION102.md](ITERATION102.md).
