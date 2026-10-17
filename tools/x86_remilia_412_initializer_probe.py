@@ -13,8 +13,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "local/python-deps"))
 
 import pefile
+from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import (UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESI,
-                               UC_X86_REG_ESP)
+                               UC_X86_REG_EAX, UC_X86_REG_ESP)
 from tools.x86_suwako_808_factory_probe import (
     LIST, STACK, STOP, Suwako808FactoryProbe,
 )
@@ -23,6 +24,7 @@ EXE = ROOT / "original/th123.exe"
 ACTION = 412
 ACTION_MAP = 0x0059B380
 INIT_JUMP_TABLE = 0x0059B32C
+INITIALIZER_DISPATCH = 0x0059AB40
 OBJECT = LIST + 0x8000
 
 
@@ -68,10 +70,20 @@ def run(exe: Path, dat_dir: Path) -> dict[str, object]:
     uc.reg_write(UC_X86_REG_ESP, sp)
     uc.reg_write(UC_X86_REG_ECX, OBJECT)
     uc.reg_write(UC_X86_REG_ESI, OBJECT)
-    uc.reg_write(UC_X86_REG_EIP, init_va)
-    uc.emu_start(init_va, STOP, count=10000)
+    uc.reg_write(UC_X86_REG_EAX, ACTION)
+    uc.reg_write(UC_X86_REG_EIP, INITIALIZER_DISPATCH)
+    executed_targets: list[str] = []
+
+    def trace_target(_uc, address: int, _size: int, _user: object) -> None:
+        if address == init_va:
+            executed_targets.append(hex(address))
+
+    uc.hook_add(UC_HOOK_CODE, trace_target)
+    uc.emu_start(INITIALIZER_DISPATCH, STOP, count=10000)
     if uc.reg_read(UC_X86_REG_EIP) != STOP:
         raise RuntimeError(f"initializer did not return: EIP={uc.reg_read(UC_X86_REG_EIP):#x}")
+    if executed_targets != [hex(init_va)]:
+        raise AssertionError(f"dispatcher did not reach exactly {init_va:#x}: {executed_targets}")
 
     values = {
         "state_190": struct.unpack("<I", uc.mem_read(OBJECT + 0x190, 4))[0],
@@ -89,9 +101,11 @@ def run(exe: Path, dat_dir: Path) -> dict[str, object]:
         raise AssertionError(f"initializer outputs differ: {values}")
     return {
         "action": ACTION, "map_index": index, "dispatch_group": group,
-        "initializer_va": hex(init_va), "executed_helpers": ["0x4636b0"],
+        "dispatcher_va": hex(INITIALIZER_DISPATCH),
+        "initializer_va": hex(init_va), "executed_targets": executed_targets,
+        "executed_helpers": ["0x4636b0"],
         "outputs": values,
-        "scope": "The PE action map and jump table resolve 412 to 0x59ad64; that original body and its original 0x4636b0 helper execute in Unicorn with controlled object memory. This verifies initializer effects only; it does not execute the full character update or a fight.",
+        "scope": "The original action initializer dispatcher 0x59ab40 executes with action 412, reaches original body 0x59ad64 through the PE map/jump table, then executes original helper 0x4636b0 in Unicorn with controlled object memory. This verifies initializer effects only; it does not execute the full character update or a fight.",
     }
 
 

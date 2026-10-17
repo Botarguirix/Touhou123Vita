@@ -2,6 +2,11 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.97: dispatch dinámico de action 412
+
+- La sonda ahora ejecuta el selector original `0x59ab40` con action 412; un hook confirma el salto a `0x59ad64` por el mapa/jump table. `0x4636b0` y el cuerpo también corren desde el PE; todos los campos centinela esperados quedan en cero.
+- Reporte ignorado actualizado: `artifacts/kernel/remilia-412-initializer.json`. Aún falta el caller de input/setter, update completo, factories y primer impacto. Ver [ITERATION97.md](ITERATION97.md).
+
 ## Iteración 1.96: ejecución del initializer Remilia 412
 
 - Se añadió `tools/x86_remilia_412_initializer_probe.py`: el mapa/jump table original resuelve action 412 a grupo 15 y `0x59ad64`; Unicorn ejecuta el cuerpo y `0x4636b0` del PE.
