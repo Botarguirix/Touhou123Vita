@@ -6,9 +6,9 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Gate de reconstrucción — Iteración 1.82
+### Gate de reconstrucción — Iteración 1.83
 
-Build VitaSDK fresco, VPK de 95,972 bytes, SHA-256 `d361adfe700db32c6789d8eb2288d4c39d723c8d020bc3a4b92ed9b22b830318`; Vita3K SDL aislado schema28 pasó 600 frames. La regresión confirma roster de recursos 20/20, cero fallos PAT/textura, combate de prototipo y BG34 (30+30 tiles, 4 assets estáticos, 30 objetos). No confirma 20 personajes jugables, un combate completo ni paridad; `a_hits=0`, los demás escenarios y sus mecánicas siguen pendientes. El VPK y la evidencia permanecen locales en `artifacts/`. Ver [ITERATION82.md](ITERATION82.md) y [STATUS.md](STATUS.md).
+Build VitaSDK fresco, VPK de 96,162 bytes, SHA-256 `c4fb9924259113e14ba0cdb9f39691c2fa03dc6398b16c335f7cee1523936605`; Vita3K SDL aislado schema29 pasó 600 frames. El nuevo gate prueba con geometría PAT un ataque A seleccionable y con daño correcto por cada uno de los 20 personajes (`roster_a_attack_mask=0xFFFFF`), además de mantener recursos 20/20, cero fallos de textura y BG34 (30+30 tiles, 4 assets estáticos, 30 objetos). Es colocación controlada: el combate automatizado aún registra `a_hits=0`, por lo que la conexión natural y la paridad no están demostradas. Los otros escenarios y sus mecánicas siguen pendientes. El VPK y la evidencia permanecen locales en `artifacts/`. Ver [ITERATION83.md](ITERATION83.md), [ITERATION82.md](ITERATION82.md) y [STATUS.md](STATUS.md).
 
 ### Seguimiento activo de objetos — Iteración 1.81
 

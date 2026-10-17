@@ -2,6 +2,15 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.83: gate de ataque A con PAT de todo el roster
+
+- Agregué un probe al auto-test que recorre los 20 PAT cargados y prueba entradas de ataque terrestre A (acciones 300/302/303/304/330). Usa sus cajas PAT de ataque y hurt, deja que `fight_step` recorra la animación y solo cuenta la ruta si el combate registra un impacto A y el daño coincide con el valor de la pose que golpeó.
+- La corrida fresca Vita3K SDL schema29 pasó 600 frames con `roster_a_attack_mask=1048575` (`0xFFFFF`), es decir 20/20. El build y el runner ahora exigen esa máscara completa. VPK: 96,162 bytes, SHA-256 `c4fb9924259113e14ba0cdb9f39691c2fa03dc6398b16c335f7cee1523936605`.
+- Límite importante: el probe coloca los luchadores según la geometría PAT para garantizar la intersección; demuestra que cada PAT ofrece al menos una ruta A seleccionable que aplica su daño, pero no demuestra que el jugador conecte naturalmente en una partida. En la pelea principal del escenario automatizado `a_hits` sigue en 0 mientras B/C dan 1/1. Guard, cancelación, timing original y paridad por personaje siguen abiertos.
+- Se conservan 20/20 PAT/sprites/tarjetas, cero fallos de textura, 148 texturas y la regresión BG34. El siguiente trabajo es medir y corregir encuentros A/B/C naturales con spacing y tiempo de animación trazados, luego extender la misma comprobación a ataques aéreos, skills y objetos del roster.
+
+Ver [ITERATION83.md](ITERATION83.md).
+
 ## Iteración 1.82: rebuild fresco y regresión Vita3K
 
 - `tools/build-vita-native.ps1 -Output artifacts/Touhou123Vita-current-auto.vpk -AutoTest` compiló desde las fuentes actuales con VitaSDK. VPK: 95,972 bytes, SHA-256 `d361adfe700db32c6789d8eb2288d4c39d723c8d020bc3a4b92ed9b22b830318`.
