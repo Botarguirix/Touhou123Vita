@@ -85,6 +85,9 @@ La Iteración 1.48 ejecuta `nextPose` y localiza la transición de touchdown: ac
 | M6: demo integral | Flujo de selección, combate, fin de ronda y galería completa dentro del VPK | Recorrido de todos los personajes y escenarios en Vita3K, cargas/reinicios y regresión determinista | Pendiente |
 | M7: rendimiento y hardware | Perfil de CPU/GPU/memoria, optimización del renderer y prueba física | Objetivos FPS acordados sostenidos en PS Vita y sin regresiones visuales/funcionales | Pendiente; Vita física aún no probada |
 
+## Herramientas y aceleración de pruebas (2026-10-17)
+
+La revisión de recursos externos prioriza ReplayInputView+/LabTool de SokuMods para obtener una traza PC controlable de entradas, hitboxes y frame data; es más directa para cerrar la interacción Remilia que añadir de inmediato un solver. El artículo SMT compartido inspira un experimento acotado de ejecución simbólica para resolver guards y producir fixtures, verificados luego por Unicorn. El harness actual de Vita3K es una regresión integral de 600 frames; documentamos una escalera host → sonda x86 → smoke corto → gate full, y proponemos perfiles separados `smoke`/`full` como mejora futura. Detalle y enlaces: [ANALYSIS_AND_TESTING_TOOLING.md](ANALYSIS_AND_TESTING_TOOLING.md).
 ## Siguiente secuencia de trabajo
 
 1. La demo interactiva actual incluye la galería de 20 PAT. El gate automático comprueba entradas de navegación y textura, pero no es un build de juego completo. Las tarjetas `data/stand/<slug>.cv2` son arte de selección, no frames de pelea.
@@ -134,3 +137,4 @@ Se corrige una suposición del harness 808: `object+0x113` es alpha; el valor in
 El ctor aislado `783a70` y la cadena `setAction→setSequence→initializeAction` ya corren con asignaciones internas cdecl controladas y mapa PAT sintético. El constructor del sprite deja color blanco/alpha 255; los setters preservan el color. Sigue pendiente integrar manager/handles del factory, además de frame data auténtico, colisión y vida antes de portar. Véase [ITERATION72.md](ITERATION72.md).
 
 La prueba aislada `x86_suwako_808_action_probe.py` ahora ejecuta `setAction→setSequence→setPose→initializeAction` con mapa PAT sintético y demuestra la selección de seq.1/frame0, la velocidad radial, y que no hay escritura de RenderInfo al inicializar. El alpha de entrada depende todavía del allocator/pool de la factory; no marcar el proyectil completo ni portarlo hasta medir la asignación/reuso y recuperar update/colisión/vida. Ver [ITERATION72.md](ITERATION72.md).
+
