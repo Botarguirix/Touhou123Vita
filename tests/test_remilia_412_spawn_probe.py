@@ -71,6 +71,14 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(manager["live_node_count"], 6)
         self.assertEqual(manager["live_node_actions"], ["801"] * 6)
         self.assertEqual(len(report["factory_returns"]), 19)
+        helper_calls = report["create_object_helper_calls"]
+        self.assertEqual(len(helper_calls), 19)
+        self.assertTrue(all(row["this"] == child["pointer"] for row in helper_calls))
+        self.assertTrue(all(row["return_address"] == "0x787a85" for row in helper_calls))
+        self.assertTrue(all(row["this_action"] == 801 and row["this_mode_190"] == 0
+                            for row in helper_calls))
+        self.assertEqual([row["this_pose"] for row in helper_calls],
+                         [0, 3, 6, 9, 12, 15, 18, 1, 4, 7, 10, 13, 16, 19, 2, 5, 8, 11, 14])
 
 
 if __name__ == "__main__":

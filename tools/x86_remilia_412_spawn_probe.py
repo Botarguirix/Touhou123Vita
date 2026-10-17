@@ -177,6 +177,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     manager_node_visits: list[dict[str, str]] = []
     factory_calls: list[dict[str, str]] = []
     factory_returns: list[dict[str, str]] = []
+    create_object_helper_calls: list[dict[str, object]] = []
 
     def hook(machine, address: int, _size: int, _user: object) -> None:
         esp = machine.reg_read(UC_X86_REG_ESP)
@@ -207,7 +208,26 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             result_ptr = machine.reg_read(UC_X86_REG_EAX)
             factory_returns.append({"pointer": hex(result_ptr),
                                     "action": str(struct.unpack("<H", machine.mem_read(result_ptr + 0x13C, 2))[0])
+                                    if result_ptr > 0x1000 else "invalid",
+                                    "mode_190": str(u32(machine, result_ptr + 0x190))
+                                    if result_ptr > 0x1000 else "invalid",
+                                    "field_34c": str(u32(machine, result_ptr + 0x34C))
                                     if result_ptr > 0x1000 else "invalid"})
+        if real_factory and address == 0x0059B6C0:
+            helper_this = machine.reg_read(UC_X86_REG_ECX)
+            helper_sp = machine.reg_read(UC_X86_REG_ESP)
+            create_object_helper_calls.append({
+                "return_address": hex(u32(machine, helper_sp)),
+                "this": hex(helper_this),
+                "this_action": struct.unpack("<H", machine.mem_read(helper_this + 0x13C, 2))[0]
+                if helper_this > 0x1000 else None,
+                "this_pose": struct.unpack("<H", machine.mem_read(helper_this + 0x140, 2))[0]
+                if helper_this > 0x1000 else None,
+                "this_mode_190": u32(machine, helper_this + 0x190)
+                if helper_this > 0x1000 else None,
+                "stack_arguments": [hex(u32(machine, helper_sp + offset))
+                                    for offset in (4, 8, 12, 16, 20, 24, 28)],
+            })
         if address == 0x00487CA0:
             ret = u32(machine, esp)
             machine.reg_write(UC_X86_REG_ESP, esp + 4)
@@ -444,6 +464,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "manager_node_visits": manager_node_visits,
         "factory_calls": factory_calls,
         "factory_returns": factory_returns,
+        "create_object_helper_calls": create_object_helper_calls,
         "collision_matrix": collision_matrix,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,

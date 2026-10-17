@@ -80,6 +80,7 @@ def main() -> int:
     # Reading the pointer table with the raw action index silently selected
     # unrelated callbacks in earlier versions of this report.
     object_actions = {
+        "remilia_801_update": (0x321, 0x7879DA),
         "suwako_808_update": (0x328, 0x788D3E),
         "suwako_989_update": (0x320 + 189, 0x797884),
     }
@@ -91,6 +92,33 @@ def main() -> int:
         if actual != expected:
             raise SystemExit(f"{name} dispatch changed: action={action_id:#x}, group={group}, handler={actual:#x} != {expected:#x}")
         update_dispatch[name] = {"action_id": hex(action_id), "group": group, "handler": hex(actual)}
+    remilia_801_sequence_zero = u32(0x798C38)
+    remilia_801_signatures = {
+        "sequence_zero_handler": (0x798C38, 0x7879F1),
+        "special_mode_gate": (0x7879F1, bytes.fromhex("83 be 90 01 00 00 05 74 d1")),
+        "spawn_counter_modulus_three": (0x787A0F, bytes.fromhex("b9 03 00 00 00")),
+        "spawn_counter_division_gate": (0x787A28, bytes.fromhex("8b 86 44 01 00 00 99 f7 f9 85 d2 75 52")),
+        "owner_factory_vtable_offset": (0x787A66, bytes.fromhex("8b 16 8b 52 44")),
+        "spawn_action_801_call": (0x787A7E, bytes.fromhex("68 21 03 00 00 ff d2")),
+    }
+    remilia_801_signature_evidence = {}
+    for name, (address, expected) in remilia_801_signatures.items():
+        actual = u32(address) if name == "sequence_zero_handler" else code(address, len(expected))
+        if actual != expected:
+            raise SystemExit(f"Remilia 801 update contract {name} changed: {actual!r}")
+        remilia_801_signature_evidence[name] = hex(address)
+    remilia_801_spawn_contract = {
+        "action_id": "0x321 (801)",
+        "update_handler": update_dispatch["remilia_801_update"]["handler"],
+        "sequence_zero_handler": hex(remilia_801_sequence_zero),
+        "spawn_suppression": "object+0x190 == 5 branches around the spawn path",
+        "cadence": "spawn when object+0x144 % 3 == 0",
+        "factory_dispatch": "object vtable +0x44",
+        "spawned_action_id": "0x321 (801)",
+        "position_source": ["object+0xec", "object+0xf0"],
+        "pinned_signatures": remilia_801_signature_evidence,
+        "evidence_level": "pinned PE signatures plus dynamic manager trace: initial Remilia child issued 19 801 factory requests across 55 manager ticks",
+    }
     suwako_808_entry = int(update_dispatch["suwako_808_update"]["handler"], 16)
     suwako_808_cfg, suwako_808_calls = reachable_direct_calls(pe, suwako_808_entry)
     suwako_808_reachable_calls = {
@@ -127,7 +155,7 @@ def main() -> int:
         "callback_then_termination_check": True,
         "termination_field": "object+0x34c",
         "zero_behavior": "unlink node, remove generational handle via 0x0045ed10, delete list node, decrement count",
-        "evidence_level": "pinned disassembly contract; dynamic manager/factory loop not yet integrated into the harness",
+        "evidence_level": "pinned disassembly plus dynamic Remilia 801 manager lifecycle in ITERATION112; full match and pair-response path remain unverified",
     }
     # The action initializer uses a separate two-level table. Base object
     # initialization zeros vx/vy; Suwako 808's action-specific constructor
@@ -337,6 +365,7 @@ def main() -> int:
     print(json.dumps({
         "sha256": digest,
         "update_dispatch": update_dispatch,
+        "remilia_801_spawn_contract": remilia_801_spawn_contract,
         "suwako_808_seq0_update": hex(suwako_808_sequence_zero),
         "generic_pat_frame_selection": frame_selection_contract,
         "gameobject_box_sync": box_sync_contract,

@@ -25,6 +25,14 @@ class ObjectMotionAnalysisTest(unittest.TestCase):
         self.assertEqual(report["update_dispatch"]["suwako_989_update"], {
             "action_id": "0x3dd", "group": 46, "handler": "0x797884",
         })
+        self.assertEqual(report["update_dispatch"]["remilia_801_update"], {
+            "action_id": "0x321", "group": 1, "handler": "0x7879da",
+        })
+        spread = report["remilia_801_spawn_contract"]
+        self.assertEqual(spread["sequence_zero_handler"], "0x7879f1")
+        self.assertIn("object+0x144 % 3 == 0", spread["cadence"])
+        self.assertEqual(spread["factory_dispatch"], "object vtable +0x44")
+        self.assertEqual(spread["spawned_action_id"], "0x321 (801)")
         reachable = report["suwako_808_reachable_calls"]
         self.assertEqual(reachable["entry"], "0x788d3e")
         self.assertEqual(reachable["reachable_instruction_count"], 219)
@@ -43,7 +51,7 @@ class ObjectMotionAnalysisTest(unittest.TestCase):
         self.assertEqual(lifecycle["termination_field"], "object+0x34c")
         self.assertIn("unlink node", lifecycle["zero_behavior"])
         self.assertEqual(lifecycle["evidence_level"],
-                         "pinned disassembly contract; dynamic manager/factory loop not yet integrated into the harness")
+                         "pinned disassembly plus dynamic Remilia 801 manager lifecycle in ITERATION112; full match and pair-response path remain unverified")
         frame_selection = report["generic_pat_frame_selection"]
         self.assertIn("stores pose at object+0x140", frame_selection["set_pose"])
         self.assertIn("object+0x158 and +0x150", frame_selection["selector"])
