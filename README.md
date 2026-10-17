@@ -9,6 +9,7 @@ El repositorio contiene código, pruebas y documentación. Los ejecutables de PC
 ## Documentación
 
 - [Roadmap y criterios de aceptación](docs/ROADMAP.md)
+- [Iteración 2.20: update original 5AAA y lookup de spell background](docs/ITERATION120.md)
 - [Iteración 2.19: dispatcher original del defensor y estado inválido](docs/ITERATION119.md)
 - [Iteración 1.90: caja collision de Remilia 2C](docs/ITERATION90.md)
 - [Iteración 1.89: handler x86 de Remilia 2C](docs/ITERATION89.md)

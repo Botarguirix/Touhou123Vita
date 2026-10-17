@@ -109,6 +109,16 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(update["termination_context"], {
             "exception_code": "0xc000000d", "exception_address": "0x81ff7c",
         })
+        crt_event = next(event for event in update["events"]
+                         if event["address"] == "crt-handler-entry")
+        self.assertEqual((crt_event["entry"], crt_event["return_address"]),
+                         ("0x81ff70", "0x44be42"))
+        self.assertEqual(crt_event["stack_args"], [
+            "0x1008f2c", "0x1008800", "0x0", "0x1", "0x46b3a9", "0x6",
+        ])
+        self.assertIn("0x594009", update["trace"])
+        self.assertIn("0x46b370", update["trace"])
+        self.assertIn("0x44be10", update["trace"])
         self.assertEqual((update["action"], update["sequence"], update["pose"]),
                          (602, 0, 0))
         self.assertEqual(pair["defender_hp_after"], 880)
@@ -126,6 +136,24 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertTrue(response["failure_after_damage"])
         self.assertEqual(response["external_callback_pointer"], "0x0")
         self.assertIn("0x479cb0", response["trace"])
+
+    def test_original_player_update_advances_pat_action_5aaa(self):
+        report = run_case(self.dat_dir, 320.0, 180.0, 1, 1,
+                          real_factory=True, resolve_damage=True,
+                          defender_action_id=321)
+        self.assertEqual(report["defender_action_setter"]["action"], 321)
+        update = report["defender_original_update"]
+        self.assertTrue(update["completed"])
+        self.assertEqual(update["exit"], "0x599fb0")
+        self.assertIsNone(update["host_termination"])
+        self.assertEqual((update["action"], update["sequence"], update["pose"],
+                          update["subframe"]), (321, 0, 0, 1))
+        self.assertEqual(update["events"], [])
+        pair = report["pair_dispatch"]
+        self.assertEqual(pair["defender_pat_action"], 321)
+        self.assertEqual(pair["defender_frame_flags"], "0x41")
+        self.assertEqual(pair["defender_hp_after"], 880)
+        self.assertTrue(report["damage_response"]["damage_applied"])
 
     def test_remilia_pat_inventory_has_vulnerable_hurtbox_frames(self):
         report = scan_character(self.dat_dir, "remilia")

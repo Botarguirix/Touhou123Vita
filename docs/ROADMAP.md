@@ -6,9 +6,9 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Remilia 412 → objeto 801 — Iteración 2.19
+### Remilia 412 → objeto 801 — Iteración 2.20
 
-El dispatcher `0x47ce20` con listas controladas sigue aplicando 120 de daño desde Remilia 801: HP 1000→880. El defensor obtiene acción 602 a través del setter `0x464930`, initializer `0x59aaa0` y selector `0x464ae0`, con PAT seq.0/frame0 real (`frameFlags=0x3041`). Un tick posterior del dispatcher `0x587bab` no es válido: el PE termina con `STATUS_INVALID_PARAMETER` (`0xc000000d`, `0x81ff7c`), sin avance de pose. Hace falta recuperar el constructor derivado/contrato de entrada antes de inferir update natural; el callback nulo de presentación tras daño también sigue pendiente. VPK sin cambios. Ver [ITERATION119.md](ITERATION119.md), [ITERATION118.md](ITERATION118.md), [ITERATION117.md](ITERATION117.md), [ITERATION116.md](ITERATION116.md), [ITERATION115.md](ITERATION115.md), [ITERATION114.md](ITERATION114.md), [ITERATION113.md](ITERATION113.md), [ITERATION112.md](ITERATION112.md), [ITERATION111.md](ITERATION111.md), [ITERATION110.md](ITERATION110.md) y [ITERATION109.md](ITERATION109.md).
+Con acción 321 (`ACTION_5AAA`) desde setter/PAT originales, el dispatcher `0x587bab` completa un update: subframe 0→1; el pair dispatcher aplica 120 de daño, HP 1000→880. Esto sigue usando posición, setter y listas controladas, y el callback de presentación cae después de aplicar daño. El caso de pose neutral PAT 602 aborta porque su rama `0x594009 → 0x46b370(6,2)` accede índice 6 de `Player+0x72c` (`spellBgTextures`) sin recursos/lista cargados; la Iteración 2.19 queda refinada por esta causa concreta. Falta conectar input natural a 5AAA, procesar reacción/hitstop y poblar recursos reales de spell background para validar acción 602. VPK/runtime sin cambios. Ver [ITERATION120.md](ITERATION120.md), [ITERATION119.md](ITERATION119.md), [ITERATION118.md](ITERATION118.md), [ITERATION117.md](ITERATION117.md), [ITERATION116.md](ITERATION116.md), [ITERATION115.md](ITERATION115.md), [ITERATION114.md](ITERATION114.md), [ITERATION113.md](ITERATION113.md), [ITERATION112.md](ITERATION112.md) y [ITERATION111.md](ITERATION111.md).
 
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 

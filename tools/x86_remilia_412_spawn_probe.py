@@ -218,6 +218,7 @@ def run_original_character_update(probe: Suwako808FactoryProbe, obj: int) -> dic
     """Run one original character update dispatch after the real action setter."""
     uc = probe.uc
     snapshot = bytes(uc.mem_read(obj, 0x1400))
+    event_start = len(probe.events)
     entry_sp = STACK + 0xC000
     uc.mem_write(entry_sp, struct.pack("<I", STOP))
     uc.reg_write(UC_X86_REG_ESP, entry_sp)
@@ -255,7 +256,9 @@ def run_original_character_update(probe: Suwako808FactoryProbe, obj: int) -> dic
         "pose": struct.unpack("<H", uc.mem_read(obj + 0x140, 2))[0],
         "subframe": struct.unpack("<H", uc.mem_read(obj + 0x142, 2))[0],
         "frame_descriptor": hex(u32(uc, obj + 0x158)),
-        "trace": [hex(pc) for pc in probe._code_trace[-50:]],
+        "trace": [hex(pc) for pc in probe._code_trace[-300:]],
+        "events": [event for event in probe.events[event_start:]
+                   if event.get("address") == "crt-handler-entry"],
     }
     if not state["completed"]:
         uc.mem_write(obj, snapshot)
@@ -263,7 +266,8 @@ def run_original_character_update(probe: Suwako808FactoryProbe, obj: int) -> dic
 
 
 def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int,
-             real_factory: bool = False, resolve_damage: bool = False) -> dict[str, object]:
+             real_factory: bool = False, resolve_damage: bool = False,
+             defender_action_id: int = 602) -> dict[str, object]:
     probe = Suwako808FactoryProbe(ROOT / "original/th123.exe", dat_dir,
                                   character="remilia", action_id=801)
     uc = probe.uc
@@ -469,9 +473,10 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         attack_frame = sequences[0]["frames"][0]
         defender_pat = read_pat(dat_dir / probe.pat_fixture["archive"],
                                 "data/character/remilia/remilia.pat")[0]
-        # Action 602 is Remilia's PAT stand/neutral pose with vulnerable-frame
-        # bit 0x40, unlike the action-0 setup frame (0x31).
-        defender_sequence = action_sequence_metadata(defender_pat, 602)[0]
+        # Action 602 is the initial neutral pose used by the original damage
+        # fixture; callers can select another real PAT action for dispatcher
+        # differential tests.
+        defender_sequence = action_sequence_metadata(defender_pat, defender_action_id)[0]
         defender_frames = defender_sequence["frames"]
         neutral_frame = defender_frames[0]
         defender = LIST + 0x8800
@@ -487,18 +492,20 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             uc.emu_start(0x0046B7F0, STOP, count=500000)
         except Exception as exc:
             raise RuntimeError(
-                f"original character constructor fault at {uc.reg_read(UC_X86_REG_EIP):#x}: {exc}; "
+                f"original character constructor 0x46b7f0 fault at "
+                f"{uc.reg_read(UC_X86_REG_EIP):#x}: {exc}; "
                 f"trace={[hex(pc) for pc in probe._code_trace[-20:]]}") from exc
         finally:
             probe._trace_active = False
         if uc.reg_read(UC_X86_REG_EIP) != STOP:
-            raise RuntimeError(f"original character base constructor returned at {uc.reg_read(UC_X86_REG_EIP):#x}; trace={[hex(pc) for pc in probe._code_trace[-24:]]}")
+            raise RuntimeError(f"original character constructor returned at {uc.reg_read(UC_X86_REG_EIP):#x}; trace={[hex(pc) for pc in probe._code_trace[-24:]]}")
         defender_constructor = {
             "function": "0x46b7f0",
             "field_1ac_after_constructor": uc.mem_read(defender + 0x1AC, 1)[0],
         }
         defender_action_state = initialize_original_action(
-            probe, defender, 602, defender_frames, int(defender_sequence["loop_mode"]))
+            probe, defender, defender_action_id, defender_frames,
+            int(defender_sequence["loop_mode"]))
         # The common update dereferences this owning-player back-reference
         # before dispatching the action handler; the pair setup below uses the
         # same relationship for its two characters.
@@ -590,7 +597,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "defender_frame_flags": hex(struct.unpack("<I", uc.mem_read(
                     u32(uc, defender + 0x1C0) + 0x4C, 4))[0]),
                 "defender_field_1ac_after_original_constructor": defender_constructor["field_1ac_after_constructor"],
-                "defender_pat_action": 602,
+                "defender_pat_action": defender_action_id,
                 "defender_pat_sequence": int(neutral_frame.get("sequence", 0)),
                 "defender_pat_frame": int(neutral_frame["frame"]),
                 "defender_action_setter_state": defender_action_state,
