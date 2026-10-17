@@ -32,6 +32,7 @@ LIST, OWNER, OWNER_DATA, PAT_MAP = 0x01000000, 0x01010000, 0x01020000, 0x0103000
 NIL, ACTION_NODE = 0x01031000, 0x01032000
 CUSTOM = 0x01037000
 STACK, STOP, HEAP = 0x02000000, 0x03000000, 0x01100000
+CRT_HEAP = 0x01200000
 
 
 def read_u32(uc: Uc, address: int) -> int:
@@ -61,6 +62,7 @@ class Suwako808FactoryProbe:
                               (STACK, 0x10000), (STOP, 0x1000), (HEAP, 0x100000)):
             self.uc.mem_map(address, size)
         self.uc.mem_map(0, 0x1000)  # FS:[0] used by the original SEH prologues
+        self.uc.mem_map(CRT_HEAP, 0x200000)
         self.uc.mem_map(0x03100000, 0x1000)  # controlled KERNEL32 module image
         self.uc.mem_write(STOP, b"\xf4")
         self.uc.mem_write(STOP + 0x10, b"\xc2\x04\x00")  # lock init/lock/unlock service
@@ -69,6 +71,11 @@ class Suwako808FactoryProbe:
         self.uc.mem_write(0x0085711C, struct.pack("<I", STOP + 0x10))
         self._windows_api_stub_names: dict[int, str] = {}
         self._tls_slots: dict[int, int] = {}
+        self._fls_slots: dict[int, int] = {}
+        self._fls_callbacks: dict[int, int] = {}
+        self._crt_heap_cursor = CRT_HEAP
+        self._crt_heap_allocations: dict[int, int] = {}
+        self.crt_init_state: dict[str, object] | None = None
         self._last_error = 0
         self.host_termination: dict[str, object] | None = None
         if action_id == 801:
@@ -77,7 +84,7 @@ class Suwako808FactoryProbe:
             api_stubs = {
                 "TlsGetValue": (0x20, b"\x31\xc0\xc2\x04\x00", 0x857190),
                 "GetModuleHandleA": (0x30, b"\xb8\x00\x00\x10\x03\xc2\x04\x00", 0x857188),
-                "GetProcAddress": (0x40, b"\xb8\x50\x00\x00\x03\xc2\x08\x00", 0x857184),
+                "GetProcAddress": (0x40, b"\xc2\x08\x00", 0x857184),
                 "DecodePointer": (0x50, b"\x8b\x44\x24\x04\xc2\x04\x00", None),
                 "GetLastError": (0x60, b"\x31\xc0\xc3", 0x857038),
                 "SetLastError": (0x70, b"\x31\xc0\xc2\x04\x00", 0x8571A4),
@@ -87,6 +94,12 @@ class Suwako808FactoryProbe:
                 "UnhandledExceptionFilter": (0xB0, b"\x31\xc0\xc2\x04\x00", 0x857158),
                 "InterlockedIncrement": (0xC0, b"\x8b\x44\x24\x04\xff\x00\x8b\x00\xc2\x04\x00", 0x8571A0),
                 "GetCurrentProcess": (0xF0, b"\xb8\xff\xff\xff\xff\xc3", 0x857154),
+                "GetProcessHeap": (0x180, b"\xb8\xff\xff\xff\xff\xc3", 0x857178),
+                "HeapAlloc": (0x190, b"\xc2\x0c\x00", 0x857174),
+                "HeapFree": (0x1A0, b"\xc2\x0c\x00", 0x857170),
+                "HeapReAlloc": (0x1B0, b"\xc2\x10\x00", 0x857180),
+                "HeapSize": (0x1C0, b"\xb8\xff\xff\xff\xff\xc2\x0c\x00", 0x8571CC),
+                "Sleep": (0x1D0, b"\xc2\x04\x00", 0x8571C8),
             }
             for name, (offset, code, iat) in api_stubs.items():
                 address = STOP + offset
@@ -97,6 +110,14 @@ class Suwako808FactoryProbe:
             self._windows_api_stub_names[STOP + 0xD0] = "TlsAlloc"
             self._windows_api_stub_names[STOP + 0xD4] = "TlsSetValue"
             self._windows_api_stub_names[STOP + 0x120] = "TerminateProcess"
+            for offset, name, code in (
+                    (0x130, "EncodePointer", b"\x8b\x44\x24\x04\xc2\x04\x00"),
+                    (0x140, "FlsGetValue", b"\x31\xc0\xc2\x04\x00"),
+                    (0x150, "FlsSetValue", b"\x31\xc0\xc2\x08\x00"),
+                    (0x160, "FlsAlloc", b"\x31\xc0\xc2\x04\x00"),
+                    (0x170, "FlsFree", b"\x31\xc0\xc2\x04\x00")):
+                self.uc.mem_write(STOP + offset, code)
+                self._windows_api_stub_names[STOP + offset] = name
             self.uc.mem_write(0x00857194, struct.pack("<I", STOP + 0xD0))
             self.uc.mem_write(0x00857198, struct.pack("<I", STOP + 0xD4))
             self.uc.mem_write(0x00857150, struct.pack("<I", STOP + 0x120))
@@ -133,7 +154,8 @@ class Suwako808FactoryProbe:
     def _invalid_mem_hook(self, _uc: Uc, access: int, address: int, size: int,
                           value: int, _user: object) -> bool:
         self._invalid_memory.append({"access": access, "address": address,
-                                     "size": size, "value": value})
+                                     "size": size, "value": value,
+                                     "eip": _uc.reg_read(UC_X86_REG_EIP)})
         return False
 
     def _return(self, esp: int, cleanup: int = 0) -> None:
@@ -143,14 +165,129 @@ class Suwako808FactoryProbe:
         uc.reg_write(UC_X86_REG_EIP, target)
 
     def _hook(self, uc: Uc, address: int, _size: int, _user: object) -> None:
-        if address in self._windows_api_stub_names:
-            self.events.append({"address": "windows-api", "name": self._windows_api_stub_names[address]})
+        if address in (0x0081FE50, 0x0081FF4C, 0x0081FF70):
             esp = uc.reg_read(UC_X86_REG_ESP)
+            self.events.append({"address": "crt-handler-entry", "entry": hex(address),
+                                "return_address": hex(read_u32(uc, esp)),
+                                "stack_args": [hex(read_u32(uc, esp + 4 * i))
+                                               for i in range(1, 7)]})
+        if address == 0x00464AE0:
+            obj = uc.reg_read(UC_X86_REG_ECX)
+            seq = read_u32(uc, obj + 0x15C)
+            frames_begin, frames_end = read_u32(uc, seq + 4), read_u32(uc, seq + 8)
+            self.events.append({"address": "setPose-validation", "object": hex(obj),
+                                "requested_pose": struct.unpack("<H", uc.mem_read(obj + 0x140, 2))[0],
+                                "object_pose_count": struct.unpack("<H", uc.mem_read(obj + 0x148, 2))[0],
+                                "sequence": struct.unpack("<H", uc.mem_read(obj + 0x13E, 2))[0],
+                                "sequence_pointer": hex(seq),
+                                "frames_begin": hex(frames_begin),
+                                "frames_end": hex(frames_end),
+                                "frame_count_from_vector": (frames_end - frames_begin) // 0xA8})
+        if address in self._windows_api_stub_names:
+            esp = uc.reg_read(UC_X86_REG_ESP)
+            api_name = self._windows_api_stub_names[address]
+            api_event: dict[str, object] = {
+                "address": "windows-api",
+                "name": api_name,
+                "return_address": hex(read_u32(uc, esp)),
+            }
+            if api_name in ("TlsGetValue", "GetModuleHandleA", "GetProcAddress",
+                            "DecodePointer", "SetLastError", "TlsSetValue",
+                            "TerminateProcess", "FlsGetValue", "FlsSetValue",
+                            "FlsAlloc", "FlsFree", "HeapAlloc", "HeapFree",
+                            "HeapReAlloc", "HeapSize"):
+                api_event["arguments"] = [hex(read_u32(uc, esp + 4 * i))
+                                           for i in range(1, 4)]
+            self.events.append(api_event)
             if address == STOP + 0x20:  # TlsGetValue(DWORD index)
                 index = read_u32(uc, esp + 4)
                 self._last_error = 87 if index == 0xFFFFFFFF else 0
                 uc.reg_write(UC_X86_REG_EAX, self._tls_slots.get(index, 0))
                 self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x40:  # GetProcAddress(module, name)
+                name_ptr = read_u32(uc, esp + 8)
+                name_bytes = bytearray()
+                for offset in range(128):
+                    ch = uc.mem_read(name_ptr + offset, 1)[0]
+                    if ch == 0:
+                        break
+                    name_bytes.append(ch)
+                proc_name = name_bytes.decode("ascii", "replace")
+                resolved = {
+                    "EncodePointer": STOP + 0x130,
+                    "DecodePointer": STOP + 0x50,
+                    "FlsGetValue": STOP + 0x140,
+                    "FlsSetValue": STOP + 0x150,
+                    "FlsAlloc": STOP + 0x160,
+                    "FlsFree": STOP + 0x170,
+                }.get(proc_name, 0)
+                self.events.append({"address": "windows-api-result",
+                                    "name": "GetProcAddress", "symbol": proc_name,
+                                    "result": hex(resolved)})
+                uc.reg_write(UC_X86_REG_EAX, resolved)
+                self._return(esp, cleanup=8)
+                return
+            if address == STOP + 0x130:  # EncodePointer(pointer), identity in this fixture
+                uc.reg_write(UC_X86_REG_EAX, read_u32(uc, esp + 4))
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x140:  # FlsGetValue(index)
+                index = read_u32(uc, esp + 4)
+                uc.reg_write(UC_X86_REG_EAX, self._fls_slots.get(index, 0))
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x150:  # FlsSetValue(index, value)
+                index, value = read_u32(uc, esp + 4), read_u32(uc, esp + 8)
+                self._fls_slots[index] = value
+                uc.reg_write(UC_X86_REG_EAX, 1)
+                self._return(esp, cleanup=8)
+                return
+            if address == STOP + 0x160:  # FlsAlloc(callback)
+                index = 0x40
+                self._fls_callbacks[index] = read_u32(uc, esp + 4)
+                self._fls_slots.setdefault(index, 0)
+                uc.reg_write(UC_X86_REG_EAX, index)
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x170:  # FlsFree(index)
+                index = read_u32(uc, esp + 4)
+                self._fls_slots.pop(index, None)
+                self._fls_callbacks.pop(index, None)
+                uc.reg_write(UC_X86_REG_EAX, 1)
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x190:  # HeapAlloc(heap, flags, bytes)
+                flags, size = read_u32(uc, esp + 8), read_u32(uc, esp + 12)
+                ptr = (self._crt_heap_cursor + 0xF) & ~0xF
+                self._crt_heap_cursor = ptr + max(size, 1) + 0x10
+                uc.mem_write(ptr, bytes(max(size, 1)))
+                self._crt_heap_allocations[ptr] = size
+                self.allocations.append({"kind": "crt-HeapAlloc", "size": size,
+                                         "flags": flags, "address": hex(ptr),
+                                         "zeroed": True})
+                uc.reg_write(UC_X86_REG_EAX, ptr)
+                self._return(esp, cleanup=12)
+                return
+            if address == STOP + 0x1A0:  # HeapFree(heap, flags, ptr)
+                uc.reg_write(UC_X86_REG_EAX, 1)
+                self._return(esp, cleanup=12)
+                return
+            if address == STOP + 0x1B0:  # HeapReAlloc(heap, flags, old, size)
+                flags, old, size = (read_u32(uc, esp + 8), read_u32(uc, esp + 12),
+                                    read_u32(uc, esp + 16))
+                ptr = (self._crt_heap_cursor + 0xF) & ~0xF
+                self._crt_heap_cursor = ptr + max(size, 1) + 0x10
+                uc.mem_write(ptr, bytes(max(size, 1)))
+                old_size = self._crt_heap_allocations.get(old, 0)
+                if old_size:
+                    uc.mem_write(ptr, bytes(uc.mem_read(old, min(old_size, size))))
+                self._crt_heap_allocations[ptr] = size
+                self.allocations.append({"kind": "crt-HeapReAlloc", "size": size,
+                                         "flags": flags, "address": hex(ptr),
+                                         "old_address": hex(old), "zeroed": True})
+                uc.reg_write(UC_X86_REG_EAX, ptr)
+                self._return(esp, cleanup=16)
                 return
             if address == STOP + 0x60:  # GetLastError()
                 uc.reg_write(UC_X86_REG_EAX, self._last_error)
@@ -181,7 +318,8 @@ class Suwako808FactoryProbe:
             if address == STOP + 0x120:  # TerminateProcess(handle, exit_code)
                 self.host_termination = {"api": "TerminateProcess",
                                          "process": hex(read_u32(uc, esp + 4)),
-                                         "exit_code": hex(read_u32(uc, esp + 8))}
+                                         "exit_code": hex(read_u32(uc, esp + 8)),
+                                         "return_address": hex(read_u32(uc, esp))}
                 uc.emu_stop()
                 return
         if self._trace_active:
@@ -284,15 +422,22 @@ class Suwako808FactoryProbe:
         uc.mem_write(NIL + 0x15, b"\x01")
         uc.mem_write(ACTION_NODE, struct.pack("<III", NIL, NIL, NIL))
         uc.mem_write(ACTION_NODE + 0x0C, struct.pack("<I", self.action_id))
-        sequence_nodes = [PAT_MAP + 0x8000 + i * 0x1000 for i in range(len(sequences))]
-        uc.mem_write(ACTION_NODE + 0x10, struct.pack("<I", sequence_nodes[0]))
-        for index, (seq, metadata) in enumerate(zip(sequence_nodes, sequences)):
+        # The factory's observed physical node for PAT seq.1 is the third node;
+        # preserve that mapping while keeping descriptors in PAT index order.
+        physical_nodes = [PAT_MAP + 0x8000 + i * 0x1000 for i in range(len(sequences))]
+        pat_sequence_by_node = [0] + list(range(len(sequences) - 1, 0, -1))
+        sequence_node_by_pat = {pat_index: physical_nodes[node_index]
+                                for node_index, pat_index in enumerate(pat_sequence_by_node)}
+        self._sequence_node_by_pat = sequence_node_by_pat
+        uc.mem_write(ACTION_NODE + 0x10, struct.pack("<I", physical_nodes[0]))
+        for index, (seq, pat_index) in enumerate(zip(physical_nodes, pat_sequence_by_node)):
+            metadata = sequences[pat_index]
             frames = metadata["frames"]
-            frame = PAT_MAP + 0x10000 + index * 0x1000
+            frame = PAT_MAP + 0x10000 + pat_index * 0x1000
             uc.mem_write(seq + 4, struct.pack("<II", frame, frame + len(frames) * 0xA8))
             uc.mem_write(seq + 0x14, bytes((int(metadata["loop_mode"]),)))
-            next_node = sequence_nodes[(index + 1) % len(sequence_nodes)]
-            previous_node = sequence_nodes[(index - 1) % len(sequence_nodes)]
+            next_node = physical_nodes[(index + 1) % len(physical_nodes)]
+            previous_node = physical_nodes[(index - 1) % len(physical_nodes)]
             uc.mem_write(seq + 0x18, struct.pack("<I", next_node))
             uc.mem_write(seq + 0x1C, struct.pack("<I", previous_node))
             for frame_index, frame_data in enumerate(frames):
@@ -304,13 +449,13 @@ class Suwako808FactoryProbe:
                 for vector_offset, key, stride, type_offset in (
                         (0x58, "hurt_boxes", 16, 0), (0x68, "attack_boxes", 16, 0x100)):
                     boxes = frame_data[key]
-                    box_start = PAT_MAP + 0x20000 + (index * 0x8000) + (frame_index * 0x800) + type_offset
+                    box_start = PAT_MAP + 0x20000 + (pat_index * 0x8000) + (frame_index * 0x800) + type_offset
                     box_end = box_start + len(boxes) * stride
                     uc.mem_write(pose + vector_offset, struct.pack("<4I", 0, box_start, box_end, box_end))
                     if boxes:
                         uc.mem_write(box_start, b"".join(struct.pack("<4i", *box) for box in boxes))
                 extra_count = len(frame_data["attack_boxes"])
-                extra = PAT_MAP + 0x30000 + (index * 0x8000) + (frame_index * 0x800)
+                extra = PAT_MAP + 0x30000 + (pat_index * 0x8000) + (frame_index * 0x800)
                 extra_end = extra + extra_count * 4
                 uc.mem_write(pose + 0x78, struct.pack("<4I", 0, extra, extra_end, extra_end))
                 if extra_count:
@@ -364,6 +509,38 @@ class Suwako808FactoryProbe:
         self.box_transform_entries.clear()
         self._invalid_memory.clear()
         self.host_termination = None
+        self.crt_init_state = None
+        self._tls_slots.clear()
+        self._fls_slots.clear()
+        self._fls_callbacks.clear()
+        self._crt_heap_cursor = CRT_HEAP
+        self._crt_heap_allocations.clear()
+
+        if self.action_id == 801:
+            init_sp = STACK + 0x5000 - 4
+            uc.mem_write(init_sp, struct.pack("<I", STOP))
+            uc.reg_write(UC_X86_REG_ESP, init_sp)
+            uc.reg_write(UC_X86_REG_EIP, 0x00824BFA)
+            init_error = None
+            self._code_trace.clear()
+            self._trace_active = True
+            try:
+                uc.emu_start(0x00824BFA, STOP, count=100000)
+            except Exception as exc:
+                init_error = f"{type(exc).__name__}: {exc}"
+            finally:
+                self._trace_active = False
+            self.crt_init_state = {
+                "entry": "0x824bfa",
+                "completed": init_error is None and uc.reg_read(UC_X86_REG_EIP) == STOP,
+                "error": init_error,
+                "fiber_index": hex(read_u32(uc, 0x00894954)),
+                "thread_index": hex(read_u32(uc, 0x00894950)),
+                "fiber_slot_value": hex(self._fls_slots.get(read_u32(uc, 0x00894954), 0)),
+                "fls_callback": hex(self._fls_callbacks.get(read_u32(uc, 0x00894954), 0)),
+                "invalid_memory": list(self._invalid_memory),
+                "trace": [hex(pc) for pc in self._code_trace[-80:]],
+            }
 
         # Execute the actual object-list/handle-manager constructor.
         sp = STACK + 0x7000 - 4
@@ -409,9 +586,10 @@ class Suwako808FactoryProbe:
             box_sync = {"sequence_1": self._sync_box_data(obj)}
             # Examine seq.0 using the original selector and box synchronizer;
             # the actual action-808 update later changes sequence as usual.
-            sequence_zero = PAT_MAP + 0x8000
+            sequence_zero = self._sequence_node_by_pat[0]
             uc.mem_write(obj + 0x13E, struct.pack("<H", 0))
             uc.mem_write(obj + 0x15C, struct.pack("<I", sequence_zero))
+            uc.mem_write(obj + 0x148, struct.pack("<H", len(self.pat_fixture["sequences"][0]["frames"])))
             pose_sp = STACK + 0xA800 - 4
             uc.mem_write(pose_sp, struct.pack("<II", STOP, 0))
             uc.reg_write(UC_X86_REG_ESP, pose_sp)
@@ -423,9 +601,10 @@ class Suwako808FactoryProbe:
             box_sync["sequence_0"] = self._sync_box_data(obj)
             # Restore the factory's natural seq.1 pose before ticking the
             # action dispatcher below.
-            sequence_one = PAT_MAP + 0x9000
+            sequence_one = self._sequence_node_by_pat[1]
             uc.mem_write(obj + 0x13E, struct.pack("<H", 1))
             uc.mem_write(obj + 0x15C, struct.pack("<I", sequence_one))
+            uc.mem_write(obj + 0x148, struct.pack("<H", len(self.pat_fixture["sequences"][1]["frames"])))
             pose_sp = STACK + 0xA800 - 4
             uc.mem_write(pose_sp, struct.pack("<II", STOP, 0))
             uc.reg_write(UC_X86_REG_ESP, pose_sp)
@@ -441,6 +620,7 @@ class Suwako808FactoryProbe:
                 "vtable": hex(read_u32(uc, obj)),
                 "action": struct.unpack("<H", uc.mem_read(obj + 0x13C, 2))[0],
                 "sequence": struct.unpack("<H", uc.mem_read(obj + 0x13E, 2))[0],
+                "pose_count": struct.unpack("<H", uc.mem_read(obj + 0x148, 2))[0],
                 "render_color_hex": bytes(uc.mem_read(obj + 0x110, 4)).hex(),
                 "alpha": uc.mem_read(obj + 0x113, 1)[0],
                 "position": [read_f32(uc, obj + 0xEC), read_f32(uc, obj + 0xF0)],
@@ -463,7 +643,7 @@ class Suwako808FactoryProbe:
                 try:
                     uc.emu_start(0x007876D0, STOP, count=100000)
                 except Exception as exc:
-                    trail = ",".join(hex(item) for item in self._code_trace[-120:])
+                    trail = ",".join(hex(item) for item in self._code_trace[-300:])
                     regs = {name: f"{uc.reg_read(register):#x}" for name, register in (
                         ("eax", UC_X86_REG_EAX), ("ebx", UC_X86_REG_EBX),
                         ("ecx", UC_X86_REG_ECX), ("edx", UC_X86_REG_EDX),
@@ -475,8 +655,9 @@ class Suwako808FactoryProbe:
                 finally:
                     self._trace_active = False
                 if self.host_termination is not None:
+                    trail = ",".join(hex(item) for item in self._code_trace[-300:])
                     update_error = (f"tick {tick + 1}: CRT requested process termination "
-                                    f"{self.host_termination}")
+                                    f"{self.host_termination}; trace={trail}")
                     break
                 if uc.reg_read(UC_X86_REG_EIP) != STOP:
                     trail = ",".join(hex(item) for item in self._code_trace[-120:])
@@ -516,6 +697,7 @@ class Suwako808FactoryProbe:
         return {
             "reference_sha256": self.sha256,
             "factory_completed": factory_completed,
+            "crt_init": self.crt_init_state,
             "stopped_eip": hex(uc.reg_read(UC_X86_REG_EIP)),
             "error": error,
             "factory_return_object": factory_return_state,

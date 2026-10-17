@@ -2,11 +2,15 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
-## Iteración 2.05: imports Windows y fixture del objeto 801
+## Iteración 2.06: CRT y ciclo de vida de Remilia 801
 
-- Se modelaron imports del CRT/Kernel32 con contratos controlados; la rutina atraviesa `TlsGetValue`, pero el CRT termina el proceso con `0xc000000d` a través de `TerminateProcess`. La hipótesis previa de recursión en lista/contendor era errónea; el stub de `0x47dcb0` se retiró porque recibía `ECX=2` dentro de la ruta de error.
-- No se demuestra ciclo de vida ni daño; falta completar la inicialización del fixture para evitar la excepción CRT sin omitir lógica de personaje.
-- Suwako 808 conserva la regresión de ocho ticks y `py_compile` pasa. Próximo: identificar el estado de CRT/fixture que dispara la excepción sin omitir lógica de personaje. Ver [ITERATION105.md](ITERATION105.md).
+- Se ejecuta el inicializador CRT original `0x824bfa` con contratos de host controlados para TLS/FLS y heap; el índice inválido `0xffffffff` y la terminación CRT desaparecen.
+- El factory crea action 801/seq.1 con dos poses. El dispatcher original completa 18 ticks hasta `+0x34c=0`; seq.0 sincroniza una caja ofensiva y seq.1 ninguna. No se demuestra manager cleanup ni impacto. Ver [ITERATION106.md](ITERATION106.md).
+- Suwako 808 conserva ocho ticks y la suite Python pasa 39/39. Próximo: alimentar el setup real de Remilia 412 y seguir el primer contacto.
+
+## Iteración 2.05: imports del CRT y fixture del objeto 801
+
+- La primera hipótesis atribuyó la terminación a inicialización CRT y un stub experimental de contenedor; el seguimiento posterior corrigió ambos puntos. Ver [ITERATION105.md](ITERATION105.md).
 
 ## Iteración 2.04: factory x86 del objeto Remilia 801
 

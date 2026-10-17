@@ -68,6 +68,33 @@ class Suwako808FactoryProbeTest(unittest.TestCase):
         self.assertEqual(result["object_after_updates"]["sequence"], 1)
         self.assertEqual(result["object_after_updates"]["field_34c_u32"], 0)
 
+    def test_remilia_801_crt_init_and_pat_sequence_layout(self):
+        if not Path("original/th123c.dat").is_file():
+            self.skipTest("local th123c.dat is unavailable")
+        result = Suwako808FactoryProbe(
+            self.exe, character="remilia", action_id=801).run(ticks=40)
+        self.assertTrue(result["crt_init"]["completed"])
+        self.assertNotEqual(result["crt_init"]["fiber_index"], "0xffffffff")
+        self.assertNotEqual(result["crt_init"]["fiber_slot_value"], "0x0")
+        self.assertEqual(result["crt_init"]["invalid_memory"], [])
+        crt_tls_alloc = next(row for row in result["allocations"]
+                             if row.get("kind") == "crt-HeapAlloc")
+        self.assertEqual(crt_tls_alloc["size"], 0x214)
+        self.assertTrue(result["factory_completed"])
+        obj = result["factory_return_object"]
+        self.assertEqual((obj["action"], obj["sequence"], obj["pose_count"]), (801, 1, 2))
+        pat_seq1 = result["pat_fixture"]["sequences"][1]
+        self.assertEqual(len(pat_seq1["frames"]), 2)
+        self.assertEqual(pat_seq1["frames"][0]["damage"], 0)
+        self.assertEqual(pat_seq1["frames"][0]["attack_boxes"], [])
+        self.assertEqual(result["box_sync"]["sequence_0"]["hit_box_count"], 1)
+        self.assertEqual(result["box_sync"]["sequence_1_restored"]["hit_box_count"], 0)
+        self.assertIsNone(result["update_error"])
+        self.assertEqual(len(result["updates"]), 18)
+        self.assertTrue(result["dispatcher_reached_terminal_field_zero"])
+        self.assertEqual(result["object_after_updates"]["alpha"], 0)
+        self.assertEqual(result["object_after_updates"]["field_34c_u32"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
