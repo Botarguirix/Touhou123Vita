@@ -258,6 +258,19 @@ def main() -> int:
         },
         "evidence_level": "pinned PE bytes show manager pair phases and hit/hurt rectangle traversal; exact damage/guard/priority response still needs dynamic pair trace",
     }
+    character_constructor_signatures = {
+        "base_constructor_sets_active_field_1ac": (0x46B8DB, bytes.fromhex("c6 86 ac 01 00 00 01")),
+        "character_cleanup_clears_field_1ac": (0x46B9C8, bytes.fromhex("88 9e ac 01 00 00")),
+    }
+    for name, (address, expected) in character_constructor_signatures.items():
+        actual = code(address, len(expected))
+        if actual != expected:
+            raise SystemExit(f"character constructor {name} changed: {actual.hex()} != {expected.hex()}")
+    character_lifecycle = {
+        "base_constructor": "0x46b7f0", "sets_object_field": "object+0x1ac = 1",
+        "cleanup": "0x46b9a0", "clears_object_field": "object+0x1ac = 0",
+        "evidence_level": "pinned bytes; base constructor executed in the Remilia pair probe",
+    }
     frame_selection_contract = {
         "set_pose": "0x464b50 stores pose at object+0x140 and calls 0x464ae0",
         "selector": "0x464ae0 selects the current 0xa8-byte PAT descriptor and publishes it at object+0x158 and +0x150",
@@ -381,6 +394,7 @@ def main() -> int:
         "generic_pat_frame_selection": frame_selection_contract,
         "gameobject_box_sync": box_sync_contract,
         "gameobject_collision_pipeline": collision_pipeline,
+        "character_object_lifecycle": character_lifecycle,
         "suwako_808_reachable_calls": suwako_808_reachable_calls,
         "suwako_gameobject_manager_lifecycle": manager_lifecycle,
         "suwako_808_motion_evidence": {

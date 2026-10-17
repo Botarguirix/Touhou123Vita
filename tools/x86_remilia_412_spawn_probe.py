@@ -337,7 +337,28 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             if frame["hurt_boxes"]
         )
         defender = LIST + 0x8800
-        uc.mem_write(defender, bytes(0x3AC))
+        uc.mem_write(defender, bytes(0x1400))
+        character_ctor_sp = STACK + 0x7000 - 4
+        uc.mem_write(character_ctor_sp, struct.pack("<I", STOP))
+        uc.reg_write(UC_X86_REG_ESP, character_ctor_sp)
+        uc.reg_write(UC_X86_REG_ECX, defender)
+        uc.reg_write(UC_X86_REG_EIP, 0x0046B7F0)
+        probe._code_trace.clear()
+        probe._trace_active = True
+        try:
+            uc.emu_start(0x0046B7F0, STOP, count=500000)
+        except Exception as exc:
+            raise RuntimeError(
+                f"original character constructor fault at {uc.reg_read(UC_X86_REG_EIP):#x}: {exc}; "
+                f"trace={[hex(pc) for pc in probe._code_trace[-20:]]}") from exc
+        finally:
+            probe._trace_active = False
+        if uc.reg_read(UC_X86_REG_EIP) != STOP:
+            raise RuntimeError(f"original character base constructor returned at {uc.reg_read(UC_X86_REG_EIP):#x}; trace={[hex(pc) for pc in probe._code_trace[-24:]]}")
+        defender_constructor = {
+            "function": "0x46b7f0",
+            "field_1ac_after_constructor": uc.mem_read(defender + 0x1AC, 1)[0],
+        }
         neutral_descriptor = PAT_MAP + 0x60000
         neutral_collision = PAT_MAP + 0x61000
         neutral_hurt = PAT_MAP + 0x62000
@@ -442,15 +463,15 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                     u32(uc, defender + 0x1C0) + 0x50, 4))[0]),
                 "defender_frame_flags": hex(struct.unpack("<I", uc.mem_read(
                     u32(uc, defender + 0x1C0) + 0x4C, 4))[0]),
+                "defender_field_1ac_after_original_constructor": defender_constructor["field_1ac_after_constructor"],
             }
-            # Differentially open the two character-resolver gates observed
-            # at 0x47c990; retain it as a synthetic gate test, not PAT evidence.
+            # Differentially open only the descriptor flag gate observed at
+            # 0x47c990. object+0x1ac already came from the original character ctor.
             if not pair_error and pair_dispatch["defender_hp_after"] == pair_hp_before:
                 original_frame_flags = struct.unpack(
                     "<I", uc.mem_read(neutral_descriptor + 0x4C, 4))[0]
                 uc.mem_write(neutral_descriptor + 0x4C,
                              struct.pack("<I", original_frame_flags | 0x40))
-                uc.mem_write(defender + 0x1AC, struct.pack("<B", 1))
                 uc.mem_write(defender + 0x184, struct.pack("<H", pair_hp_before))
                 uc.mem_write(pair_sp, struct.pack("<I", STOP))
                 uc.reg_write(UC_X86_REG_ESP, pair_sp)
@@ -474,7 +495,8 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 gate_hp_after = struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
                 pair_dispatch["gate_open_trial"] = {
                     "synthetic": True, "changed_frame_flags": "OR 0x40",
-                    "changed_object_field_1ac": 1, "error": gate_error,
+                    "object_field_1ac_from_original_constructor": defender_constructor["field_1ac_after_constructor"],
+                    "error": gate_error,
                     "reached_hit_response": "0x47b660" in gate_calls,
                     "reached_geometry": "0x47a5b0" in gate_calls,
                     "call_sites": gate_calls,
@@ -650,6 +672,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     return {
         "initialized_action": initialized_action,
         "manager_setup": manager_state,
+        "defender_constructor": defender_constructor if real_factory and child_factory else None,
         "input_fixture": {"position": [x, y], "facing": facing,
                           "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,

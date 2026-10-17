@@ -88,6 +88,10 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertTrue(pair["reached_projectile_filter"])
         self.assertTrue(pair["reached_character_resolver"])
         self.assertEqual(pair["defender_frame_flags"], "0x31")
+        self.assertEqual(pair["defender_field_1ac_after_original_constructor"], 1)
+        self.assertEqual(report["defender_constructor"], {
+            "function": "0x46b7f0", "field_1ac_after_constructor": 1,
+        })
         self.assertEqual(pair["defender_hp_after"], 1000)
         gate_trial = pair["gate_open_trial"]
         self.assertTrue(gate_trial["synthetic"])

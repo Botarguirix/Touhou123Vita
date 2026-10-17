@@ -79,6 +79,10 @@ class ObjectMotionAnalysisTest(unittest.TestCase):
         self.assertEqual(collision["hurtbox_vs_hurtbox"]["function"], "0x47a740")
         self.assertIn("exact damage/guard/priority response still needs dynamic pair trace",
                       collision["evidence_level"])
+        character_lifecycle = report["character_object_lifecycle"]
+        self.assertEqual(character_lifecycle["base_constructor"], "0x46b7f0")
+        self.assertEqual(character_lifecycle["sets_object_field"], "object+0x1ac = 1")
+        self.assertEqual(character_lifecycle["clears_object_field"], "object+0x1ac = 0")
         motion = report["suwako_808_motion_evidence"]
         self.assertEqual(motion["action_initializer_handler"], "0x7997ae")
         self.assertEqual(motion["gravity_subtracted_from_vertical_velocity_per_tick"], 0.20000000298023224)
