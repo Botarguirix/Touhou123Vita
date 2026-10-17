@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.99: moveLock(412) y setter desde handler
+
+- La sonda entra en `0x59dd97`, ejecuta el lookup original `0x489610`, registra la clave 412 y el retorno de lock 0; la rama alcanza el setter, reset PAT e initializer original. Resultado: action 412, seq.0, pose 0, 12 poses.
+- PAT lookup y callback pose/render son controlados; los gates previos del handler se saltan. No es todavía una entrada natural ni combate. Reporte ignorado: `artifacts/kernel/remilia-412-input-gate.json`.
+- Siguiente: probar rechazo por lock/recurso y rastrear update/factories/daño. Ver [ITERATION99.md](ITERATION99.md).
+
 ## Iteración 1.98: setter de Remilia 2C hasta PAT seq.0
 
 - La ruta de input `0x59dd59–0x59ddb1` consulta moveLock(412) y, si los gates pasan, usa el setter virtual `0x464930`. La sonda ejecuta `0x464930 → 0x438ca0 → 0x465370 → 0x59aaa0 → 0x59ad64 → 0x4636b0`.

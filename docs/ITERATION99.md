@@ -1,0 +1,7 @@
+# Iteración 1.99: gate real de moveLock(412) hasta el setter
+
+Se amplió la traza desde el setter hasta el bloque exitoso del handler 2C. El desensamblado de `0x59c010` muestra que `0x59dd97` consulta moveLock para 412 con `0x489610`; si el recurso disponible cubre el valor retornado, pasa 412 al setter virtual por `0x59d74e`.
+
+La sonda `tools/x86_remilia_412_input_gate_probe.py` entra en `0x59dd97` con el objeto en estado controlado y ejecuta el lookup original `0x489610`. El fixture del mapa devuelve lock 0; se registra que la consulta usa action 412 (`0x19c`) y que el helper retorna 0. La ejecución continúa por `0x464930 → 0x438ca0 → 0x465370 → 0x59aaa0 → 0x59ad64 → 0x4636b0`; PAT seq.0 selecciona pose 0 y 12 poses. El reporte está en `artifacts/kernel/remilia-412-input-gate.json` y queda ignorado.
+
+Alcance: la sonda comienza después de los gates anteriores del handler (estado/ground, flags de movimiento y disponibilidad de recurso), por lo que no demuestra la elegibilidad natural de 2C desde un estado real. El lookup de contenedores PAT y la callback de pose/render son controlados; sí ejecuta el lookup moveLock, setter, resetSequence e initializer originales. No ejecuta actualización por frame, colisión, respuesta de daño ni combate. Siguiente: probar también el rechazo por lock/recurso y después ejecutar el update x86 posterior a la entrada para seguir creación de objetos o aplicación de daño. Ver [ITERATION95.md](ITERATION95.md)–[ITERATION98.md](ITERATION98.md).
