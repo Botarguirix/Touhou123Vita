@@ -2,13 +2,14 @@
 
 Proyecto experimental para reconstruir y adaptar **Touhou 12.3: Hisoutensoku** a PS Vita.
 
-El prototipo incluye un **lector nativo de DAT externos**, CV2/PAL/PAT, un kernel de animación contrastado con x86 y catálogos locales de 22 carpetas PAT. Vita3K verifica PAT, sprites y tarjetas de los 20 personajes cuando están disponibles los DAT de 12.3 y los DAT heredados de 10.5. El auto-test schema29 encuentra una ruta A con cajas y daño PAT para cada personaje en una colocación controlada; eso no equivale a que todos sean jugables ni a paridad por frame. En la pelea principal todavía falta conseguir impactos A mediante movimiento natural. **El motor completo de Hisoutensoku aún no está portado**: skills del roster, objetos, cartas, clima, escenarios completos, audio y replays requieren recuperación y comparación con PC.
+El prototipo incluye un **lector nativo de DAT externos**, CV2/PAL/PAT, un kernel de animación contrastado con x86 y catálogos locales de 22 carpetas PAT. Vita3K verifica PAT, sprites y tarjetas de los 20 personajes cuando están disponibles los DAT de 12.3 y los DAT heredados de 10.5. El auto-test schema29 encuentra una ruta A con cajas y daño PAT para cada personaje en colocación controlada (`0xFFFFF`), y registra un golpe tras aproximación normal de Marisa contra Cirno inmóvil. Estos gates no demuestran que los 20 sean jugables ni paridad por frame. **El motor completo de Hisoutensoku aún no está portado**: skills del roster, objetos, cartas, clima, escenarios completos, audio y replays requieren recuperación y comparación con PC.
 
 El repositorio contiene código, pruebas y documentación. Los ejecutables de PC, paquetes comerciales, recursos convertidos, pseudocódigo y VPK con recursos permanecen locales y están excluidos de Git.
 
 ## Documentación
 
 - [Roadmap y criterios de aceptación](docs/ROADMAP.md)
+- [Iteración 1.84: impacto A tras aproximación normal](docs/ITERATION84.md)
 - [Iteración 1.83: gate de ataque A para los 20 PAT](docs/ITERATION83.md)
 - [Iteración 1.82: rebuild fresco y regresión Vita3K](docs/ITERATION82.md)
 - [Iteración 1.80: sincronización de cajas del objeto 808](docs/ITERATION80.md)

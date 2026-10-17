@@ -2,6 +2,15 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.84: impacto A con aproximación normal
+
+- Ajusté la secuencia de autoprueba para recorrer distancia con `IN_RIGHT`, dejar la CPU inmóvil y pulsar A con `IN_MELEE`; el combate no recoloca a los luchadores para ese impacto. La ejecución de `fight_step` registró `a_hits=1`. El runner y el gate Vita ahora exigen ese hit.
+- Vita3K SDL aislado pasó 600 frames con las regresiones actuales y la máscara PAT A 20/20 (`0xFFFFF`). Se guardó [fight-natural-a.bmp](../artifacts/screenshots/fight-natural-a.bmp), capturada durante el intercambio, con el rival en reacción y su barra de vida reducida.
+- VPK: `artifacts/Touhou123Vita-natural-a-auto.vpk`, 96,273 bytes, SHA-256 `ef4ca60440f5ab7d5607e182884517dac4299578b15a0349bd93ec1e87ac27f8`.
+- Límite: la aproximación se prueba contra CPU inmóvil, con un solo matchup Marisa/Cirno y controles deterministas. No valida IA, guardia, paridad de timing PC, la respuesta completa de hit, ni el roster en combates naturales. Siguiente: variar matchups y entradas sin recolocación, medir el daño A frame a frame contra PC y recuperar estados de guardia/cancelación.
+
+Ver [ITERATION84.md](ITERATION84.md).
+
 ## Iteración 1.83: gate de ataque A con PAT de todo el roster
 
 - Agregué un probe al auto-test que recorre los 20 PAT cargados y prueba entradas de ataque terrestre A (acciones 300/302/303/304/330). Usa sus cajas PAT de ataque y hurt, deja que `fight_step` recorra la animación y solo cuenta la ruta si el combate registra un impacto A y el daño coincide con el valor de la pose que golpeó.
