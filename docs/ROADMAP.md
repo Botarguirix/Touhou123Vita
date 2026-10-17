@@ -6,6 +6,10 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
+### Corrección del update Remilia 412 — Iteración 2.01
+
+La conclusión de Iteración 1.95 queda supersedida: action 412 sigue la tabla del dispatcher especial (`0x58a3a1 → 0x58cce7`), no el handler genérico `0x483f40`. En el subestado `+0x140 == 4`, el handler arma la solicitud del objeto 801 (`0x46eb30`) y llama un callback de objeto indexado. Siguiente trabajo: resolver ese callback y probar update/collision/daño con una secuencia natural y un oracle x86. No marcar el 2C completo ni trasladarlo al runtime hasta verificarlo. Ver [ITERATION101.md](ITERATION101.md).
+
 ### Audit de `attack_flags` — Iteración 1.87
 
 El roster contiene 1,442 combinaciones personaje/acción/índice/flags con poses dañinas sin cajas explícitas, distribuidas en 164 valores raw (`PAT_ATTACK_FLAGS.md`). Remilia 412:0 marca 750 de daño con `0x00204002`; 416:0/1, 800 con `0x0000240a`. Alice 418:0 marca daño con `0x00088404` y el handler crea objeto 849. Iteración 1.88 desensambla `0x465e10` y consumidores geométricos: los bits `0x00400000/0x00800000` leídos en descriptor `+0x4c` gobiernan punteros de hit/hurt transformados y corresponden a `frameFlags`, no a `attack_flags`. El sincronizador publica conteos y buffers de vectores PAT. Siguiente: recuperar el productor de CharacterFrameData para Remilia 412; no inferir hitboxes solo por daño/flags. Ver [ITERATION88.md](ITERATION88.md).

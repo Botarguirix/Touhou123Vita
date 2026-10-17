@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 2.01: corrección del dispatch de Remilia 412
+
+- Corrección importante: la Iteración 1.95 no siguió la rama previa para acciones >300. El dispatcher real envía action 412 por tabla especial a `0x58cce7`, no al update genérico `0x483f40`.
+- En el subestado `+0x140 == 4`, el handler configura datos y solicita el objeto ID 801 mediante `0x46eb30`, después invoca un callback indexado. Es un candidato concreto para explicar el ataque PAT 750, todavía sin vínculo dinámico probado con el daño.
+- Próximo: identificar ese callback y ejecutar la secuencia natural hasta el primer contacto; no hay runtime/VPK nuevo. Evidencia y límites: [ITERATION101.md](ITERATION101.md).
+
 ## Iteración 2.00: gate diferencial de Remilia 2C
 
 - Dos corridas x86 desde `0x59dd97`: con lock 0/BX 0 entra a 412 y selecciona PAT seq.0 (12 poses); con lock 0/BX 1 rechaza 412, consulta fallback 410 y no alcanza setter 412.
