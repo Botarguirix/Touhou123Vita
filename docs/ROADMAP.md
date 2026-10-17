@@ -6,6 +6,10 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
+### Remilia 412: factory del objeto 801 — Iteración 2.02
+
+`0x46eb30` es el wrapper de `Player::createObject`; la rama especial de action 412 lo llama con ID 801 y posición relativa al jugador en el subestado 4. Le sigue el callback indexado `0x464980`. Esto da un objetivo claro para el siguiente tramo: resolver factory, initializer, update y colisión de 801, y comprobar el daño contra el oracle x86. El objeto aún no está probado como fuente de los 750 PAT. Ver [ITERATION102.md](ITERATION102.md).
+
 ### Corrección del update Remilia 412 — Iteración 2.01
 
 La conclusión de Iteración 1.95 queda supersedida: action 412 sigue la tabla del dispatcher especial (`0x58a3a1 → 0x58cce7`), no el handler genérico `0x483f40`. En el subestado `+0x140 == 4`, el handler arma la solicitud del objeto 801 (`0x46eb30`) y llama un callback de objeto indexado. Siguiente trabajo: resolver ese callback y probar update/collision/daño con una secuencia natural y un oracle x86. No marcar el 2C completo ni trasladarlo al runtime hasta verificarlo. Ver [ITERATION101.md](ITERATION101.md).

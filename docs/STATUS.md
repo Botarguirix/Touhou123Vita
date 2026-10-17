@@ -2,6 +2,11 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 2.02: contrato del objeto 801
+
+- La llamada `0x46eb30` desde el handler especial de action 412 es el wrapper de `Player::createObject`: solicita el objeto 801 con coordenadas derivadas del jugador/facing. Después se invoca el callback indexado `0x464980`.
+- El vínculo de ese objeto con los 750 de daño de la pose PAT aún no se ha probado. Sigue el initializer/update/collision de 801 hasta un primer impacto comparable. Sin cambios de runtime ni VPK. Ver [ITERATION102.md](ITERATION102.md).
+
 ## Iteración 2.01: corrección del dispatch de Remilia 412
 
 - Corrección importante: la Iteración 1.95 no siguió la rama previa para acciones >300. El dispatcher real envía action 412 por tabla especial a `0x58cce7`, no al update genérico `0x483f40`.
