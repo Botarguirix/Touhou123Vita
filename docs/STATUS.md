@@ -2,6 +2,10 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 2.08: callsite Remilia 412 → objeto 801
+
+- Probe x86 ejecuta el bloque original de subestado 4 y captura ID 801, coordenadas `(403,360)`/`(237,360)` para facing `+1`/`-1`, bloque temporal `[-70,12,0]` y callback indexado por EBX. El punto de entrada, EBX, tabla, retorno del manager y dispatcher externo son fixtures; no prueba combate natural, actualización, impacto ni daño. Suite Python 40/40. Ver [ITERATION108.md](ITERATION108.md).
+
 ## Iteración 2.07: CRT y siguiente enlace Remilia 412 → 801
 - El probe permite hasta 18 updates originales de Remilia 801 en el fixture controlado; `+0x34c=0`, seq.0 sincroniza una caja PAT y seq.1 no tiene caja.
 - El callsite desensamblado calcula el spawn 801 desde posición/facing del owner; `0x464980` indexa `object+0x164[EBX]`. Falta capturar esos valores al ejecutar el estado `+0x140==4` y probar callback, colisión y daño. Ver [ITERATION107.md](ITERATION107.md).

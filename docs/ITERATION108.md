@@ -1,0 +1,9 @@
+# Iteración 2.08: ejecución del callsite Remilia 412 → objeto 801
+
+Se añade `tools/x86_remilia_412_spawn_probe.py`. La probe ejecuta las instrucciones originales del PE fijado por SHA-256 `f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e` desde el bloque de subestado 4 (`0x58cd2b`) hasta la llamada al wrapper `0x46eb30`, captura los siete argumentos y deja ejecutar el lookup original `0x464980` hasta el dispatcher `0x401d50`. Se confirma dinámicamente el ID 801, la coordenada vertical `y+180`, el bloque temporal `[-70,12,0]` y el índice de callback EBX.
+
+Corridas diferenciales con `(x,y)=(320,180)` produjeron spawn `(403,360)` al facing `+1` y `(237,360)` al facing `-1`; la separación horizontal de 166 coincide con `2×83`, y el byte de facing llega como `0x01/0xff`. El fixture de callback índice 3 contiene `0x12345678` y el `0x464980` original selecciona y despacha ese puntero. La prueba automatizada compara ambas orientaciones.
+
+Alcance: el punto de entrada ya presupone action 412/seq.0/subestado 4, EBX y la tabla de callback se fijan en el fixture; el manager devuelve un handle simulado y el dispatcher externo se intercepta. No es una transición natural de combate, no construye ni actualiza 801, y no prueba colisión ni daño. Siguiente: entrar desde el update completo de 412, resolver la función callback real y encadenar la creación con factory/update/colisión del objeto.
+
+Validación: `python tools/x86_remilia_412_spawn_probe.py` y variante `--facing -1`; suite Python completa 40/40. Sin cambios al runtime Vita ni VPK nuevo. Los reportes bajo `artifacts/` quedan ignorados; se versionan probe, test y documentación.
