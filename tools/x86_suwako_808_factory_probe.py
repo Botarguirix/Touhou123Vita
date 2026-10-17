@@ -61,6 +61,8 @@ class Suwako808FactoryProbe:
                               (OWNER_DATA, 0x10000), (PAT_MAP, 0x80000),
                               (STACK, 0x10000), (STOP, 0x1000), (HEAP, 0x100000)):
             self.uc.mem_map(address, size)
+        # The manager's factory interface is a secondary subobject at LIST-4.
+        self.uc.mem_map(LIST - 0x1000, 0x1000)
         self.uc.mem_map(0, 0x1000)  # FS:[0] used by the original SEH prologues
         self.uc.mem_map(CRT_HEAP, 0x200000)
         self.uc.mem_map(0x03100000, 0x1000)  # controlled KERNEL32 module image

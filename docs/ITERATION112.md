@@ -1,0 +1,9 @@
+# Iteración 2.12: interfaz correcta del manager y retiro administrado de 801
+
+Se corrigió la sonda real de Remilia 412 → objeto 801. El constructor del manager corre sobre el objeto base `LIST`; las llamadas de factory/update usan su interfaz secundaria `LIST-4`. `PLAYER+0x6f8` ahora contiene esa interfaz, el slot 1 se adapta a la factory original `0x784020` y el slot 4 despacha indirectamente a `0x633ce0`. Los métodos ajustan `this` y enlazan/recorren la misma lista inicializada por el constructor. Esto reemplaza el montaje anterior que conectaba la factory en `LIST` y fallaba al visitar el sentinel.
+
+Desde el hijo recién creado, sin ticks manuales previos, la lista administrada corre 55 frames. El hijo 801 avanza por su update original hasta `+0x34c=0`; el manager termina la llamada normalmente y el recorrido posterior de enlaces confirma que el nodo del hijo inicial ya no está enlazado. No aparece el fetch inválido de `ESI=1`. La fase deja seis objetos 801 adicionales activos y captura 19 retornos válidos de factory para otros 801; esta multiplicación debe analizarse como comportamiento de la ruta de actualización antes de atribuirla a un combate natural. La corrida pasó por 340 visitas a nodos durante los callbacks del manager.
+
+La matriz geométrica del helper original `0x47a5b0` sigue dando contacto con la hurtbox neutral a distancias X 0/40/60 y ninguno desde 70. Todavía no se ejecutan las fases de pares de personajes/proyectiles (`0x47cb70/0x47ce20`) ni la respuesta de daño, guardia o hitstop. La factory del callback padre y los gates de entrada siguen controlados; no es un match completo.
+
+Regresión: prueba la factory, hitbox PAT, matriz de contacto, 55 ticks indirectos por vtable, terminación y ausencia del hijo inicial en la lista. Siguiente: identificar por qué el update crea 19 objetos 801, conectar el manager de colisiones de parejas y seguir contacto hasta la mutación de vida/guardia. Sin cambio de runtime Vita ni VPK.

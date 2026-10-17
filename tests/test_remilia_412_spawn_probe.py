@@ -54,19 +54,23 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(report["child_box_sync"]["hit_box_count"], 1)
         self.assertEqual(report["child_box_sync"]["hit_boxes"],
                          [[368, -395, 438, -325]])
-        self.assertEqual(len(report["child_updates"]), 60)
-        self.assertIn("manager update", report["child_update_error"])
+        self.assertEqual(len(report["child_updates"]), 55)
+        self.assertIsNone(report["child_update_error"])
         self.assertEqual([row["contact"] for row in report["collision_matrix"]],
                          [True, True, True, False, False, False, False])
         self.assertEqual([row["center_distance_x"] for row in report["collision_matrix"]],
                          [0.0, 40.0, 60.0, 70.0, 71.0, 100.0, 200.0])
         manager = report["manager_tick"]
         completed = [row for row in manager["ticks"] if row["completed"]]
-        self.assertEqual(len(completed), 17)
-        self.assertEqual(completed[-1]["pose"], 17)
-        self.assertFalse(manager["object_retired"])
-        self.assertEqual(manager["last"]["esi"], "0x1")
-        self.assertEqual(manager["last"]["child_field_34c"], 1)
+        self.assertEqual(manager["interface"], hex(0x01000000 - 4))
+        self.assertEqual(manager["update_slot"], "vtable[4] -> 0x633ce0")
+        self.assertEqual(len(completed), 55)
+        self.assertEqual(completed[-1]["field_34c"], 0)
+        self.assertTrue(manager["object_retired"])
+        self.assertFalse(manager["original_child_still_linked"])
+        self.assertEqual(manager["live_node_count"], 6)
+        self.assertEqual(manager["live_node_actions"], ["801"] * 6)
+        self.assertEqual(len(report["factory_returns"]), 19)
 
 
 if __name__ == "__main__":

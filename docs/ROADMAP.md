@@ -6,9 +6,9 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Remilia 412 → objeto 801 — Iteración 2.11
+### Remilia 412 → objeto 801 — Iteración 2.12
 
-La probe ejecuta el setter/initializer y temporizador original de 412, que solicita 801 al tick 16; la factory crea el proyectil y el helper `0x47a5b0` confirma el umbral geométrico PAT. El slot de actualización del manager visita el hijo durante 17 ticks y llega a pose17, pero la llamada 18 falla al despachar `ESI=1` como vtable; `+0x34c` aún vale 1. Hay que corregir la convención del nodo raíz/sentinel y allocator para completar el lifecycle. Después conectar fases de pares (`0x47cb70/0x47ce20`) y respuesta/daño. No se ha verificado combate completo, VPK ni Vita3K. Ver [ITERATION111.md](ITERATION111.md), [ITERATION110.md](ITERATION110.md), [ITERATION109.md](ITERATION109.md) y [ITERATION108.md](ITERATION108.md).
+La probe ejecuta el setter/initializer y temporizador original de 412, que solicita 801 al tick 16. La factory y el update indirecto del manager usan la interfaz secundaria `LIST-4`, con lo que el hijo recién creado avanza 55 ticks y el manager elimina el nodo al quedar `+0x34c=0`; no aparece el fallo del sentinel. Se observaron 19 creaciones adicionales de 801 y seis instancias activas al terminar. El helper PAT hit-vs-hurt confirma contacto a X 0/40/60, ninguno desde 70. Siguiente: explicar el crecimiento de objetos, conectar fases de pares y seguir daño/guardia. No se ha verificado combate completo, VPK ni Vita3K. Ver [ITERATION112.md](ITERATION112.md), [ITERATION111.md](ITERATION111.md), [ITERATION110.md](ITERATION110.md), [ITERATION109.md](ITERATION109.md) y [ITERATION108.md](ITERATION108.md).
 
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 

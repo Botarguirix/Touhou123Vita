@@ -139,13 +139,13 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         manager_vtable = OWNER + 0x800
         uc.mem_write(manager_vtable, bytes(0x20))
         uc.mem_write(manager_vtable + 4, struct.pack("<I", 0x00784020))
-        uc.mem_write(LIST, struct.pack("<I", manager_vtable))
+        uc.mem_write(LIST - 4, struct.pack("<I", manager_vtable))
         uc.mem_write(PLAYER + 0x130, struct.pack("<I", OWNER))
         uc.mem_write(PLAYER + 0x170, struct.pack("<I", PLAYER))
-        uc.mem_write(PLAYER + 0x6F8, struct.pack("<I", LIST))
+        uc.mem_write(PLAYER + 0x6F8, struct.pack("<I", LIST - 4))
         uc.mem_write(OWNER + 0x130, struct.pack("<I", OWNER))
         uc.mem_write(OWNER + 0x160, struct.pack("<I", PAT_MAP))
-        uc.mem_write(LIST + 0x64, struct.pack("<I", PLAYER))
+        uc.mem_write(LIST + 0x60, struct.pack("<I", PLAYER))
     uc.mem_write(CALLBACKS, bytes(0x500))
     uc.mem_write(PLAYER + 0x164, struct.pack("<I", CALLBACKS))
     # The original vtable pose-advance method has already reached pose 4.
@@ -174,6 +174,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     child_updates: list[dict[str, object]] = []
     child_update_error: str | None = None
     manager_tick: dict[str, object] | None = None
+    manager_node_visits: list[dict[str, str]] = []
+    factory_calls: list[dict[str, str]] = []
+    factory_returns: list[dict[str, str]] = []
 
     def hook(machine, address: int, _size: int, _user: object) -> None:
         esp = machine.reg_read(UC_X86_REG_ESP)
@@ -184,6 +187,27 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             dispatch_trace.append(hex(address))
         if address in (0x0047A9E0, 0x00487870, 0x00820230, 0x00438C60):
             original_helpers.append(hex(address))
+        if real_factory and address == 0x00633C50:
+            node = machine.reg_read(UC_X86_REG_ESI)
+            obj = u32(machine, node + 8)
+            object_details = {"vtable": hex(u32(machine, obj))} if obj > 0x1000 else {}
+            if obj > 0x1000:
+                object_details["action"] = str(struct.unpack("<H", machine.mem_read(obj + 0x13C, 2))[0])
+            manager_node_visits.append({
+                "node": hex(node), "next": hex(u32(machine, node)),
+                "previous": hex(u32(machine, node + 4)),
+                "object": hex(obj), **object_details,
+            })
+        if real_factory and address == 0x00784020:
+            esp_factory = machine.reg_read(UC_X86_REG_ESP)
+            factory_calls.append({"action": hex(u32(machine, esp_factory + 12)),
+                                  "owner": hex(u32(machine, esp_factory + 8)),
+                                  "return": hex(u32(machine, esp_factory))})
+        if real_factory and address == 0x0059B70A:
+            result_ptr = machine.reg_read(UC_X86_REG_EAX)
+            factory_returns.append({"pointer": hex(result_ptr),
+                                    "action": str(struct.unpack("<H", machine.mem_read(result_ptr + 0x13C, 2))[0])
+                                    if result_ptr > 0x1000 else "invalid"})
         if address == 0x00487CA0:
             ret = u32(machine, esp)
             machine.reg_write(UC_X86_REG_ESP, esp + 4)
@@ -279,42 +303,6 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             child_box_sync = probe._sync_box_data(child)
         except Exception as exc:
             child_update_error = f"box sync: {type(exc).__name__}: {exc}"
-        for tick in range(60):
-            if u32(uc, child + 0x34C) == 0:
-                break
-            tick_sp = STACK + 0x9000 - 4
-            uc.mem_write(tick_sp, struct.pack("<I", STOP))
-            uc.reg_write(UC_X86_REG_ESP, tick_sp)
-            uc.reg_write(UC_X86_REG_ECX, child)
-            uc.reg_write(UC_X86_REG_EIP, 0x007876D0)
-            probe._code_trace.clear()
-            probe._trace_active = True
-            try:
-                uc.emu_start(0x007876D0, STOP, count=100000)
-            except Exception as exc:
-                child_update_error = f"tick {tick + 1}: {type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}"
-                break
-            finally:
-                probe._trace_active = False
-            if probe.host_termination is not None:
-                child_update_error = f"CRT termination: {probe.host_termination}"
-                break
-            if uc.reg_read(UC_X86_REG_EIP) != STOP:
-                child_update_error = f"tick {tick + 1}: dispatcher returned at {uc.reg_read(UC_X86_REG_EIP):#x}"
-                break
-            child_updates.append({
-                "tick": tick + 1,
-                "action": struct.unpack("<H", uc.mem_read(child + 0x13C, 2))[0],
-                "sequence": struct.unpack("<H", uc.mem_read(child + 0x13E, 2))[0],
-                "pose": struct.unpack("<H", uc.mem_read(child + 0x140, 2))[0],
-                "subframe": struct.unpack("<H", uc.mem_read(child + 0x142, 2))[0],
-                "field_34c": u32(uc, child + 0x34C),
-                "alpha": uc.mem_read(child + 0x113, 1)[0],
-                "position": [struct.unpack("<f", uc.mem_read(child + 0xEC, 4))[0],
-                             struct.unpack("<f", uc.mem_read(child + 0xF0, 4))[0]],
-                "hit_boxes": uc.mem_read(child + 0x1CB, 1)[0],
-                "hurt_boxes": uc.mem_read(child + 0x1CC, 1)[0],
-            })
         # Exercise the reference hit-vs-hurt helper with the factory-created
         # projectile and defender boxes extracted from Remilia's neutral PAT.
         # Pair resolution and damage response remain outside this probe.
@@ -368,7 +356,11 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         # the manager's virtual slot so its callback and removal gate remain in
         # the execution path throughout the lifecycle sample.
         manager_vtable = OWNER + 0x800
+        # The secondary manager interface at LIST-4 dispatches factory in
+        # slot 1 and update in slot 4; both methods adjust `this` by +4.
         uc.mem_write(manager_vtable + 0x10, struct.pack("<I", 0x00633CE0))
+        manager_update_stub = STOP + 0x500
+        uc.mem_write(manager_update_stub, b"\x8b\x01\xff\x50\x10\xc3")
         manager_ticks: list[dict[str, object]] = []
         for tick in range(120):
             if u32(uc, child + 0x34C) == 0:
@@ -376,12 +368,12 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             manager_sp = STACK + 0x9800 - 4
             uc.mem_write(manager_sp, struct.pack("<I", STOP))
             uc.reg_write(UC_X86_REG_ESP, manager_sp)
-            uc.reg_write(UC_X86_REG_ECX, LIST)
-            uc.reg_write(UC_X86_REG_EIP, 0x00633CE0)
+            uc.reg_write(UC_X86_REG_ECX, LIST - 4)
+            uc.reg_write(UC_X86_REG_EIP, manager_update_stub)
             probe._code_trace.clear()
             probe._trace_active = True
             try:
-                uc.emu_start(0x00633CE0, STOP, count=500000)
+                uc.emu_start(manager_update_stub, STOP, count=500000)
                 completed = uc.reg_read(UC_X86_REG_EIP) == STOP
                 state = {"tick": tick + 1, "completed": completed,
                          "field_34c": u32(uc, child + 0x34C),
@@ -389,6 +381,14 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                          "pose": struct.unpack("<H", uc.mem_read(child + 0x140, 2))[0],
                          "trace": [hex(pc) for pc in probe._code_trace[-12:]]}
                 manager_ticks.append(state)
+                child_updates.append({"tick": tick + 1,
+                                      "action": state["action"],
+                                      "sequence": struct.unpack("<H", uc.mem_read(child + 0x13E, 2))[0],
+                                      "pose": state["pose"],
+                                      "subframe": struct.unpack("<H", uc.mem_read(child + 0x142, 2))[0],
+                                      "field_34c": state["field_34c"],
+                                      "position": [struct.unpack("<f", uc.mem_read(child + 0xEC, 4))[0],
+                                                   struct.unpack("<f", uc.mem_read(child + 0xF0, 4))[0]]})
                 if not completed:
                     child_update_error = f"manager update returned at {uc.reg_read(UC_X86_REG_EIP):#x}"
                     break
@@ -404,9 +404,32 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 break
             finally:
                 probe._trace_active = False
+        root_node = u32(uc, LIST + 0x58)
+        node = u32(uc, root_node)
+        live_nodes: list[dict[str, str]] = []
+        seen_nodes: set[int] = set()
+        while node != root_node and node not in seen_nodes and len(live_nodes) < 512:
+            seen_nodes.add(node)
+            obj = u32(uc, node + 8)
+            live_nodes.append({"node": hex(node), "object": hex(obj),
+                               "action": str(struct.unpack("<H", uc.mem_read(obj + 0x13C, 2))[0])
+                               if obj > 0x1000 else "invalid"})
+            node = u32(uc, node)
         manager_tick = {"ticks": manager_ticks,
+                        "interface": hex(LIST - 4),
+                        "update_slot": "vtable[4] -> 0x633ce0",
                         "object_retired": bool(manager_ticks and manager_ticks[-1].get("field_34c") == 0),
-                        "last": manager_ticks[-1] if manager_ticks else None}
+                        "last": manager_ticks[-1] if manager_ticks else None,
+                        "live_node_count": len(live_nodes),
+                        "original_child_still_linked": any(
+                            row["object"] == child_factory["pointer"] for row in live_nodes),
+                        "live_node_actions": [row["action"] for row in live_nodes],
+                        "list_root_pointer": hex(u32(uc, LIST + 0x58)),
+                        "root_node": {"next": hex(u32(uc, u32(uc, LIST + 0x58))),
+                                      "previous": hex(u32(uc, u32(uc, LIST + 0x58) + 4)),
+                                      "data": hex(u32(uc, u32(uc, LIST + 0x58) + 8))},
+                        "list_header_words": [hex(u32(uc, LIST + offset))
+                                              for offset in (0x54, 0x58, 0x5C, 0x60, 0x64, 0x68)]}
     return {
         "initialized_action": initialized_action,
         "manager_setup": manager_state,
@@ -418,6 +441,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "child_updates": child_updates,
         "child_update_error": child_update_error,
         "manager_tick": manager_tick,
+        "manager_node_visits": manager_node_visits,
+        "factory_calls": factory_calls,
+        "factory_returns": factory_returns,
         "collision_matrix": collision_matrix,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,
