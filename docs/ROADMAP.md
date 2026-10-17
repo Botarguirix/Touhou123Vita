@@ -8,7 +8,7 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ### Audit de `attack_flags` — Iteración 1.87
 
-El roster contiene 1,442 combinaciones personaje/acción/índice/flags con poses dañinas sin cajas explícitas, distribuidas en 164 valores raw (`PAT_ATTACK_FLAGS.md`). Remilia 412:0 marca 750 de daño con `0x00204002`; 416:0/1, 800 con `0x0000240a`. Alice 418:0 marca daño con `0x00088404` y el handler crea objeto 849. Los bits no están interpretados aún. El siguiente paso técnico es descompilar el sincronizador de FrameData y los predicados de colisión con Ghidra, ejecutar vectores controlados y validar el 2C de Remilia contra el juego original; `analyzeHeadless.bat` no fue localizado en el entorno actual.
+El roster contiene 1,442 combinaciones personaje/acción/índice/flags con poses dañinas sin cajas explícitas, distribuidas en 164 valores raw (`PAT_ATTACK_FLAGS.md`). Remilia 412:0 marca 750 de daño con `0x00204002`; 416:0/1, 800 con `0x0000240a`. Alice 418:0 marca daño con `0x00088404` y el handler crea objeto 849. Iteración 1.88 desensambla `0x465e10` y consumidores geométricos: los bits `0x00400000/0x00800000` leídos en descriptor `+0x4c` gobiernan punteros de hit/hurt transformados y corresponden a `frameFlags`, no a `attack_flags`. El sincronizador publica conteos y buffers de vectores PAT. Siguiente: recuperar el productor de CharacterFrameData para Remilia 412; no inferir hitboxes solo por daño/flags. Ver [ITERATION88.md](ITERATION88.md).
 
 ### Medición B/C actual — Iteración 1.86
 

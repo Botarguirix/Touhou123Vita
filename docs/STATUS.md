@@ -2,6 +2,13 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.88: exportación reproducible de sincronización PAT
+
+- Se añadió `tools/disassemble_pe_windows.py`, fijado al SHA-256 del ejecutable original. El desensamblado local de `0x465e10`, `0x47a5b0` y `0x47a740` confirma que `frameFlags` (`+0x4c`) controla la publicación de buffers transformados; no interpreta `attackFlags` (`+0x50`).
+- `ExportKernel.java` incluye esas rutinas como objetivos Ghidra. La evidencia está en `artifacts/ghidra/attack-flag-pipeline-disassembly.tsv`, ignorada por Git.
+- Siguiente: reconstruir el productor de CharacterFrameData para Remilia 412 y probar vector/colisión mediante el harness x86; aún sin cambio de runtime/VPK.
+- Ver [ITERATION88.md](ITERATION88.md).
+
 ## Iteración 1.87: inventario PAT de `attack_flags`
 
 - Agregué un resumen reproducible de poses con daño y flags de ataque no nulos. En el roster aparecen 1,987 combinaciones personaje/acción/índice/flags con cajas explícitas (7,129 poses), 1,442 sin cajas (4,891 poses) y 164 valores raw sin caja.

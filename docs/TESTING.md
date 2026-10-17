@@ -29,6 +29,8 @@ Desde la Iteración 1.83 el reporte schema31 exige una máscara completa `roster
 
 Para inventariar poses con daño y flags de ataque usa `python tools/summarize_pat_attack_flags.py artifacts/pat-detail.tsv docs/PAT_ATTACK_FLAGS.md`. La prueba sintética del formato se ejecuta con `python -m unittest discover -s tests -p test_pat_attack_flags.py -v`. El reporte agrupa por personaje/acción/índice/flags y presencia de cajas; no interpreta bits ni valida contactos en runtime. Ver [ITERATION87.md](ITERATION87.md).
 
+Para exportar una ventana de desensamblado del ejecutable fijado, usa `python tools/disassemble_pe_windows.py --window 00465e10:240 --output artifacts/ghidra/selected-window.tsv`. Repite `--window VA:LENGTH` para incluir más direcciones. El script rechaza cualquier PE cuyo SHA-256 no coincida con la referencia documentada. Ver [ITERATION88.md](ITERATION88.md).
+
 Para automatización reproducible se recomienda una versión de Vita3K con `--frontend sdl` y añadir `-Frontend sdl` al runner. No usar `--console` para ejecutar por Title ID: es un modo de instalación. El modo portátil se activa con una carpeta `portable` al lado del ejecutable; el FAQ oficial describe esta disposición. La copia local conserva el nombre `Vita3K.exe` y no modifica la instalación compartida.
 
 `tools/run-all.ps1` encadena pruebas host, compilación Vita, VPK automático y validación Vita3K en una sola ejecución. Requiere font/assets y VitaFS preparados. `tools/play.ps1` instala la variante interactiva en el VitaFS local, retira conservando el indicador de autoprueba y abre una ventana para jugar.
