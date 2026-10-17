@@ -171,8 +171,8 @@ def pose_metadata(pat: bytes, action_id: int, sequence_id: int) -> tuple[list[st
     return images, found
 
 
-def action_sequence_metadata(pat: bytes, action_id: int) -> list[dict[str, object]]:
-    """Return the real sequence flags and frame durations for one PAT action."""
+def action_sequence_metadata(pat: bytes, action_id: int | None) -> list[dict[str, object]]:
+    """Return sequence/frame metadata for one PAT action, or all actions if None."""
     reader = Reader(pat)
     if reader.u8() != 5:
         raise ValueError("unsupported PAT version")
@@ -245,8 +245,12 @@ def action_sequence_metadata(pat: bytes, action_id: int) -> list[dict[str, objec
                            "block_stun": block_stun, "frame_flags": frame_flags,
                            "attack_flags": attack_flags, "collision_boxes": collision_boxes,
                            "hurt_boxes": hurt_boxes, "attack_boxes": attack_boxes})
-        if action == action_id:
-            result.append({"sequence": sequence, "loop_mode": loop_mode, "frames": frames})
+        if action_id is None or action == action_id:
+            row: dict[str, object] = {"sequence": sequence, "loop_mode": loop_mode,
+                                      "frames": frames}
+            if action_id is None:
+                row["action"] = action
+            result.append(row)
     return result
 
 

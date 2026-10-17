@@ -330,12 +330,11 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         # Pair resolution and damage response remain outside this probe.
         sequences = probe.pat_fixture["sequences"]
         attack_frame = sequences[0]["frames"][0]
-        neutral_frame = next(
-            frame for frame in action_sequence_metadata(
-                read_pat(dat_dir / probe.pat_fixture["archive"],
-                         "data/character/remilia/remilia.pat")[0], 0)[0]["frames"]
-            if frame["hurt_boxes"]
-        )
+        defender_pat = read_pat(dat_dir / probe.pat_fixture["archive"],
+                                "data/character/remilia/remilia.pat")[0]
+        # Action 602 is Remilia's PAT stand/neutral pose with vulnerable-frame
+        # bit 0x40, unlike the action-0 setup frame (0x31).
+        neutral_frame = action_sequence_metadata(defender_pat, 602)[0]["frames"][0]
         defender = LIST + 0x8800
         uc.mem_write(defender, bytes(0x1400))
         character_ctor_sp = STACK + 0x7000 - 4
@@ -464,6 +463,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "defender_frame_flags": hex(struct.unpack("<I", uc.mem_read(
                     u32(uc, defender + 0x1C0) + 0x4C, 4))[0]),
                 "defender_field_1ac_after_original_constructor": defender_constructor["field_1ac_after_constructor"],
+                "defender_pat_action": 602,
+                "defender_pat_sequence": int(neutral_frame.get("sequence", 0)),
+                "defender_pat_frame": int(neutral_frame["frame"]),
             }
             # Differentially open only the descriptor flag gate observed at
             # 0x47c990. object+0x1ac already came from the original character ctor.
@@ -533,6 +535,15 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                     "defender_hp_before": pair_hp_before,
                     "defender_hp_after": pair_dispatch["defender_hp_after"],
                     "damage_applied": pair_dispatch["defender_hp_after"] < pair_hp_before,
+                    "attacker_frame_damage_field": struct.unpack("<H", uc.mem_read(
+                        u32(uc, child + 0x1C0) + 0x1C, 2))[0],
+                    "attacker_frame_flags": hex(struct.unpack("<I", uc.mem_read(
+                        u32(uc, child + 0x1C0) + 0x4C, 4))[0]),
+                    "attacker_attack_flags": hex(struct.unpack("<I", uc.mem_read(
+                        u32(uc, child + 0x1C0) + 0x50, 4))[0]),
+                    "attacker_hitbox_count": uc.mem_read(child + 0x1CB, 1)[0],
+                    "defender_hurtbox_count": uc.mem_read(defender + 0x1CC, 1)[0],
+                    "attacker_cooldown_190": u32(uc, child + 0x190),
                     "error": pair_error,
                     "failure_after_damage": bool(pair_error and
                         pair_dispatch["defender_hp_after"] < pair_hp_before),

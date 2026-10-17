@@ -1,0 +1,9 @@
+# Iteración 2.17: impacto por el dispatcher con frame vulnerable PAT auténtico
+
+Se extendió el decodificador para recorrer todas las acciones PAT y se añadió `tools/find_pat_vulnerability_frames.py`. En el PAT de Remilia de `th123c.dat` (SHA-256 `e5ae70d49562120fda4dca1007848cab70dd1a094a6b9a278295615753ba47cd`) hay 3,052 poses con hurtbox, 781 poses con `frameFlags&0x40` y 762 que cumplen ambas condiciones. La acción 602, seq.0/frame0 —pose de pie— contiene hurtbox y `frameFlags=0x3041`, con `attackFlags=0`.
+
+La sonda construye el objeto defensor ejecutando el constructor base original `0x46b7f0`, carga la geometría/flags PAT originales de acción 602 y usa `object+0x1ac=1` producido por ese constructor. Sin modificar flags, el manager alcanza `0x47ce20 → 0x47ca70 → 0x47c990 → 0x47b660 → 0x47a5b0`; la geometría contacta y la vida baja 1000→880 por los 120 de Remilia 801 seq.0. Luego cae en callback global nulo de presentación, después de la mutación.
+
+Esta corrida ya no abre artificialmente el bit vulnerable. Sí sigue siendo una fixture controlada: el harness selecciona e instala el frame 602 PAT en el objeto defensor, sitúa ambos objetos y arma las listas del manager; **no** ejecuta todavía el dispatcher/initializer/update del personaje hasta llegar naturalmente a esa pose. Por ello valida una respuesta original con estado PAT auténtico, no una pelea end-to-end natural. Siguiente: ejecutar el estado de personaje y transición a la pose 602 por setters/updates originales, mantener la lista real de combate y resolver el callback de presentación para observar reacción e hitstop. No cambia el runtime Vita ni el VPK.
+
+La suite Python completa y el analizador de firmas del PE se ejecutan antes del commit. El inventario se regenera con `python tools/find_pat_vulnerability_frames.py original --character remilia --output artifacts/remilia-vulnerability-summary.json`; `--include-poses` incluye coordenadas de cada frame coincidente.

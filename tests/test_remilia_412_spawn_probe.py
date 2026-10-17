@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from tools.x86_remilia_412_spawn_probe import run_case
+from tools.find_pat_vulnerability_frames import scan_character
 
 
 class Remilia412SpawnProbeTest(unittest.TestCase):
@@ -80,27 +81,24 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual([row["this_pose"] for row in helper_calls],
                          [0, 3, 6, 9, 12, 15, 18, 1, 4, 7, 10, 13, 16, 19, 2, 5, 8, 11, 14])
 
-    def test_original_pair_dispatch_reaches_pat_damage_after_opening_observed_gates(self):
+    def test_original_pair_dispatch_applies_pat_damage_on_real_vulnerable_pose(self):
         report = run_case(self.dat_dir, 320.0, 180.0, 1, 1,
                           real_factory=True, resolve_damage=True)
         pair = report["pair_dispatch"]
-        self.assertIsNone(pair["error"])
+        self.assertIn("0x0", pair["error"])
         self.assertTrue(pair["reached_projectile_filter"])
         self.assertTrue(pair["reached_character_resolver"])
-        self.assertEqual(pair["defender_frame_flags"], "0x31")
+        self.assertEqual(pair["defender_pat_action"], 602)
+        self.assertEqual((pair["defender_pat_sequence"], pair["defender_pat_frame"]), (0, 0))
+        self.assertEqual(pair["defender_frame_flags"], "0x3041")
         self.assertEqual(pair["defender_field_1ac_after_original_constructor"], 1)
         self.assertEqual(report["defender_constructor"], {
             "function": "0x46b7f0", "field_1ac_after_constructor": 1,
         })
-        self.assertEqual(pair["defender_hp_after"], 1000)
-        gate_trial = pair["gate_open_trial"]
-        self.assertTrue(gate_trial["synthetic"])
-        self.assertEqual(gate_trial["geometry_after_dispatch"]["return_value"], 1)
-        self.assertTrue(gate_trial["reached_hit_response"])
-        self.assertEqual(gate_trial["defender_hp_after"], 880)
-        self.assertIn("0x47a5b0", gate_trial["call_sites"])
+        self.assertEqual(pair["defender_hp_after"], 880)
+        self.assertNotIn("gate_open_trial", pair)
         response = report["damage_response"]
-        self.assertEqual(response["function"], "pair-dispatch-gate-open")
+        self.assertEqual(response["function"], "pair-dispatch")
         self.assertTrue(response["damage_applied"])
         self.assertEqual(response["pat_damage"], 120)
         self.assertEqual((response["defender_hp_before"], response["defender_hp_after"]),
@@ -112,6 +110,16 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertTrue(response["failure_after_damage"])
         self.assertEqual(response["external_callback_pointer"], "0x0")
         self.assertIn("0x479cb0", response["trace"])
+
+    def test_remilia_pat_inventory_has_vulnerable_hurtbox_frames(self):
+        report = scan_character(self.dat_dir, "remilia")
+        self.assertEqual(report["archive"], "th123c.dat")
+        self.assertEqual(report["poses_with_hurt_boxes"], 3052)
+        self.assertEqual(report["poses_with_flag_0x40"], 781)
+        self.assertEqual(report["poses_with_hurt_and_flag_0x40"], 762)
+        example = report["actions"]["602"]["examples"][0]
+        self.assertEqual((example["sequence"], example["frame"], example["frame_flags"]),
+                         (0, 0, "0x00003041"))
 
 
 if __name__ == "__main__":
