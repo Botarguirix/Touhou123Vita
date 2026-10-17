@@ -61,11 +61,54 @@ class Suwako808FactoryProbe:
                               (STACK, 0x10000), (STOP, 0x1000), (HEAP, 0x100000)):
             self.uc.mem_map(address, size)
         self.uc.mem_map(0, 0x1000)  # FS:[0] used by the original SEH prologues
+        self.uc.mem_map(0x03100000, 0x1000)  # controlled KERNEL32 module image
         self.uc.mem_write(STOP, b"\xf4")
         self.uc.mem_write(STOP + 0x10, b"\xc2\x04\x00")  # lock init/lock/unlock service
         self.uc.mem_write(0x00857114, struct.pack("<I", STOP + 0x10))
         self.uc.mem_write(0x00857118, struct.pack("<I", STOP + 0x10))
         self.uc.mem_write(0x0085711C, struct.pack("<I", STOP + 0x10))
+        self._windows_api_stub_names: dict[int, str] = {}
+        self._tls_slots: dict[int, int] = {}
+        self._last_error = 0
+        if action_id == 801:
+            # Minimal, signature-correct KERNEL32 contracts for the CRT
+            # delay-load/pointer-decoder path exercised by action 801.
+            api_stubs = {
+                "TlsGetValue": (0x20, b"\x31\xc0\xc2\x04\x00", 0x857190),
+                "GetModuleHandleA": (0x30, b"\xb8\x00\x00\x10\x03\xc2\x04\x00", 0x857188),
+                "GetProcAddress": (0x40, b"\xb8\x50\x00\x00\x03\xc2\x08\x00", 0x857184),
+                "DecodePointer": (0x50, b"\x8b\x44\x24\x04\xc2\x04\x00", None),
+                "GetLastError": (0x60, b"\x31\xc0\xc3", 0x857038),
+                "SetLastError": (0x70, b"\x31\xc0\xc2\x04\x00", 0x8571A4),
+                "GetCurrentThreadId": (0x80, b"\xb8\x01\x00\x00\x00\xc3", 0x8571A8),
+                "IsDebuggerPresent": (0x90, b"\x31\xc0\xc3", 0x857160),
+                "SetUnhandledExceptionFilter": (0xA0, b"\x31\xc0\xc2\x04\x00", 0x85715C),
+                "UnhandledExceptionFilter": (0xB0, b"\x31\xc0\xc2\x04\x00", 0x857158),
+                "InterlockedIncrement": (0xC0, b"\x8b\x44\x24\x04\xff\x00\x8b\x00\xc2\x04\x00", 0x8571A0),
+            }
+            for name, (offset, code, iat) in api_stubs.items():
+                address = STOP + offset
+                self.uc.mem_write(address, code)
+                self._windows_api_stub_names[address] = name
+                if iat is not None:
+                    self.uc.mem_write(iat, struct.pack("<I", address))
+            self._windows_api_stub_names[STOP + 0xD0] = "TlsAlloc"
+            self._windows_api_stub_names[STOP + 0xD4] = "TlsSetValue"
+            self.uc.mem_write(0x00857194, struct.pack("<I", STOP + 0xD0))
+            self.uc.mem_write(0x00857198, struct.pack("<I", STOP + 0xD4))
+            fake = bytearray(0x400)
+            fake[:2] = b"MZ"
+            struct.pack_into("<I", fake, 0x3C, 0x80)
+            fake[0x80:0x84] = b"PE\0\0"
+            struct.pack_into("<H", fake, 0x86, 1)  # one section
+            struct.pack_into("<H", fake, 0x94, 0xE0)  # optional header size
+            fake[0x178:0x180] = b".text\0\0\0"
+            self.uc.mem_write(0x03100000, bytes(fake))
+            # The static CRT normally initializes its invalid-parameter
+            # callback before game objects update; use a no-op callback slot.
+            self.uc.mem_write(0x0089AB48, struct.pack("<I", 1))
+            self.uc.mem_write(0x0089AB54, struct.pack("<I", STOP + 0xE0))
+            self.uc.mem_write(STOP + 0xE0, b"\xc3")
         self.heap_cursor = HEAP
         self.allocations: list[dict[str, object]] = []
         self.events: list[dict[str, object]] = []
@@ -96,11 +139,58 @@ class Suwako808FactoryProbe:
         uc.reg_write(UC_X86_REG_EIP, target)
 
     def _hook(self, uc: Uc, address: int, _size: int, _user: object) -> None:
+        if address in self._windows_api_stub_names:
+            self.events.append({"address": "windows-api", "name": self._windows_api_stub_names[address]})
+            esp = uc.reg_read(UC_X86_REG_ESP)
+            if address == STOP + 0x20:  # TlsGetValue(DWORD index)
+                index = read_u32(uc, esp + 4)
+                self._last_error = 87 if index == 0xFFFFFFFF else 0
+                uc.reg_write(UC_X86_REG_EAX, self._tls_slots.get(index, 0))
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x60:  # GetLastError()
+                uc.reg_write(UC_X86_REG_EAX, self._last_error)
+                self._return(esp)
+                return
+            if address == STOP + 0x70:  # SetLastError(DWORD)
+                self._last_error = read_u32(uc, esp + 4)
+                uc.reg_write(UC_X86_REG_EAX, 0)
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x50:  # DecodePointer(PVOID)
+                encoded = read_u32(uc, esp + 4)
+                self.events.append({"address": "windows-api-arg", "name": "DecodePointer",
+                                    "value": hex(encoded)})
+                uc.reg_write(UC_X86_REG_EAX, encoded)
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0xD0:  # TlsAlloc() -> stable synthetic slot
+                uc.reg_write(UC_X86_REG_EAX, 0x40)
+                self._return(esp)
+                return
+            if address == STOP + 0xD4:  # TlsSetValue(index, value)
+                index, value = read_u32(uc, esp + 4), read_u32(uc, esp + 8)
+                self._tls_slots[index] = value
+                uc.reg_write(UC_X86_REG_EAX, 1)
+                self._return(esp, cleanup=8)
+                return
         if self._trace_active:
             self._code_trace.append(address)
-            del self._code_trace[:-40]
+            del self._code_trace[:-300]
+            if address < 0x1000:
+                self.events.append({"address": "invalid-low-code-fetch", "eip": hex(address)})
+                uc.emu_stop()
+                return
         if address == STOP:
             uc.emu_stop()
+            return
+        if address == 0x0047DCB0 and self.action_id == 801:
+            # The CRT module-wrapper owns freshly zeroed auxiliary containers
+            # in this fixture. Its cleanup callback would dispatch through
+            # their intentionally absent vtables; empty-container teardown is
+            # a no-op, so skip only this host-wrapper destructor.
+            self.events.append({"address": "host-wrapper-cleanup", "object": hex(uc.reg_read(UC_X86_REG_ECX))})
+            self._return(uc.reg_read(UC_X86_REG_ESP))
             return
         if address in (0x004640B0, 0x00464200):
             esp = uc.reg_read(UC_X86_REG_ESP)
@@ -370,7 +460,7 @@ class Suwako808FactoryProbe:
                 try:
                     uc.emu_start(0x007876D0, STOP, count=100000)
                 except Exception as exc:
-                    trail = ",".join(hex(item) for item in self._code_trace[-24:])
+                    trail = ",".join(hex(item) for item in self._code_trace[-120:])
                     regs = {name: f"{uc.reg_read(register):#x}" for name, register in (
                         ("eax", UC_X86_REG_EAX), ("ebx", UC_X86_REG_EBX),
                         ("ecx", UC_X86_REG_ECX), ("edx", UC_X86_REG_EDX),
@@ -382,7 +472,9 @@ class Suwako808FactoryProbe:
                 finally:
                     self._trace_active = False
                 if uc.reg_read(UC_X86_REG_EIP) != STOP:
-                    update_error = f"tick {tick + 1}: unexpected EIP {uc.reg_read(UC_X86_REG_EIP):#x}"
+                    trail = ",".join(hex(item) for item in self._code_trace[-120:])
+                    update_error = (f"tick {tick + 1}: stopped outside PE at "
+                                    f"EIP={uc.reg_read(UC_X86_REG_EIP):#x}; trace={trail}")
                     break
                 updates.append({
                     "tick": tick + 1,

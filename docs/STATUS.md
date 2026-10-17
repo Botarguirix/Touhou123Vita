@@ -2,6 +2,11 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 2.05: imports Windows y fixture del objeto 801
+
+- Se modelaron imports del CRT/Kernel32 con contratos controlados; la rutina atraviesa `TlsGetValue` y llega al update auxiliar. Luego recursa sobre una lista cuyo fixture carece de sus contenedores/vtables; no se demuestra ciclo de vida ni daño.
+- Suwako 808 conserva la regresión de ocho ticks y `py_compile` pasa. Próximo: reconstruir el constructor/sentinela de esas listas. Ver [ITERATION105.md](ITERATION105.md).
+
 ## Iteración 2.04: factory x86 del objeto Remilia 801
 
 - Factory e initializer originales crean action 801/seq.1; `0x465e10` publica una hitbox al seleccionar seq.0 y ninguna en seq.1. El update avanza tres ticks; el cuarto intenta `KERNEL32!TlsGetValue` por IAT `0x857190`, cuyo puntero sin resolver (`0x8a896c0d`) provoca la excepción. Ciclo de vida/daño aún no verificados.

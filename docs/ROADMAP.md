@@ -6,6 +6,10 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
+### Contenedores auxiliares del objeto 801 — Iteración 2.05
+
+Con stubs de Windows/CRT el update de Remilia 801 supera la importación anterior, pero recursa en una lista/auxiliar sin construir en el fixture Unicorn. La factory sigue creando el objeto; falta reproducir sus contenedores/callbacks antes de probar daño. Ver [ITERATION105.md](ITERATION105.md).
+
 ### Prueba de factory/pose del objeto 801 — Iteración 2.04
 
 La factory original crea Remilia action 801/seq.1 y el sincronizador PAT publica una caja ofensiva al seleccionar seq.0. Tres updates x86 de seq.1 corren; tick 4 requiere dependencias globales/servicios aún no montados en Unicorn, por lo que no se prueba vida ni daño natural. Resolver el servicio y el setup de secuencia emitido por 412. Ver [ITERATION104.md](ITERATION104.md).
