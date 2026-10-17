@@ -2,6 +2,15 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.85: ataque A natural para todo el roster
+
+- El auto-test schema30 ejecuta cada PAT desde el spawn normal `(190,450)` contra Cirno quieto: aproxima al jugador con 130 updates de `IN_RIGHT`, intenta las entradas A terrestres disponibles y espera a que conecte usando únicamente `fight_step`, PAT y sus hitboxes/hurtboxes. No acomoda manualmente las coordenadas para esta medición.
+- Los 20 personajes conectaron al menos una ruta y el daño coincide con la pose de impacto: `roster_a_natural_attack_mask=1048575` (`0xFFFFF`). Se mantienen también los 20/20 casos de geometría controlada. La prueba principal de 600 frames registra `a_hits=1`, B=1 y C=2; el gate y runner exigen ambas máscaras completas y el hit A del combate.
+- VitaSDK recompiló el VPK y Vita3K SDL aislado pasó schema30/600 frames. Paquete: 96,291 bytes, SHA-256 `1a1461e7197ac65694ce45f01f45f3460288301bd7029c27a1b072300372fd08`. Evidencia visual: [fight-natural-a.bmp](../artifacts/screenshots/fight-natural-a.bmp).
+- Límite: cada luchador se enfrenta a Cirno inmóvil en la sonda, por lo que no prueba 400 matchups, IA, defensa ni paridad temporal con TH123. La pelea mostrada sigue siendo prototipo; faltan skills/objetos para el roster, sistemas globales y los otros escenarios. Siguiente: medir B/C y entradas de dash por personaje, luego matchups y guardia con trazas comparables al original.
+
+Ver [ITERATION85.md](ITERATION85.md).
+
 ## Iteración 1.84: impacto A con aproximación normal
 
 - Ajusté la secuencia de autoprueba para recorrer distancia con `IN_RIGHT`, dejar la CPU inmóvil y pulsar A con `IN_MELEE`; el combate no recoloca a los luchadores para ese impacto. La ejecución de `fight_step` registró `a_hits=1`. El runner y el gate Vita ahora exigen ese hit.

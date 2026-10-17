@@ -6,9 +6,9 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Gate de reconstrucción — Iteración 1.84
+### Gate de reconstrucción — Iteración 1.85
 
-Build VitaSDK fresco, VPK de 96,273 bytes, SHA-256 `ef4ca60440f5ab7d5607e182884517dac4299578b15a0349bd93ec1e87ac27f8`; Vita3K SDL aislado schema29 pasó 600 frames. La regresión registra un golpe A tras movimiento normal de Marisa hacia Cirno inmóvil (`a_hits=1`) y mantiene el gate de ruta A PAT para 20/20 (`0xFFFFF`), roster de recursos 20/20 y BG34. Es un único matchup determinista: no verifica IA/guardia ni paridad por frame. La evidencia visual de la corrida está en [fight-natural-a.bmp](../artifacts/screenshots/fight-natural-a.bmp); los otros escenarios y sus mecánicas siguen pendientes. El VPK queda local en `artifacts/`. Ver [ITERATION84.md](ITERATION84.md), [ITERATION83.md](ITERATION83.md), [ITERATION82.md](ITERATION82.md) y [STATUS.md](STATUS.md).
+Build VitaSDK fresco, VPK de 96,291 bytes, SHA-256 `1a1461e7197ac65694ce45f01f45f3460288301bd7029c27a1b072300372fd08`; Vita3K SDL aislado schema30 pasó 600 frames. El gate prueba rutas A con aproximación natural desde spawns normales contra Cirno inmóvil para los 20 PAT (`roster_a_natural_attack_mask=0xFFFFF`), además de ataque A con geometría controlada, hits A/B/C en la pelea principal, roster de recursos 20/20 y BG34. No verifica todos los matchups, IA/guardia ni paridad por frame. La evidencia visual está en [fight-natural-a.bmp](../artifacts/screenshots/fight-natural-a.bmp); los otros escenarios y sus mecánicas siguen pendientes. El VPK queda local en `artifacts/`. Ver [ITERATION85.md](ITERATION85.md), [ITERATION84.md](ITERATION84.md), [ITERATION83.md](ITERATION83.md) y [STATUS.md](STATUS.md).
 
 ### Seguimiento activo de objetos — Iteración 1.81
 
