@@ -104,10 +104,47 @@ def u32(uc, address: int) -> int:
     return struct.unpack("<I", uc.mem_read(address, 4))[0]
 
 
-def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int) -> dict[str, object]:
-    probe = Suwako808FactoryProbe(ROOT / "original/th123.exe", dat_dir)
+def initialize_object_manager(probe: Suwako808FactoryProbe) -> dict[str, object]:
     uc = probe.uc
+    sp = STACK + 0x5000 - 4
+    uc.mem_write(sp, struct.pack("<I", STOP))
+    uc.reg_write(UC_X86_REG_ESP, sp)
+    uc.reg_write(UC_X86_REG_EIP, 0x00824BFA)
+    uc.emu_start(0x00824BFA, STOP, count=100000)
+    if uc.reg_read(UC_X86_REG_EIP) != STOP:
+        raise RuntimeError(f"CRT init did not return: {uc.reg_read(UC_X86_REG_EIP):#x}")
+    sp = STACK + 0x7000 - 4
+    uc.mem_write(sp, struct.pack("<I", STOP))
+    uc.reg_write(UC_X86_REG_ESP, sp)
+    uc.reg_write(UC_X86_REG_ECX, LIST)
+    uc.reg_write(UC_X86_REG_EIP, 0x00783D70)
+    uc.emu_start(0x00783D70, STOP, count=100000)
+    if uc.reg_read(UC_X86_REG_EIP) != STOP:
+        raise RuntimeError(f"object manager ctor did not return: {uc.reg_read(UC_X86_REG_EIP):#x}")
+    return {"crt": "0x824bfa", "manager_constructor": "0x783d70", "completed": True}
+
+
+def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int,
+             real_factory: bool = False) -> dict[str, object]:
+    probe = Suwako808FactoryProbe(ROOT / "original/th123.exe", dat_dir,
+                                  character="remilia", action_id=801)
+    uc = probe.uc
+    manager_state = initialize_object_manager(probe) if real_factory else None
     initialized_action = initialize_action_412(probe, dat_dir)
+    if real_factory:
+        # The original manager's vtable slot +4 points outside the pinned PE
+        # in this isolated image. Route that interface slot to the game's own
+        # 0x784020 factory while preserving its actual list/handle state.
+        manager_vtable = OWNER + 0x800
+        uc.mem_write(manager_vtable, bytes(0x20))
+        uc.mem_write(manager_vtable + 4, struct.pack("<I", 0x00784020))
+        uc.mem_write(LIST, struct.pack("<I", manager_vtable))
+        uc.mem_write(PLAYER + 0x130, struct.pack("<I", OWNER))
+        uc.mem_write(PLAYER + 0x170, struct.pack("<I", PLAYER))
+        uc.mem_write(PLAYER + 0x6F8, struct.pack("<I", LIST))
+        uc.mem_write(OWNER + 0x130, struct.pack("<I", OWNER))
+        uc.mem_write(OWNER + 0x160, struct.pack("<I", PAT_MAP))
+        uc.mem_write(LIST + 0x64, struct.pack("<I", PLAYER))
     uc.mem_write(CALLBACKS, bytes(0x500))
     uc.mem_write(PLAYER + 0x164, struct.pack("<I", CALLBACKS))
     # The original vtable pose-advance method has already reached pose 4.
@@ -131,6 +168,10 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     dispatch_trace: list[str] = []
     execution_tail: list[str] = []
     tick_states: list[dict[str, int]] = []
+    child_factory: dict[str, object] = {}
+    child_box_sync: dict[str, object] | None = None
+    child_updates: list[dict[str, object]] = []
+    child_update_error: str | None = None
 
     def hook(machine, address: int, _size: int, _user: object) -> None:
         esp = machine.reg_read(UC_X86_REG_ESP)
@@ -159,9 +200,28 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "temporary_float_block": list(struct.unpack("<3f", machine.mem_read(ptr, 12))),
                 "temporary_float_count": words[7],
             })
-            machine.reg_write(UC_X86_REG_EAX, 0x0BADF00D)  # controlled manager result
-            machine.reg_write(UC_X86_REG_ESP, esp + 32)  # ret 0x1c
-            machine.reg_write(UC_X86_REG_EIP, words[0])
+            if real_factory:
+                # The parent action has reached its spawn frame; prepare the
+                # child's real PAT lookup and let 0x46eb30 call the manager.
+                machine.mem_write(PLAYER + 0x160, struct.pack("<I", PAT_MAP))
+                probe._prepare_pat()
+            else:
+                machine.reg_write(UC_X86_REG_EAX, 0x0BADF00D)
+                machine.reg_write(UC_X86_REG_ESP, esp + 32)
+                machine.reg_write(UC_X86_REG_EIP, words[0])
+        elif address == 0x0058CDC4 and real_factory:
+            child = machine.reg_read(UC_X86_REG_EAX)
+            if child:
+                child_factory.update({
+                    "pointer": hex(child),
+                    "action": struct.unpack("<H", machine.mem_read(child + 0x13C, 2))[0],
+                    "sequence": struct.unpack("<H", machine.mem_read(child + 0x13E, 2))[0],
+                    "pose": struct.unpack("<H", machine.mem_read(child + 0x140, 2))[0],
+                    "pose_count": struct.unpack("<H", machine.mem_read(child + 0x148, 2))[0],
+                    "position": [struct.unpack("<f", machine.mem_read(child + 0xEC, 4))[0],
+                                 struct.unpack("<f", machine.mem_read(child + 0xF0, 4))[0]],
+                    "lifetime_field_34c": u32(machine, child + 0x34C),
+                })
         elif address == CALLBACK_DISPATCH:
             callback_pointer = u32(machine, esp + 4)
             callback.update({
@@ -210,11 +270,58 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         raise RuntimeError(f"original handler block did not request object 801: {errors}")
     if not callback:
         raise RuntimeError(f"original indexed callback did not dispatch: {errors}")
+    if real_factory and child_factory:
+        child = int(child_factory["pointer"], 16)
+        try:
+            child_box_sync = probe._sync_box_data(child)
+        except Exception as exc:
+            child_update_error = f"box sync: {type(exc).__name__}: {exc}"
+        for tick in range(60):
+            if u32(uc, child + 0x34C) == 0:
+                break
+            tick_sp = STACK + 0x9000 - 4
+            uc.mem_write(tick_sp, struct.pack("<I", STOP))
+            uc.reg_write(UC_X86_REG_ESP, tick_sp)
+            uc.reg_write(UC_X86_REG_ECX, child)
+            uc.reg_write(UC_X86_REG_EIP, 0x007876D0)
+            probe._code_trace.clear()
+            probe._trace_active = True
+            try:
+                uc.emu_start(0x007876D0, STOP, count=100000)
+            except Exception as exc:
+                child_update_error = f"tick {tick + 1}: {type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}"
+                break
+            finally:
+                probe._trace_active = False
+            if probe.host_termination is not None:
+                child_update_error = f"CRT termination: {probe.host_termination}"
+                break
+            if uc.reg_read(UC_X86_REG_EIP) != STOP:
+                child_update_error = f"tick {tick + 1}: dispatcher returned at {uc.reg_read(UC_X86_REG_EIP):#x}"
+                break
+            child_updates.append({
+                "tick": tick + 1,
+                "action": struct.unpack("<H", uc.mem_read(child + 0x13C, 2))[0],
+                "sequence": struct.unpack("<H", uc.mem_read(child + 0x13E, 2))[0],
+                "pose": struct.unpack("<H", uc.mem_read(child + 0x140, 2))[0],
+                "subframe": struct.unpack("<H", uc.mem_read(child + 0x142, 2))[0],
+                "field_34c": u32(uc, child + 0x34C),
+                "alpha": uc.mem_read(child + 0x113, 1)[0],
+                "position": [struct.unpack("<f", uc.mem_read(child + 0xEC, 4))[0],
+                             struct.unpack("<f", uc.mem_read(child + 0xF0, 4))[0]],
+                "hit_boxes": uc.mem_read(child + 0x1CB, 1)[0],
+                "hurt_boxes": uc.mem_read(child + 0x1CC, 1)[0],
+            })
     return {
         "initialized_action": initialized_action,
+        "manager_setup": manager_state,
         "input_fixture": {"position": [x, y], "facing": facing,
                           "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,
+        "child_factory_result": child_factory or None,
+        "child_box_sync": child_box_sync,
+        "child_updates": child_updates,
+        "child_update_error": child_update_error,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,
         "animation_tick_states": tick_states,
@@ -225,7 +332,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             "gauge_5e4": struct.unpack("<H", uc.mem_read(PLAYER + 0x5E4, 2))[0],
         },
         "error": errors or None,
-        "scope": "Original action setter/initializer chain 0x464930..0x59ad64 runs to produce action 412/seq.0/pose 0. On each repeated main-action dispatch, original 0x438c60 increments subframe and duration-gates calls through Remilia vtable slot 8 to 0x464b70; the original 0x587bab comparison, 0x58a3a1 dispatch, 0x58cce7 handler, 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 lookup execute. EBX=1 is seeded to match skipped prologue 0x5879cf; callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0 remains a service fixture. Full 0x5879a0 prologue/gates, actual manager, callback, 801 update, collision, and damage are not run.",
+        "scope": "Original action setter/initializer, 0x438c60 timer, action dispatch, helpers, spawn wrapper, and 0x464980 lookup execute. With real_factory=true, CRT startup and object manager constructor execute; manager interface slot +4 is directed to the original 0x784020 factory because its normal target is outside this pinned image. Player PAT/animation fixture, EBX=1 from skipped prologue, callback table/external dispatcher, and 0x487ca0 service remain controlled. In real_factory mode the original child box sync and 0x7876d0 update dispatcher run; pair collision/damage remain unresolved.",
     }
 
 
@@ -235,11 +342,14 @@ def main() -> None:
     parser.add_argument("--x", type=float, default=320.0)
     parser.add_argument("--y", type=float, default=180.0)
     parser.add_argument("--facing", type=int, choices=(-1, 1), default=1)
+    parser.add_argument("--real-factory", action="store_true",
+                        help="execute CRT startup, object manager, and the actual 801 factory")
     parser.add_argument("--callback-index", type=int, choices=(0, 1, 2, 3), default=1,
                         help="callback table slot preloaded with the fixture function pointer")
     parser.add_argument("--output", type=Path, default=ROOT / "artifacts/x86-remilia-412-spawn-probe.json")
     args = parser.parse_args()
-    result = run_case(args.dat_dir, args.x, args.y, args.facing, args.callback_index)
+    result = run_case(args.dat_dir, args.x, args.y, args.facing, args.callback_index,
+                      real_factory=args.real_factory)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))

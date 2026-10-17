@@ -4,6 +4,8 @@ Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
 ## Iteración 2.08: callsite Remilia 412 → objeto 801
 
+- **Iteración 2.09:** la factory original crea 801/seq.0 con 20 poses en `(403,360)`; sync publica una hitbox PAT y el update original corre 60 ticks sin error. Sigue vivo al tick 60. Callback/servicios externos, pareja, colisión y daño aún sin verificar. Ver [ITERATION109.md](ITERATION109.md).
+
 - Probe x86 ejecuta setter/initializer y temporizador PAT originales: `0x438c60` avanza subframe y `0x464b70` cambia pose cada 4 ticks; el handler llega a pose4 y pide 801 en el tick 16. Ambas orientaciones dan spawn `(403,360)`/`(237,360)`. Callback/manager externos y gates previos siguen en fixture; no prueba colisión ni daño. Suite Python 40/40. Ver [ITERATION108.md](ITERATION108.md).
 
 ## Iteración 2.07: CRT y siguiente enlace Remilia 412 → 801

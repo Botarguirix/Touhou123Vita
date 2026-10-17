@@ -6,9 +6,9 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Remilia 412 → objeto 801 — Iteración 2.08
+### Remilia 412 → objeto 801 — Iteración 2.09
 
-La probe encadena el setter/initializer original 412 hasta pose0/12 poses, y luego ejecuta desde la comparación del update `0x587bab`; pose4 se prepara en fixture hasta resolver el actualizador de animación por los dispatchers `0x58a3a1 → 0x58cce7`, el callsite de subestado 4 y `0x464980`; EBX=1 procede del prólogo del update principal: objeto 801, spawn diferencial por facing y lectura del callback `object+0x164[EBX]` quedan medidos. El estado de entrada, índice/tabla de callback, manager y dispatcher externo siguen controlados. Siguiente: ejecución desde el update natural de 412 y callback real, seguida por factory/update/colisión del 801. No se ha probado combate ni daño. Ver [ITERATION108.md](ITERATION108.md).
+La probe ejecuta el setter/initializer y temporizador original de 412, que avanza pose cada cuatro ticks y solicita 801 al tick 16. La factory original crea 801/seq.0 con 20 poses; el sincronizador de caja carga una hitbox PAT y el dispatcher original del hijo corre 60 ticks sin error. El manager usa un adaptador porque su vtable ordinario apunta fuera del PE fijado; callback/servicios externos y gates del jugador siguen controlados. El hijo sigue activo al tick 60. Siguiente: callback real, servicio/manager y defensor para medir contacto/daño. Sin combate completo ni cambios Vita/VPK. Ver [ITERATION109.md](ITERATION109.md) y [ITERATION108.md](ITERATION108.md).
 
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 
