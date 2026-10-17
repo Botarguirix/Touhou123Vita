@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.96: ejecución del initializer Remilia 412
+
+- Se añadió `tools/x86_remilia_412_initializer_probe.py`: el mapa/jump table original resuelve action 412 a grupo 15 y `0x59ad64`; Unicorn ejecuta el cuerpo y `0x4636b0` del PE.
+- La sonda comprueba resets de `+0x190`, `+0x7D0/+0x7D2/+0x7D6/+0x7D8` y floats `+0xF4..+0x100`. Reporte ignorado: `artifacts/kernel/remilia-412-initializer.json`.
+- El initializer solo limpia estado/counters y movimiento, sin daño ni spawn visible. Falta ejecutar el caller/entrada a 412 y rastrear el origen real del contacto. Ver [ITERATION96.md](ITERATION96.md).
+
 ## Iteración 1.95: dispatcher común de Remilia y action 412
 
 - El update `0x5879a0` enruta acciones mayores que 226 al método genérico `0x483f40`. Este último solo despacha explícitamente actions 50–181; 412 termina en el epílogo por defecto `0x484be3`.

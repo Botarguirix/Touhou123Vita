@@ -1,0 +1,7 @@
+# Iteración 1.96: ejecutar el initializer original de Remilia 412
+
+La sonda nueva `tools/x86_remilia_412_initializer_probe.py` decodifica el mapa de inicializadores del PE: `action-0xD9` indexa bytes en `0x59b380`; el resultado selecciona un destino en el jump table `0x59b32c`. Para action 412 el índice es 195, el grupo es 15 y el destino es `0x59ad64`. Los casos de control 411, 413, 416 y 418 resuelven a otros destinos, como corresponde a sus handlers separados.
+
+La sonda ejecuta en Unicorn el cuerpo original `0x59ad64` y el helper original `0x4636b0`, con memoria de objeto sembrada con valores centinela. Se verifican a cero `object+0x190`, los contadores `+0x7D0/+0x7D2/+0x7D6/+0x7D8` y los cuatro floats `+0xF4/+0xF8/+0xFC/+0x100`. El reporte local ignorado es `artifacts/kernel/remilia-412-initializer.json`.
+
+Esto prueba el destino y los efectos del initializer, no el flujo de entrada completo, la actualización del personaje, el spawn de objetos ni un impacto. El initializer observado solo limpia estado/counters y movimiento; no contiene una ruta de daño. Siguiente: instrumentar el caller que selecciona este destino y ejecutar la transición de entrada a 412 con los datos de personaje requeridos, registrando virtual calls y factories sin sustituir el comportamiento x86. Después habrá que encontrar la fuente real del contacto antes de ajustar Vita. Ver [ITERATION94.md](ITERATION94.md) y [ITERATION95.md](ITERATION95.md).

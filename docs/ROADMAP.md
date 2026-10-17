@@ -18,6 +18,8 @@ Iteración 1.94 ejecuta `0x465e10` del PE fijado con el PAT real de Remilia 412/
 
 Iteración 1.95 sigue el update común de Remilia: action 412 enruta a `0x483f40`, cuyo switch solo cubre actions 50–181; 412 retorna por la rama por defecto. El dispatcher común no explica ese daño ni evidencia llamadas directas a los callbacks 2/3. Es una conclusión estática, pendiente de probar vtables y objetos secundarios con setup/update dinámico. Ver [ITERATION95.md](ITERATION95.md).
 
+Iteración 1.96 verifica el mapa del initializer: 412 → grupo 15 → `0x59ad64`. Unicorn ejecuta la rutina original y `0x4636b0`, confirmando el reset de estado, contadores y movimiento sin spawn ni daño en ese initializer. Próximo: instrumentar el caller y la transición de entrada a 412, con atención a llamadas virtuales/factories, hasta ubicar el emisor de contacto. Ver [ITERATION96.md](ITERATION96.md).
+
 ### Medición B/C actual — Iteración 1.86
 
 La última compilación de VitaSDK pasó schema31 en Vita3K SDL aislado, 600 frames; conserva roster PAT/recursos/tarjetas 20/20 y A natural 20/20. La sonda B/C intenta aproximación desde spawn, rutas terrestres/aéreas/dash y valida el daño PAT directo o de objeto; registró B 14/20 (`0x0EBBB6`) y C 15/20 (`0x0BF9B7`). Es una medición diagnóstica, no un gate final: el inventario ve variantes PAT, pero el selector provisional de runtime solo cubre dash 408/418; las demás variantes requieren contraste x86 y flags de ataque sin cajas quedan sin simular. Los fallos actuales incluyen rutas B en Reimu, Alice, Remilia, Udonge, Tenshi y Cirno, y rutas C en Alice, Remilia, Suika, Udonge y Utsuho. Ver [ITERATION86.md](ITERATION86.md) y [roster-bc-natural.tsv](../artifacts/roster-bc-natural.tsv).
