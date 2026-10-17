@@ -20,11 +20,11 @@ sys.path.insert(0, str(ROOT / "local/python-deps"))
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import (
     UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EIP,
-    UC_X86_REG_ESP, UC_X86_REG_ESI,
+    UC_X86_REG_ESP, UC_X86_REG_ESI, UC_X86_REG_EBP, UC_X86_REG_EDI,
 )
 from tools.x86_suwako_808_factory_probe import LIST, OWNER, STACK, STOP, Suwako808FactoryProbe
 
-HANDLER_STATE4 = 0x0058CD2B
+ACTION_DISPATCH = 0x0058A3A1
 CREATE_OBJECT_WRAPPER = 0x0046EB30
 CALLBACK_LOOKUP = 0x00464980
 CALLBACK_DISPATCH = 0x00401D50
@@ -75,6 +75,12 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         esp = machine.reg_read(UC_X86_REG_ESP)
         if address in (0x0047A9E0, 0x00487870, 0x00820230):
             original_helpers.append(hex(address))
+        if address in (0x00487CA0, 0x00438C60):
+            ret = u32(machine, esp)
+            if address == 0x00438C60:
+                machine.reg_write(UC_X86_REG_EAX, 0)  # external status query: false
+            machine.reg_write(UC_X86_REG_ESP, esp + 4)
+            machine.reg_write(UC_X86_REG_EIP, ret)
         if address == CREATE_OBJECT_WRAPPER:
             words = struct.unpack("<8I", machine.mem_read(esp, 32))
             ptr = words[6]
@@ -96,7 +102,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             callback_pointer = u32(machine, esp + 4)
             callback.update({
                 "dispatcher": hex(address),
-                "index": callback_index,
+                "index": machine.reg_read(UC_X86_REG_EBX),
                 "table_pointer": hex(u32(machine, PLAYER + 0x164)),
                 "selected_function_pointer": hex(callback_pointer),
                 "action": struct.unpack("<H", machine.mem_read(PLAYER + 0x13C, 2))[0],
@@ -113,12 +119,15 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     uc.hook_add(UC_HOOK_CODE, hook)
     uc.mem_write(entry_sp, struct.pack("<I", STOP))
     uc.reg_write(UC_X86_REG_ESP, entry_sp)
-    uc.reg_write(UC_X86_REG_EBX, callback_index)
+    uc.reg_write(UC_X86_REG_EBX, 1)  # established at 0x5879cf in the main update prologue
+    uc.reg_write(UC_X86_REG_EAX, 412)
+    uc.reg_write(UC_X86_REG_EBP, 0)
+    uc.reg_write(UC_X86_REG_EDI, 0)
     uc.reg_write(UC_X86_REG_ECX, PLAYER)
     uc.reg_write(UC_X86_REG_ESI, PLAYER)
-    uc.reg_write(UC_X86_REG_EIP, HANDLER_STATE4)
+    uc.reg_write(UC_X86_REG_EIP, ACTION_DISPATCH)
     try:
-        uc.emu_start(HANDLER_STATE4, STOP, count=10000)
+        uc.emu_start(ACTION_DISPATCH, STOP, count=10000)
     except Exception as exc:
         errors.append(f"{type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}")
     if not spawn:
@@ -128,7 +137,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     return {
         "input_fixture": {"position": [x, y], "facing": facing,
                           "action": 412, "sequence": 0, "substate": 4,
-                          "callback_index_fixture": callback_index},
+                          "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,
         "callback_dispatch": callback,
         "original_helpers_reached": original_helpers,
@@ -137,7 +146,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             "gauge_5e4": struct.unpack("<H", uc.mem_read(PLAYER + 0x5E4, 2))[0],
         },
         "error": errors or None,
-        "scope": "Original 0x47a9e0/0x487870 helpers, state-4 spawn callsite instructions, and 0x464980 callback-table lookup execute from the hash-pinned PE. Entry state and EBX are fixtures; the object manager return and external 0x401d50 dispatcher are controlled boundaries. Does not prove natural reachability, instantiate/update 801, run collision, or apply damage.",
+        "scope": "Original action dispatch 0x58a3a1 through table-selected handler 0x58cce7, original 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 callback-table lookup execute from the hash-pinned PE. Action/sequence/substate fields and EBX=1 are seeded (EBX matches the value loaded by the main update prologue at 0x5879cf, but that prologue is not executed); callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0/0x438c60 external status services return fixtures. Does not execute the entire 0x5879a0 main update, instantiate/update 801, run collision, or apply damage.",
     }
 
 
@@ -147,7 +156,8 @@ def main() -> None:
     parser.add_argument("--x", type=float, default=320.0)
     parser.add_argument("--y", type=float, default=180.0)
     parser.add_argument("--facing", type=int, choices=(-1, 1), default=1)
-    parser.add_argument("--callback-index", type=int, choices=(0, 1, 2, 3), default=CALLBACK_INDEX)
+    parser.add_argument("--callback-index", type=int, choices=(0, 1, 2, 3), default=1,
+                        help="callback table slot preloaded with the fixture function pointer")
     parser.add_argument("--output", type=Path, default=ROOT / "artifacts/x86-remilia-412-spawn-probe.json")
     args = parser.parse_args()
     result = run_case(args.dat_dir, args.x, args.y, args.facing, args.callback_index)
