@@ -173,6 +173,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     child_box_sync: dict[str, object] | None = None
     child_updates: list[dict[str, object]] = []
     child_update_error: str | None = None
+    manager_tick: dict[str, object] | None = None
 
     def hook(machine, address: int, _size: int, _user: object) -> None:
         esp = machine.reg_read(UC_X86_REG_ESP)
@@ -363,6 +364,49 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                                          "transform_helpers": probe.box_transform_calls[transform_start:]})
         finally:
             probe.intercept_box_transforms = saved_intercept
+        # The factory inserts the child into the real list. Advance only via
+        # the manager's virtual slot so its callback and removal gate remain in
+        # the execution path throughout the lifecycle sample.
+        manager_vtable = OWNER + 0x800
+        uc.mem_write(manager_vtable + 0x10, struct.pack("<I", 0x00633CE0))
+        manager_ticks: list[dict[str, object]] = []
+        for tick in range(120):
+            if u32(uc, child + 0x34C) == 0:
+                break
+            manager_sp = STACK + 0x9800 - 4
+            uc.mem_write(manager_sp, struct.pack("<I", STOP))
+            uc.reg_write(UC_X86_REG_ESP, manager_sp)
+            uc.reg_write(UC_X86_REG_ECX, LIST)
+            uc.reg_write(UC_X86_REG_EIP, 0x00633CE0)
+            probe._code_trace.clear()
+            probe._trace_active = True
+            try:
+                uc.emu_start(0x00633CE0, STOP, count=500000)
+                completed = uc.reg_read(UC_X86_REG_EIP) == STOP
+                state = {"tick": tick + 1, "completed": completed,
+                         "field_34c": u32(uc, child + 0x34C),
+                         "action": struct.unpack("<H", uc.mem_read(child + 0x13C, 2))[0],
+                         "pose": struct.unpack("<H", uc.mem_read(child + 0x140, 2))[0],
+                         "trace": [hex(pc) for pc in probe._code_trace[-12:]]}
+                manager_ticks.append(state)
+                if not completed:
+                    child_update_error = f"manager update returned at {uc.reg_read(UC_X86_REG_EIP):#x}"
+                    break
+            except Exception as exc:
+                manager_ticks.append({"tick": tick + 1, "completed": False,
+                                      "error": f"{type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}",
+                                      "child_vtable": hex(u32(uc, child)),
+                                      "child_field_34c": u32(uc, child + 0x34C),
+                                      "esi": hex(uc.reg_read(UC_X86_REG_ESI)),
+                                      "edx": hex(uc.reg_read(UC_X86_REG_EDX)),
+                                      "trace": [hex(pc) for pc in probe._code_trace[-12:]]})
+                child_update_error = f"manager update: {manager_ticks[-1]['error']}"
+                break
+            finally:
+                probe._trace_active = False
+        manager_tick = {"ticks": manager_ticks,
+                        "object_retired": bool(manager_ticks and manager_ticks[-1].get("field_34c") == 0),
+                        "last": manager_ticks[-1] if manager_ticks else None}
     return {
         "initialized_action": initialized_action,
         "manager_setup": manager_state,
@@ -373,6 +417,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "child_box_sync": child_box_sync,
         "child_updates": child_updates,
         "child_update_error": child_update_error,
+        "manager_tick": manager_tick,
         "collision_matrix": collision_matrix,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,

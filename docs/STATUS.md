@@ -4,6 +4,7 @@ Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
 ## Iteración 2.08: callsite Remilia 412 → objeto 801
 
+- **Iteración 2.11:** el manager original visita el hijo 801 y ejecuta 17 ticks (pose0→17); en la llamada 18 cae con `ESI=1` en `0x4ae3b7`, mientras `+0x34c` del hijo sigue en 1. El enlazado/sentinel de lista no reproduce aún el lifecycle correcto. Ver [ITERATION111.md](ITERATION111.md).
 - **Iteración 2.10:** el hijo 801 de la factory original y una hurtbox neutral Remilia se pasan al helper x86 `0x47a5b0`; hay contacto a distancias 0/40/60 y no a 70/71/100/200. Transformaciones de caja corren desde PE, pero callback, fase completa del manager y daño siguen fuera. Ver [ITERATION110.md](ITERATION110.md).
 - **Iteración 2.09:** la factory original crea 801/seq.0 con 20 poses en `(403,360)`; sync publica una hitbox PAT y el update original corre 60 ticks sin error. Sigue vivo al tick 60. Callback/servicios externos, pareja, colisión y daño aún sin verificar. Ver [ITERATION109.md](ITERATION109.md).
 
