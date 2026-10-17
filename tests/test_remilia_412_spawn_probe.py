@@ -122,6 +122,9 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual((update["action"], update["sequence"], update["pose"]),
                          (602, 0, 0))
         self.assertEqual(pair["defender_hp_after"], 880)
+        # This isolated projectile damage path does not produce the player's
+        # hit-confirm CollisionType required by Remilia's 5AA->5AAA handler.
+        self.assertEqual(pair["defender_collision_type_after"], 0)
         self.assertNotIn("gate_open_trial", pair)
         response = report["damage_response"]
         self.assertEqual(response["function"], "pair-dispatch")

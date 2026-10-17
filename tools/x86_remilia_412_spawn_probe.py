@@ -588,6 +588,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "reached_character_resolver": "0x47c990" in [hex(pc) for pc in probe._code_trace],
                 "defender_hp_before": pair_hp_before,
                 "defender_hp_after": struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0],
+                "defender_collision_type_after": u32(uc, defender + 0x190),
                 "attacker_flags": hex(struct.unpack("<I", uc.mem_read(
                     u32(uc, child + 0x1C0) + 0x50, 4))[0]),
                 "attacker_frame_flags": hex(struct.unpack("<I", uc.mem_read(
@@ -727,6 +728,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "defender_hurtbox_count": uc.mem_read(defender + 0x1CC, 1)[0],
                 "defender_hp_before": hp_before,
                 "defender_hp_after": struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0],
+                "defender_collision_type_after": u32(uc, defender + 0x190),
                 "damage_applied": struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
                 == hp_before - int(probe.pat_fixture["sequences"][0]["frames"][0]["damage"]),
                 "attacker_hit_priority_1bc": uc.mem_read(child + 0x1BC, 1)[0],
