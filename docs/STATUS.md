@@ -4,8 +4,9 @@ Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
 ## Iteración 2.05: imports Windows y fixture del objeto 801
 
-- Se modelaron imports del CRT/Kernel32 con contratos controlados; la rutina atraviesa `TlsGetValue` y llega al update auxiliar. Luego recursa sobre una lista cuyo fixture carece de sus contenedores/vtables; no se demuestra ciclo de vida ni daño.
-- Suwako 808 conserva la regresión de ocho ticks y `py_compile` pasa. Próximo: reconstruir el constructor/sentinela de esas listas. Ver [ITERATION105.md](ITERATION105.md).
+- Se modelaron imports del CRT/Kernel32 con contratos controlados; la rutina atraviesa `TlsGetValue`, pero el CRT termina el proceso con `0xc000000d` a través de `TerminateProcess`. La hipótesis previa de recursión en lista/contendor era errónea; el stub de `0x47dcb0` se retiró porque recibía `ECX=2` dentro de la ruta de error.
+- No se demuestra ciclo de vida ni daño; falta completar la inicialización del fixture para evitar la excepción CRT sin omitir lógica de personaje.
+- Suwako 808 conserva la regresión de ocho ticks y `py_compile` pasa. Próximo: identificar el estado de CRT/fixture que dispara la excepción sin omitir lógica de personaje. Ver [ITERATION105.md](ITERATION105.md).
 
 ## Iteración 2.04: factory x86 del objeto Remilia 801
 

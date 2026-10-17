@@ -70,6 +70,7 @@ class Suwako808FactoryProbe:
         self._windows_api_stub_names: dict[int, str] = {}
         self._tls_slots: dict[int, int] = {}
         self._last_error = 0
+        self.host_termination: dict[str, object] | None = None
         if action_id == 801:
             # Minimal, signature-correct KERNEL32 contracts for the CRT
             # delay-load/pointer-decoder path exercised by action 801.
@@ -85,6 +86,7 @@ class Suwako808FactoryProbe:
                 "SetUnhandledExceptionFilter": (0xA0, b"\x31\xc0\xc2\x04\x00", 0x85715C),
                 "UnhandledExceptionFilter": (0xB0, b"\x31\xc0\xc2\x04\x00", 0x857158),
                 "InterlockedIncrement": (0xC0, b"\x8b\x44\x24\x04\xff\x00\x8b\x00\xc2\x04\x00", 0x8571A0),
+                "GetCurrentProcess": (0xF0, b"\xb8\xff\xff\xff\xff\xc3", 0x857154),
             }
             for name, (offset, code, iat) in api_stubs.items():
                 address = STOP + offset
@@ -94,8 +96,10 @@ class Suwako808FactoryProbe:
                     self.uc.mem_write(iat, struct.pack("<I", address))
             self._windows_api_stub_names[STOP + 0xD0] = "TlsAlloc"
             self._windows_api_stub_names[STOP + 0xD4] = "TlsSetValue"
+            self._windows_api_stub_names[STOP + 0x120] = "TerminateProcess"
             self.uc.mem_write(0x00857194, struct.pack("<I", STOP + 0xD0))
             self.uc.mem_write(0x00857198, struct.pack("<I", STOP + 0xD4))
+            self.uc.mem_write(0x00857150, struct.pack("<I", STOP + 0x120))
             fake = bytearray(0x400)
             fake[:2] = b"MZ"
             struct.pack_into("<I", fake, 0x3C, 0x80)
@@ -174,6 +178,12 @@ class Suwako808FactoryProbe:
                 uc.reg_write(UC_X86_REG_EAX, 1)
                 self._return(esp, cleanup=8)
                 return
+            if address == STOP + 0x120:  # TerminateProcess(handle, exit_code)
+                self.host_termination = {"api": "TerminateProcess",
+                                         "process": hex(read_u32(uc, esp + 4)),
+                                         "exit_code": hex(read_u32(uc, esp + 8))}
+                uc.emu_stop()
+                return
         if self._trace_active:
             self._code_trace.append(address)
             del self._code_trace[:-300]
@@ -183,14 +193,6 @@ class Suwako808FactoryProbe:
                 return
         if address == STOP:
             uc.emu_stop()
-            return
-        if address == 0x0047DCB0 and self.action_id == 801:
-            # The CRT module-wrapper owns freshly zeroed auxiliary containers
-            # in this fixture. Its cleanup callback would dispatch through
-            # their intentionally absent vtables; empty-container teardown is
-            # a no-op, so skip only this host-wrapper destructor.
-            self.events.append({"address": "host-wrapper-cleanup", "object": hex(uc.reg_read(UC_X86_REG_ECX))})
-            self._return(uc.reg_read(UC_X86_REG_ESP))
             return
         if address in (0x004640B0, 0x00464200):
             esp = uc.reg_read(UC_X86_REG_ESP)
@@ -361,6 +363,7 @@ class Suwako808FactoryProbe:
         self.box_transform_calls.clear()
         self.box_transform_entries.clear()
         self._invalid_memory.clear()
+        self.host_termination = None
 
         # Execute the actual object-list/handle-manager constructor.
         sp = STACK + 0x7000 - 4
@@ -471,6 +474,10 @@ class Suwako808FactoryProbe:
                     break
                 finally:
                     self._trace_active = False
+                if self.host_termination is not None:
+                    update_error = (f"tick {tick + 1}: CRT requested process termination "
+                                    f"{self.host_termination}")
+                    break
                 if uc.reg_read(UC_X86_REG_EIP) != STOP:
                     trail = ",".join(hex(item) for item in self._code_trace[-120:])
                     update_error = (f"tick {tick + 1}: stopped outside PE at "

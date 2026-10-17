@@ -8,7 +8,7 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ### Contenedores auxiliares del objeto 801 — Iteración 2.05
 
-Con stubs de Windows/CRT el update de Remilia 801 supera la importación anterior, pero recursa en una lista/auxiliar sin construir en el fixture Unicorn. La factory sigue creando el objeto; falta reproducir sus contenedores/callbacks antes de probar daño. Ver [ITERATION105.md](ITERATION105.md).
+Con stubs de Windows/CRT el update de Remilia 801 supera la primera importación, pero termina por excepción CRT `0xc000000d`/`TerminateProcess`. La atribución anterior a contenedores del juego se corrigió: el supuesto cleanup recibía un `ECX` inválido en la ruta de error. Hay que completar el estado CRT/fixture para seguir update sin alterar el dispatcher de personaje. Ver [ITERATION105.md](ITERATION105.md).
 
 ### Prueba de factory/pose del objeto 801 — Iteración 2.04
 
