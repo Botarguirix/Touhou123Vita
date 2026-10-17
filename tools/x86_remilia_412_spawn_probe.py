@@ -28,6 +28,7 @@ from tools.x86_remilia_412_action_setter_probe import (
     INITIALIZER_BODY, ZERO_MOTION, PAT_LOOKUP, MAP_RESULT, MAP_OBJECT,
     MAP_NODE, SEQUENCE_NODE, FRAME_DATA, SET_POSE_CAPTURE,
 )
+from tools.extract_pat_pose_metadata import action_sequence_metadata, read_pat
 from tools.x86_suwako_808_factory_probe import LIST, OWNER, PAT_MAP, STACK, STOP, Suwako808FactoryProbe
 
 MAIN_ACTION_COMPARE = 0x00587BAB
@@ -270,6 +271,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         raise RuntimeError(f"original handler block did not request object 801: {errors}")
     if not callback:
         raise RuntimeError(f"original indexed callback did not dispatch: {errors}")
+    collision_matrix: list[dict[str, object]] = []
     if real_factory and child_factory:
         child = int(child_factory["pointer"], 16)
         try:
@@ -312,6 +314,55 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "hit_boxes": uc.mem_read(child + 0x1CB, 1)[0],
                 "hurt_boxes": uc.mem_read(child + 0x1CC, 1)[0],
             })
+        # Exercise the reference hit-vs-hurt helper with the factory-created
+        # projectile and defender boxes extracted from Remilia's neutral PAT.
+        # Pair resolution and damage response remain outside this probe.
+        sequences = probe.pat_fixture["sequences"]
+        attack_frame = sequences[0]["frames"][0]
+        neutral_frame = next(
+            frame for frame in action_sequence_metadata(
+                read_pat(dat_dir / probe.pat_fixture["archive"],
+                         "data/character/remilia/remilia.pat")[0], 0)[0]["frames"]
+            if frame["hurt_boxes"]
+        )
+        defender = LIST + 0x8800
+        uc.mem_write(defender, bytes(0x3AC))
+        neutral_descriptor = PAT_MAP + 0x60000
+        neutral_collision = PAT_MAP + 0x61000
+        neutral_hurt = PAT_MAP + 0x62000
+        uc.mem_write(neutral_descriptor, bytes(0xA8))
+        uc.mem_write(defender + 0x158, struct.pack("<I", neutral_descriptor))
+        if neutral_frame["collision_boxes"]:
+            uc.mem_write(neutral_collision,
+                         struct.pack("<4i", *neutral_frame["collision_boxes"][0]))
+            uc.mem_write(neutral_descriptor + 0x54,
+                         struct.pack("<I", neutral_collision))
+        hurt = neutral_frame["hurt_boxes"]
+        hurt_start = neutral_hurt
+        hurt_end = hurt_start + len(hurt) * 16
+        uc.mem_write(neutral_descriptor + 0x58,
+                     struct.pack("<4I", 0, hurt_start, hurt_end, hurt_end))
+        if hurt:
+            uc.mem_write(hurt_start, b"".join(struct.pack("<4i", *box) for box in hurt))
+        uc.mem_write(defender + 0xEC, struct.pack("<f", 403.0))
+        uc.mem_write(defender + 0xF0, struct.pack("<f", 360.0))
+        probe._sync_box_data(defender)
+        saved_intercept = probe.intercept_box_transforms
+        try:
+            probe.intercept_box_transforms = False
+            for dx in (0.0, 40.0, 60.0, 70.0, 71.0, 100.0, 200.0):
+                uc.mem_write(child + 0xEC, struct.pack("<f", 403.0 - dx))
+                uc.mem_write(child + 0xF0, struct.pack("<f", 360.0))
+                probe._sync_box_data(child)
+                transform_start = len(probe.box_transform_calls)
+                collision = run_original_hit_hurt_pair(probe, child, defender)
+                collision_matrix.append({"center_distance_x": dx,
+                                         "attacker_hit_boxes": collision["attacker_hit_boxes"],
+                                         "defender_hurt_boxes": collision["defender_hurt_boxes"],
+                                         "contact": collision["return_value"] != 0,
+                                         "transform_helpers": probe.box_transform_calls[transform_start:]})
+        finally:
+            probe.intercept_box_transforms = saved_intercept
     return {
         "initialized_action": initialized_action,
         "manager_setup": manager_state,
@@ -322,6 +373,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "child_box_sync": child_box_sync,
         "child_updates": child_updates,
         "child_update_error": child_update_error,
+        "collision_matrix": collision_matrix,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,
         "animation_tick_states": tick_states,
@@ -334,6 +386,22 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "error": errors or None,
         "scope": "Original action setter/initializer, 0x438c60 timer, action dispatch, helpers, spawn wrapper, and 0x464980 lookup execute. With real_factory=true, CRT startup and object manager constructor execute; manager interface slot +4 is directed to the original 0x784020 factory because its normal target is outside this pinned image. Player PAT/animation fixture, EBX=1 from skipped prologue, callback table/external dispatcher, and 0x487ca0 service remain controlled. In real_factory mode the original child box sync and 0x7876d0 update dispatcher run; pair collision/damage remain unresolved.",
     }
+
+
+def run_original_hit_hurt_pair(probe: Suwako808FactoryProbe,
+                               attacker: int, defender: int) -> dict[str, int]:
+    uc = probe.uc
+    sp = STACK + 0xB000 - 12
+    uc.mem_write(sp, struct.pack("<3I", STOP, attacker, defender))
+    uc.reg_write(UC_X86_REG_ESP, sp)
+    uc.reg_write(UC_X86_REG_ECX, attacker)
+    uc.reg_write(UC_X86_REG_EIP, 0x0047A5B0)
+    uc.emu_start(0x0047A5B0, STOP, count=100000)
+    if uc.reg_read(UC_X86_REG_EIP) != STOP:
+        raise RuntimeError(f"0x47a5b0 did not return: {uc.reg_read(UC_X86_REG_EIP):#x}")
+    return {"return_value": uc.reg_read(UC_X86_REG_EAX),
+            "attacker_hit_boxes": uc.mem_read(attacker + 0x1CB, 1)[0],
+            "defender_hurt_boxes": uc.mem_read(defender + 0x1CC, 1)[0]}
 
 
 def main() -> None:

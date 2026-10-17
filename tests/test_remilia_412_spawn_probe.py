@@ -46,6 +46,21 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(minus["callback_dispatch"]["action"], 412)
         self.assertEqual(minus["callback_dispatch"]["substate"], 4)
 
+    def test_real_factory_hitbox_reaches_original_pair_geometry(self):
+        report = run_case(self.dat_dir, 320.0, 180.0, 1, 1, real_factory=True)
+        child = report["child_factory_result"]
+        self.assertEqual((child["action"], child["sequence"], child["pose_count"]),
+                         (801, 0, 20))
+        self.assertEqual(report["child_box_sync"]["hit_box_count"], 1)
+        self.assertEqual(report["child_box_sync"]["hit_boxes"],
+                         [[368, -395, 438, -325]])
+        self.assertEqual(len(report["child_updates"]), 60)
+        self.assertIsNone(report["child_update_error"])
+        self.assertEqual([row["contact"] for row in report["collision_matrix"]],
+                         [True, True, True, False, False, False, False])
+        self.assertEqual([row["center_distance_x"] for row in report["collision_matrix"]],
+                         [0.0, 40.0, 60.0, 70.0, 71.0, 100.0, 200.0])
+
 
 if __name__ == "__main__":
     unittest.main()
