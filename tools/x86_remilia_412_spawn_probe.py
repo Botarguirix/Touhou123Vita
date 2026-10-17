@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "local/python-deps"))
 from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import (
     UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EIP,
-    UC_X86_REG_ESP, UC_X86_REG_ESI, UC_X86_REG_EBP, UC_X86_REG_EDI,
+    UC_X86_REG_ESP, UC_X86_REG_ESI, UC_X86_REG_EBP, UC_X86_REG_EDI, UC_X86_REG_EDX,
 )
 from tools.x86_remilia_412_box_sync_probe import effective_pat
 from tools.x86_remilia_412_action_setter_probe import (
@@ -34,6 +34,7 @@ MAIN_ACTION_COMPARE = 0x00587BAB
 CREATE_OBJECT_WRAPPER = 0x0046EB30
 CALLBACK_DISPATCH = 0x00401D50
 HANDLER_EPILOGUE = 0x0058CDCC
+COMMON_UPDATE_EXIT = 0x00599FB0
 PLAYER = LIST + 0x8000
 CALLBACKS = OWNER + 0x100
 
@@ -51,7 +52,9 @@ def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[s
     uc.mem_write(PLAYER, struct.pack("<I", OWNER))
     uc.mem_write(OWNER + 2 * 4, struct.pack("<I", ACTION_SETTER))
     uc.mem_write(OWNER + 4 * 4, struct.pack("<I", RESET_SEQUENCE))
-    uc.mem_write(OWNER + 7 * 4, struct.pack("<I", SET_POSE_CAPTURE))
+    uc.mem_write(OWNER + 5 * 4, struct.pack("<I", 0x00464BF0))
+    uc.mem_write(OWNER + 7 * 4, struct.pack("<I", 0x00464B50))
+    uc.mem_write(OWNER + 8 * 4, struct.pack("<I", 0x00464B70))
     uc.mem_write(OWNER + 15 * 4, struct.pack("<I", INITIALIZE_ACTION))
     uc.mem_write(PLAYER + 0x160, struct.pack("<I", PAT_MAP + 0x7000))
     uc.mem_write(MAP_RESULT, struct.pack("<II", MAP_OBJECT, MAP_NODE))
@@ -75,11 +78,6 @@ def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[s
             machine.reg_write(UC_X86_REG_EAX, MAP_RESULT)
             machine.reg_write(UC_X86_REG_ESP, esp + 12)
             machine.reg_write(UC_X86_REG_EIP, ret)
-        elif address == SET_POSE_CAPTURE:
-            ret, pose = struct.unpack("<II", machine.mem_read(esp, 8))
-            machine.mem_write(PLAYER + 0x140, struct.pack("<H", pose))
-            machine.reg_write(UC_X86_REG_ESP, esp + 8)
-            machine.reg_write(UC_X86_REG_EIP, ret)
 
     uc.hook_add(UC_HOOK_CODE, setup_hook)
     sp = STACK + 0xB000
@@ -99,20 +97,6 @@ def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[s
     if (state["action"], state["sequence"], state["pose"], state["pose_count"]) != (412, 0, 0, len(frames)):
         raise AssertionError(f"original action setter did not initialize 412/seq0: {state}")
 
-    advanced: list[int] = []
-    for _ in range(4):
-        sp = STACK + 0xB100
-        uc.mem_write(sp, struct.pack("<I", STOP))
-        uc.reg_write(UC_X86_REG_ESP, sp)
-        uc.reg_write(UC_X86_REG_ECX, PLAYER)
-        uc.reg_write(UC_X86_REG_EIP, 0x00464B70)  # Remilia vtable slot 8: advance pose
-        uc.emu_start(0x00464B70, STOP, count=10000)
-        if uc.reg_read(UC_X86_REG_EIP) != STOP:
-            raise RuntimeError(f"original pose advance failed at {uc.reg_read(UC_X86_REG_EIP):#x}")
-        advanced.append(struct.unpack("<H", uc.mem_read(PLAYER + 0x140, 2))[0])
-    if advanced != [1, 2, 3, 4]:
-        raise AssertionError(f"unexpected original pose progression: {advanced}")
-    state["original_pose_advances"] = advanced
     return state
 
 
@@ -145,17 +129,20 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     errors: list[str] = []
     original_helpers: list[str] = []
     dispatch_trace: list[str] = []
+    execution_tail: list[str] = []
+    tick_states: list[dict[str, int]] = []
 
     def hook(machine, address: int, _size: int, _user: object) -> None:
         esp = machine.reg_read(UC_X86_REG_ESP)
+        execution_tail.append(hex(address))
+        if len(execution_tail) > 80:
+            del execution_tail[:-80]
         if address in (MAIN_ACTION_COMPARE, 0x0058A3A1, 0x0058CCE7):
             dispatch_trace.append(hex(address))
-        if address in (0x0047A9E0, 0x00487870, 0x00820230):
+        if address in (0x0047A9E0, 0x00487870, 0x00820230, 0x00438C60):
             original_helpers.append(hex(address))
-        if address in (0x00487CA0, 0x00438C60):
+        if address == 0x00487CA0:
             ret = u32(machine, esp)
-            if address == 0x00438C60:
-                machine.reg_write(UC_X86_REG_EAX, 0)  # external status query: false
             machine.reg_write(UC_X86_REG_ESP, esp + 4)
             machine.reg_write(UC_X86_REG_EIP, ret)
         if address == CREATE_OBJECT_WRAPPER:
@@ -190,22 +177,35 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             machine.reg_write(UC_X86_REG_ESP, esp + 8)  # callback dispatch ret 4
             machine.reg_write(UC_X86_REG_EAX, 0)
             machine.reg_write(UC_X86_REG_EIP, ret)
-        elif address == HANDLER_EPILOGUE:
+        elif address in (HANDLER_EPILOGUE, COMMON_UPDATE_EXIT):
+            tick_states.append({
+                "pose": struct.unpack("<H", machine.mem_read(PLAYER + 0x140, 2))[0],
+                "subframe": struct.unpack("<H", machine.mem_read(PLAYER + 0x142, 2))[0],
+                "duration": struct.unpack("<H", machine.mem_read(PLAYER + 0x14C, 2))[0],
+                "sequence": struct.unpack("<H", machine.mem_read(PLAYER + 0x13E, 2))[0],
+            })
             machine.emu_stop()
 
     uc.hook_add(UC_HOOK_CODE, hook)
-    uc.mem_write(entry_sp, struct.pack("<I", STOP))
-    uc.reg_write(UC_X86_REG_ESP, entry_sp)
-    uc.reg_write(UC_X86_REG_EBX, 1)  # established at 0x5879cf in the main update prologue
-    uc.reg_write(UC_X86_REG_EBP, 0)
-    uc.reg_write(UC_X86_REG_EDI, 0)
-    uc.reg_write(UC_X86_REG_ECX, PLAYER)
-    uc.reg_write(UC_X86_REG_ESI, PLAYER)
-    uc.reg_write(UC_X86_REG_EIP, MAIN_ACTION_COMPARE)
-    try:
-        uc.emu_start(MAIN_ACTION_COMPARE, STOP, count=10000)
-    except Exception as exc:
-        errors.append(f"{type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}")
+    for tick in range(120):
+        uc.mem_write(entry_sp, struct.pack("<I", STOP))
+        uc.reg_write(UC_X86_REG_ESP, entry_sp)
+        uc.reg_write(UC_X86_REG_EBX, 1)  # value loaded by 0x5879cf in the skipped prologue
+        uc.reg_write(UC_X86_REG_EBP, 0)
+        uc.reg_write(UC_X86_REG_EDI, 0)
+        uc.reg_write(UC_X86_REG_ECX, PLAYER)
+        uc.reg_write(UC_X86_REG_ESI, PLAYER)
+        uc.reg_write(UC_X86_REG_EIP, MAIN_ACTION_COMPARE)
+        try:
+            uc.emu_start(MAIN_ACTION_COMPARE, STOP, count=10000)
+        except Exception as exc:
+            errors.append(f"tick {tick + 1}: {type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}; eax={uc.reg_read(UC_X86_REG_EAX):#x} ecx={uc.reg_read(UC_X86_REG_ECX):#x} edx={uc.reg_read(UC_X86_REG_EDX):#x} esi={uc.reg_read(UC_X86_REG_ESI):#x} esp={uc.reg_read(UC_X86_REG_ESP):#x}; trace={execution_tail[-20:]}")
+            break
+        if spawn:
+            break
+        if uc.reg_read(UC_X86_REG_EIP) not in (HANDLER_EPILOGUE, COMMON_UPDATE_EXIT):
+            errors.append(f"tick {tick + 1}: handler did not reach epilogue: {uc.reg_read(UC_X86_REG_EIP):#x}")
+            break
     if not spawn:
         raise RuntimeError(f"original handler block did not request object 801: {errors}")
     if not callback:
@@ -213,18 +213,19 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     return {
         "initialized_action": initialized_action,
         "input_fixture": {"position": [x, y], "facing": facing,
-                          "pose_after_original_advances": initialized_action["original_pose_advances"][-1],
                           "main_update_ebx": 1, "callback_slot_fixture": callback_index},
         "spawn_call": spawn,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,
+        "animation_tick_states": tick_states,
+        "ticks_until_spawn": len(tick_states),
         "original_helpers_reached": original_helpers,
         "post_spawn_fields": {
             "meter_49e": struct.unpack("<H", uc.mem_read(PLAYER + 0x49E, 2))[0],
             "gauge_5e4": struct.unpack("<H", uc.mem_read(PLAYER + 0x5E4, 2))[0],
         },
         "error": errors or None,
-        "scope": "Original action setter/initializer chain 0x464930..0x59ad64 runs to produce action 412/seq.0/pose 0; four original Remilia vtable pose-advance calls then reach pose 4. The original main-update action comparison 0x587bab, dispatch 0x58a3a1, handler 0x58cce7, 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 callback-table lookup execute. EBX=1 is seeded to match the value loaded by the skipped prologue at 0x5879cf; callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0/0x438c60 status services are fixtures. Does not execute full 0x5879a0 update, instantiate/update 801, run collision, or apply damage.",
+        "scope": "Original action setter/initializer chain 0x464930..0x59ad64 runs to produce action 412/seq.0/pose 0. On each repeated main-action dispatch, original 0x438c60 increments subframe and duration-gates calls through Remilia vtable slot 8 to 0x464b70; the original 0x587bab comparison, 0x58a3a1 dispatch, 0x58cce7 handler, 0x47a9e0/0x487870 helpers, spawn callsite, and 0x464980 lookup execute. EBX=1 is seeded to match skipped prologue 0x5879cf; callback table, manager return, and external 0x401d50 dispatcher are controlled; 0x487ca0 remains a service fixture. Full 0x5879a0 prologue/gates, actual manager, callback, 801 update, collision, and damage are not run.",
     }
 
 

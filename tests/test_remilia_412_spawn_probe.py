@@ -19,11 +19,19 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(plus["initialized_action"]["sequence"], 0)
         self.assertEqual(plus["initialized_action"]["pose"], 0)
         self.assertEqual(plus["initialized_action"]["pose_count"], 12)
-        self.assertEqual(plus["initialized_action"]["original_pose_advances"], [1, 2, 3, 4])
         self.assertEqual(plus["initialized_action"]["initializer_chain"], [
             "0x464930", "0x438ca0", "0x465370", "0x59aaa0", "0x59ad64", "0x4636b0"]
         )
-        self.assertEqual(plus["main_update_dispatch_trace"], ["0x587bab", "0x58a3a1", "0x58cce7"])
+        self.assertEqual(len(plus["main_update_dispatch_trace"]), 16 * 3)
+        self.assertTrue(all(plus["main_update_dispatch_trace"][i:i + 3] ==
+                            ["0x587bab", "0x58a3a1", "0x58cce7"]
+                            for i in range(0, 16 * 3, 3)))
+        self.assertEqual(plus["ticks_until_spawn"], 16)
+        self.assertEqual([state["pose"] for state in plus["animation_tick_states"]],
+                         [0] * 3 + [1] * 4 + [2] * 4 + [3] * 4 + [4])
+        self.assertEqual([state["subframe"] for state in plus["animation_tick_states"][:4]],
+                         [1, 2, 3, 0])
+        self.assertEqual(plus["animation_tick_states"][-1]["duration"], 4)
         self.assertEqual(plus["spawn_call"]["object_id"], 801)
         self.assertEqual(plus["spawn_call"]["x"], 403.0)
         self.assertEqual(minus["spawn_call"]["x"], 237.0)
@@ -32,7 +40,8 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(plus["spawn_call"]["temporary_float_block"], [-70.0, 12.0, 0.0])
         self.assertEqual(plus["callback_dispatch"]["index"], 1)
         self.assertEqual(plus["callback_dispatch"]["selected_function_pointer"], "0x12345678")
-        self.assertEqual(plus["original_helpers_reached"], ["0x47a9e0", "0x487870", "0x820230"])
+        self.assertEqual(plus["original_helpers_reached"].count("0x438c60"), 16)
+        self.assertEqual(plus["original_helpers_reached"][-3:], ["0x47a9e0", "0x487870", "0x820230"])
         self.assertEqual(plus["post_spawn_fields"], {"meter_49e": 800, "gauge_5e4": 50})
         self.assertEqual(minus["callback_dispatch"]["action"], 412)
         self.assertEqual(minus["callback_dispatch"]["substate"], 4)
