@@ -2,6 +2,15 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.87: inventario PAT de `attack_flags`
+
+- Agregué un resumen reproducible de poses con daño y flags de ataque no nulos. En el roster aparecen 1,987 combinaciones personaje/acción/índice/flags con cajas explícitas (7,129 poses), 1,442 sin cajas (4,891 poses) y 164 valores raw sin caja.
+- Remilia 412:0 tiene 750 de daño y flags `0x00204002`; 416:0/1 tienen 800 y `0x0000240a`. Alice 418:0 tiene `0x00088404` sin caja en el PAT del jugador, coherente con la ruta de objeto 849. El reporte no interpreta los bits.
+- `tools/summarize_pat_attack_flags.py` y la prueba sintética pasan con Python estándar. Reporte: [PAT_ATTACK_FLAGS.md](PAT_ATTACK_FLAGS.md).
+- No se encontró `analyzeHeadless.bat` para ejecutar Ghidra; solicité la ruta de instalación. No cambié la simulación de colisión hasta recuperar las reglas x86 de los flags.
+
+Ver [ITERATION87.md](ITERATION87.md).
+
 ## Iteración 1.86: medición natural B/C por personaje
 
 - La sonda ahora intenta acciones B/C terrestres, aéreas y dash desde el spawn normal, con cinco distancias y ventanas de salto; valida daño contra la pose PAT directa o el objeto dueño. Los objetos también incrementan el contador B/C de la acción que los generó. El inventario detecta variantes PAT dañinas, pero el selector provisional del runtime sigue limitado a dash 408/418; otros selectores faltan.

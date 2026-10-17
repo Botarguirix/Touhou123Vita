@@ -6,6 +6,10 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
+### Audit de `attack_flags` — Iteración 1.87
+
+El roster contiene 1,442 combinaciones personaje/acción/índice/flags con poses dañinas sin cajas explícitas, distribuidas en 164 valores raw (`PAT_ATTACK_FLAGS.md`). Remilia 412:0 marca 750 de daño con `0x00204002`; 416:0/1, 800 con `0x0000240a`. Alice 418:0 marca daño con `0x00088404` y el handler crea objeto 849. Los bits no están interpretados aún. El siguiente paso técnico es descompilar el sincronizador de FrameData y los predicados de colisión con Ghidra, ejecutar vectores controlados y validar el 2C de Remilia contra el juego original; `analyzeHeadless.bat` no fue localizado en el entorno actual.
+
 ### Medición B/C actual — Iteración 1.86
 
 La última compilación de VitaSDK pasó schema31 en Vita3K SDL aislado, 600 frames; conserva roster PAT/recursos/tarjetas 20/20 y A natural 20/20. La sonda B/C intenta aproximación desde spawn, rutas terrestres/aéreas/dash y valida el daño PAT directo o de objeto; registró B 14/20 (`0x0EBBB6`) y C 15/20 (`0x0BF9B7`). Es una medición diagnóstica, no un gate final: el inventario ve variantes PAT, pero el selector provisional de runtime solo cubre dash 408/418; las demás variantes requieren contraste x86 y flags de ataque sin cajas quedan sin simular. Los fallos actuales incluyen rutas B en Reimu, Alice, Remilia, Udonge, Tenshi y Cirno, y rutas C en Alice, Remilia, Suika, Udonge y Utsuho. Ver [ITERATION86.md](ITERATION86.md) y [roster-bc-natural.tsv](../artifacts/roster-bc-natural.tsv).

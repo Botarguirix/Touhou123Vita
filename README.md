@@ -9,6 +9,7 @@ El repositorio contiene código, pruebas y documentación. Los ejecutables de PC
 ## Documentación
 
 - [Roadmap y criterios de aceptación](docs/ROADMAP.md)
+- [Iteración 1.87: inventario de attack_flags PAT](docs/ITERATION87.md) y [reporte de combinaciones](docs/PAT_ATTACK_FLAGS.md)
 - [Iteración 1.86: rutas B/C naturales y selección de variantes](docs/ITERATION86.md)
 - [Iteración 1.85: rutas A naturales para todo el roster](docs/ITERATION85.md)
 - [Iteración 1.84: impacto A tras aproximación normal](docs/ITERATION84.md)
