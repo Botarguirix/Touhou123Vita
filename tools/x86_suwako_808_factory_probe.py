@@ -40,7 +40,8 @@ def read_f32(uc: Uc, address: int) -> float:
 
 class Suwako808FactoryProbe:
     def __init__(self, exe: Path, dat_dir: Path | None = None,
-                 intercept_box_transforms: bool = False):
+                 intercept_box_transforms: bool = False,
+                 character: str = "suwako", action_id: int = 808):
         raw = exe.read_bytes()
         self.sha256 = hashlib.sha256(raw).hexdigest()
         if self.sha256 != REFERENCE_SHA256:
@@ -52,7 +53,7 @@ class Suwako808FactoryProbe:
         self.uc.mem_map(self.base, (len(image) + 0xFFF) & ~0xFFF)
         self.uc.mem_write(self.base, image)
         for address, size in ((LIST, 0x10000), (OWNER, 0x10000),
-                              (OWNER_DATA, 0x10000), (PAT_MAP, 0x40000),
+                              (OWNER_DATA, 0x10000), (PAT_MAP, 0x80000),
                               (STACK, 0x10000), (STOP, 0x1000), (HEAP, 0x100000)):
             self.uc.mem_map(address, size)
         self.uc.mem_map(0, 0x1000)  # FS:[0] used by the original SEH prologues
@@ -71,6 +72,8 @@ class Suwako808FactoryProbe:
         self._trace_active = False
         self._code_trace: list[int] = []
         self.dat_dir = dat_dir or ROOT / "original"
+        self.character = character
+        self.action_id = action_id
         self.pat_fixture: dict[str, object] = {}
         self.uc.hook_add(UC_HOOK_CODE, self._hook)
 
@@ -155,28 +158,28 @@ class Suwako808FactoryProbe:
             path = self.dat_dir / archive
             if not path.is_file():
                 continue
-            pat_resource = read_pat(path, "data/character/suwako/suwako.pat")
+            pat_resource = read_pat(path, f"data/character/{self.character}/{self.character}.pat")
             if pat_resource is not None:
                 self.pat_fixture["archive"] = archive
                 break
         if pat_resource is None:
-            raise FileNotFoundError(f"Suwako PAT not found in {self.dat_dir}")
+            raise FileNotFoundError(f"{self.character} PAT not found in {self.dat_dir}")
         pat, pat_sha256 = pat_resource
-        sequences = action_sequence_metadata(pat, 808)
+        sequences = action_sequence_metadata(pat, self.action_id)
         sequences.sort(key=lambda row: int(row["sequence"]))
         if not sequences or [row["sequence"] for row in sequences] != list(range(len(sequences))):
-            raise ValueError("PAT action 808 sequences are missing or non-contiguous")
+            raise ValueError(f"PAT action {self.action_id} sequences are missing or non-contiguous")
         if any(len(row["frames"]) > 0x1000 // 0xA8 for row in sequences):
-            raise ValueError("action 808 frame data exceeds the probe's safe PAT fixture region")
-        self.pat_fixture.update({"resource": "data/character/suwako/suwako.pat",
-                                 "action": 808, "pat_sha256": pat_sha256,
+            raise ValueError(f"action {self.action_id} frame data exceeds the probe's safe PAT fixture region")
+        self.pat_fixture.update({"resource": f"data/character/{self.character}/{self.character}.pat",
+                                 "action": self.action_id, "pat_sha256": pat_sha256,
                                  "sequences": sequences})
         uc.mem_write(PAT_MAP + 4, struct.pack("<I", NIL))
         uc.mem_write(PAT_MAP + 8, struct.pack("<I", 1))
         uc.mem_write(NIL, struct.pack("<III", ACTION_NODE, ACTION_NODE, ACTION_NODE))
         uc.mem_write(NIL + 0x15, b"\x01")
         uc.mem_write(ACTION_NODE, struct.pack("<III", NIL, NIL, NIL))
-        uc.mem_write(ACTION_NODE + 0x0C, struct.pack("<I", 808))
+        uc.mem_write(ACTION_NODE + 0x0C, struct.pack("<I", self.action_id))
         sequence_nodes = [PAT_MAP + 0x8000 + i * 0x1000 for i in range(len(sequences))]
         uc.mem_write(ACTION_NODE + 0x10, struct.pack("<I", sequence_nodes[0]))
         for index, (seq, metadata) in enumerate(zip(sequence_nodes, sequences)):
@@ -276,7 +279,7 @@ class Suwako808FactoryProbe:
         # createObject(this=list, parent=null, owner, action, x, y, dir, layer,
         # customData, customDataSize); stdcall cleanup is performed by callee.
         sp = STACK + 0x8000 - 4
-        args = (STOP, 0, OWNER, 808,
+        args = (STOP, 0, OWNER, self.action_id,
                 struct.unpack("<I", struct.pack("<f", 300.0))[0],
                 struct.unpack("<I", struct.pack("<f", 400.0))[0],
                 1, 1, CUSTOM, 3)
@@ -349,11 +352,17 @@ class Suwako808FactoryProbe:
                 uc.reg_write(UC_X86_REG_ESP, tick_sp)
                 uc.reg_write(UC_X86_REG_ECX, obj)
                 uc.reg_write(UC_X86_REG_EIP, 0x007876D0)
+                self._code_trace.clear()
+                self._trace_active = True
                 try:
                     uc.emu_start(0x007876D0, STOP, count=100000)
                 except Exception as exc:
-                    update_error = f"tick {tick + 1}: {type(exc).__name__}: {exc}"
+                    trail = ",".join(hex(item) for item in self._code_trace[-24:])
+                    update_error = (f"tick {tick + 1}: {type(exc).__name__}: {exc}; "
+                                    f"EIP={uc.reg_read(UC_X86_REG_EIP):#x}; trace={trail}")
                     break
+                finally:
+                    self._trace_active = False
                 if uc.reg_read(UC_X86_REG_EIP) != STOP:
                     update_error = f"tick {tick + 1}: unexpected EIP {uc.reg_read(UC_X86_REG_EIP):#x}"
                     break
@@ -415,15 +424,23 @@ def main() -> None:
     parser.add_argument("--exe", type=Path, default=ROOT / "original/th123.exe")
     parser.add_argument("--dat-dir", type=Path, default=ROOT / "original")
     parser.add_argument("--ticks", type=int, default=40)
+    parser.add_argument("--character", default="suwako")
+    parser.add_argument("--action", type=int, default=808)
     parser.add_argument("--copy-box-transform", action="store_true",
                         help="diagnostic only: intercept 0x4640b0/0x464200 and copy the source rectangle")
-    parser.add_argument("--output", type=Path, default=ROOT / "artifacts/x86-suwako-808-factory-probe.json")
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     report = Suwako808FactoryProbe(args.exe, args.dat_dir,
-                intercept_box_transforms=args.copy_box_transform).run(ticks=args.ticks)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(f"Suwako 808 factory probe: completed={report['factory_completed']} eip={report['stopped_eip']}")
+                intercept_box_transforms=args.copy_box_transform,
+                character=args.character, action_id=args.action).run(ticks=args.ticks)
+    output = args.output
+    if output is None:
+        output = (ROOT / "artifacts/x86-suwako-808-factory-probe.json"
+                  if args.character == "suwako" and args.action == 808
+                  else ROOT / f"artifacts/x86-{args.character}-{args.action}-factory-probe.json")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"{args.character} action {args.action} factory probe: completed={report['factory_completed']} eip={report['stopped_eip']}")
 
 
 if __name__ == "__main__":

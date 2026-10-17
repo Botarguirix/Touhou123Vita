@@ -6,6 +6,10 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
+### Prueba de factory/pose del objeto 801 — Iteración 2.04
+
+La factory original crea Remilia action 801/seq.1 y el sincronizador PAT publica una caja ofensiva al seleccionar seq.0. Tres updates x86 de seq.1 corren; tick 4 requiere dependencias globales/servicios aún no montados en Unicorn, por lo que no se prueba vida ni daño natural. Resolver el servicio y el setup de secuencia emitido por 412. Ver [ITERATION104.md](ITERATION104.md).
+
 ### Remilia 412: dispatch y datos ofensivos de 801 — Iteración 2.03
 
 El ID 801 selecciona initializer `0x7991a5` y update `0x7879da`; el PAT de Remilia tiene seq.0 con daño 120/caja ofensiva durante 20 poses y seq.2 con daño 100/caja ofensiva durante 20 poses. La ruta 412 crea 801, así que ya hay un candidato atacante concreto. Falta correr factory/update/colisión y probar el daño acumulado frente al 750 del PAT dueño. Ver [ITERATION103.md](ITERATION103.md).
