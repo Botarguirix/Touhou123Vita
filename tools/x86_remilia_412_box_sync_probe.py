@@ -18,9 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "local/python-deps"))
 
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EIP, UC_X86_REG_ESP
 from tools.extract_pat_pose_metadata import action_sequence_metadata, read_pat
 from tools.x86_suwako_808_factory_probe import (
-    LIST, PAT_MAP, Suwako808FactoryProbe,
+    LIST, PAT_MAP, STACK, STOP, Suwako808FactoryProbe,
 )
 
 EXE = ROOT / "original/th123.exe"
@@ -29,6 +30,7 @@ ACTION = 412
 SEQUENCE = 0
 POSE = 5
 OBJECT = LIST + 0x8000
+DEFENDER = LIST + 0x8800
 DESCRIPTOR = PAT_MAP + 0x10000
 COLLISION_BOX = PAT_MAP + 0x20000
 HURT_BOXES = PAT_MAP + 0x21000
@@ -57,6 +59,23 @@ def install_vector(uc, vector_address: int, storage_address: int,
     uc.mem_write(vector_address, struct.pack("<4I", 0, storage_address, end, end))
     if boxes:
         uc.mem_write(storage_address, b"".join(struct.pack("<4i", *box) for box in boxes))
+
+
+def run_hit_vs_hurt(attacker: int, defender: int, probe: Suwako808FactoryProbe) -> dict[str, object]:
+    """Run the reference pair-geometry helper with this synchronized attacker."""
+    uc = probe.uc
+    # 0x47a5b0 is a thiscall-style helper with two stack arguments and ret 8.
+    sp = STACK + 0xB000 - 12
+    uc.mem_write(sp, struct.pack("<3I", STOP, attacker, defender))
+    uc.reg_write(UC_X86_REG_ESP, sp)
+    uc.reg_write(UC_X86_REG_ECX, OBJECT)
+    uc.reg_write(UC_X86_REG_EIP, 0x0047A5B0)
+    uc.emu_start(0x0047A5B0, STOP, count=100000)
+    if uc.reg_read(UC_X86_REG_EIP) != STOP:
+        raise RuntimeError(f"0x47a5b0 did not return: EIP={uc.reg_read(UC_X86_REG_EIP):#x}")
+    return {"helper": "0x47a5b0", "return_value": uc.reg_read(UC_X86_REG_EAX),
+            "attacker_hit_box_count": uc.mem_read(attacker + 0x1CB, 1)[0],
+            "defender_hurt_box_count": uc.mem_read(defender + 0x1CC, 1)[0]}
 
 
 def run(dat_dir: Path) -> dict[str, object]:
@@ -88,6 +107,10 @@ def run(dat_dir: Path) -> dict[str, object]:
     install_vector(uc, DESCRIPTOR + 0x78, EXTRA_BOXES, [])
 
     result = probe._sync_box_data(OBJECT)
+    uc.mem_write(DEFENDER, bytes(0x3AC))
+    install_vector(uc, DEFENDER + 0x1D0, HURT_BOXES + 0x1000, frame["hurt_boxes"])
+    uc.mem_write(DEFENDER + 0x1CC, bytes((len(frame["hurt_boxes"]),)))
+    pair_geometry = run_hit_vs_hurt(OBJECT, DEFENDER, probe)
     return {
         "reference_sha256": probe.sha256,
         "archive": archive,
@@ -100,8 +123,9 @@ def run(dat_dir: Path) -> dict[str, object]:
                    "hurt_boxes": frame["hurt_boxes"],
                    "attack_boxes": frame["attack_boxes"]},
         "synchronized": result,
+        "pair_geometry": pair_geometry,
         "transform_helpers": probe.box_transform_calls,
-        "scope": "The original 0x465e10 synchronizer executed on a controlled object with the extracted PAT descriptor/vectors. 0x4640b0/0x464200 transforms are intercepted as coordinate copies. This does not execute Remilia's full update, manager pair resolution, or a native game loop.",
+        "scope": "The original 0x465e10 synchronizer and 0x47a5b0 hit-vs-hurt geometry helper execute on controlled objects with the extracted PAT descriptor/vectors. 0x4640b0/0x464200 transforms are intercepted as coordinate copies. This does not execute Remilia's full update, manager pair resolution, post-contact damage response, or a native game loop.",
     }
 
 
