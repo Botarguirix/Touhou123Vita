@@ -80,10 +80,23 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual([row["this_pose"] for row in helper_calls],
                          [0, 3, 6, 9, 12, 15, 18, 1, 4, 7, 10, 13, 16, 19, 2, 5, 8, 11, 14])
 
-    def test_original_hit_response_applies_pat_damage_before_missing_effect_callback(self):
+    def test_original_pair_dispatch_reaches_pat_damage_after_opening_observed_gates(self):
         report = run_case(self.dat_dir, 320.0, 180.0, 1, 1,
                           real_factory=True, resolve_damage=True)
+        pair = report["pair_dispatch"]
+        self.assertIsNone(pair["error"])
+        self.assertTrue(pair["reached_projectile_filter"])
+        self.assertTrue(pair["reached_character_resolver"])
+        self.assertEqual(pair["defender_frame_flags"], "0x31")
+        self.assertEqual(pair["defender_hp_after"], 1000)
+        gate_trial = pair["gate_open_trial"]
+        self.assertTrue(gate_trial["synthetic"])
+        self.assertEqual(gate_trial["geometry_after_dispatch"]["return_value"], 1)
+        self.assertTrue(gate_trial["reached_hit_response"])
+        self.assertEqual(gate_trial["defender_hp_after"], 880)
+        self.assertIn("0x47a5b0", gate_trial["call_sites"])
         response = report["damage_response"]
+        self.assertEqual(response["function"], "pair-dispatch-gate-open")
         self.assertTrue(response["damage_applied"])
         self.assertEqual(response["pat_damage"], 120)
         self.assertEqual((response["defender_hp_before"], response["defender_hp_after"]),

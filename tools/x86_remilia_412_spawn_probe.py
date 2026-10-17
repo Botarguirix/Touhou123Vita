@@ -318,6 +318,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         raise RuntimeError(f"original indexed callback did not dispatch: {errors}")
     collision_matrix: list[dict[str, object]] = []
     damage_response: dict[str, object] | None = None
+    pair_dispatch: dict[str, object] | None = None
     if real_factory and child_factory:
         child = int(child_factory["pointer"], 16)
         try:
@@ -354,6 +355,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                      struct.pack("<4I", 0, hurt_start, hurt_end, hurt_end))
         if hurt:
             uc.mem_write(hurt_start, b"".join(struct.pack("<4i", *box) for box in hurt))
+        for offset, key in ((0x4C, "frame_flags"), (0x50, "attack_flags")):
+            uc.mem_write(neutral_descriptor + offset,
+                         struct.pack("<I", int(neutral_frame.get(key, 0))))
         uc.mem_write(defender + 0xEC, struct.pack("<f", 403.0))
         uc.mem_write(defender + 0xF0, struct.pack("<f", 360.0))
         probe._sync_box_data(defender)
@@ -373,6 +377,149 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                                          "transform_helpers": probe.box_transform_calls[transform_start:]})
         finally:
             probe.intercept_box_transforms = saved_intercept
+        if resolve_damage:
+            # Build the original character-pair manager's two-player and
+            # team-indexed intrusive-list layout, then enter its PE dispatcher.
+            pair_dispatch = {}
+            uc.mem_write(child + 0xEC, struct.pack("<f", 403.0))
+            uc.mem_write(child + 0xF0, struct.pack("<f", 360.0))
+            probe._sync_box_data(child)
+            uc.mem_write(PLAYER + 0x350, struct.pack("<b", 0))
+            uc.mem_write(defender + 0x350, struct.pack("<b", 1))
+            uc.mem_write(PLAYER + 0x170, struct.pack("<I", defender))
+            uc.mem_write(defender + 0x170, struct.pack("<I", PLAYER))
+            uc.mem_write(LIST + 0x0C, struct.pack("<I", PLAYER))
+            uc.mem_write(LIST + 0x18, struct.pack("<I", defender))
+
+            def make_singleton_list(root: int, node: int, obj: int) -> None:
+                uc.mem_write(root, struct.pack("<3I", node, node, 0))
+                uc.mem_write(node, struct.pack("<3I", root, root, obj))
+
+            attacker_root, attacker_node = OWNER + 0x2000, OWNER + 0x2100
+            target_root, target_node = OWNER + 0x2200, OWNER + 0x2300
+            empty_a, empty_b = OWNER + 0x2400, OWNER + 0x2500
+            make_singleton_list(attacker_root, attacker_node, child)
+            make_singleton_list(target_root, target_node, defender)
+            make_singleton_list(empty_a, empty_a, 0)
+            make_singleton_list(empty_b, empty_b, 0)
+            uc.mem_write(LIST + 0x60, struct.pack("<I", attacker_root))
+            uc.mem_write(LIST + 0x54, struct.pack("<I", target_root))
+            uc.mem_write(LIST + 0x48, struct.pack("<I", empty_a))
+            uc.mem_write(LIST + 0x6C, struct.pack("<I", empty_b))
+            uc.mem_write(child + 0x190, struct.pack("<I", 0))
+            uc.mem_write(child + 0x194, struct.pack("<b", 1))
+            uc.mem_write(defender + 0x1A1, struct.pack("<B", 0))
+            uc.mem_write(defender + 0x184, struct.pack("<H", 1000))
+            pair_hp_before = struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
+            pair_sp = STACK + 0xB000 - 4
+            uc.mem_write(pair_sp, struct.pack("<I", STOP))
+            uc.reg_write(UC_X86_REG_ESP, pair_sp)
+            uc.reg_write(UC_X86_REG_ECX, LIST)
+            uc.reg_write(UC_X86_REG_EIP, 0x0047CE20)
+            probe._code_trace.clear()
+            probe._trace_active = True
+            pair_error = None
+            try:
+                uc.emu_start(0x0047CE20, STOP, count=500000)
+                if uc.reg_read(UC_X86_REG_EIP) != STOP:
+                    pair_error = f"pair phase returned at {uc.reg_read(UC_X86_REG_EIP):#x}"
+            except Exception as exc:
+                pair_error = f"{type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}"
+            finally:
+                probe._trace_active = False
+            pair_dispatch = {
+                "function": "0x47ce20", "error": pair_error,
+                "trace": [hex(pc) for pc in probe._code_trace[-80:]],
+                "reached_projectile_filter": "0x47ca70" in [hex(pc) for pc in probe._code_trace],
+                "reached_character_resolver": "0x47c990" in [hex(pc) for pc in probe._code_trace],
+                "defender_hp_before": pair_hp_before,
+                "defender_hp_after": struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0],
+                "attacker_flags": hex(struct.unpack("<I", uc.mem_read(
+                    u32(uc, child + 0x1C0) + 0x50, 4))[0]),
+                "attacker_frame_flags": hex(struct.unpack("<I", uc.mem_read(
+                    u32(uc, child + 0x1C0) + 0x4C, 4))[0]),
+                "defender_flags": hex(struct.unpack("<I", uc.mem_read(
+                    u32(uc, defender + 0x1C0) + 0x50, 4))[0]),
+                "defender_frame_flags": hex(struct.unpack("<I", uc.mem_read(
+                    u32(uc, defender + 0x1C0) + 0x4C, 4))[0]),
+            }
+            # Differentially open the two character-resolver gates observed
+            # at 0x47c990; retain it as a synthetic gate test, not PAT evidence.
+            if not pair_error and pair_dispatch["defender_hp_after"] == pair_hp_before:
+                original_frame_flags = struct.unpack(
+                    "<I", uc.mem_read(neutral_descriptor + 0x4C, 4))[0]
+                uc.mem_write(neutral_descriptor + 0x4C,
+                             struct.pack("<I", original_frame_flags | 0x40))
+                uc.mem_write(defender + 0x1AC, struct.pack("<B", 1))
+                uc.mem_write(defender + 0x184, struct.pack("<H", pair_hp_before))
+                uc.mem_write(pair_sp, struct.pack("<I", STOP))
+                uc.reg_write(UC_X86_REG_ESP, pair_sp)
+                uc.reg_write(UC_X86_REG_ECX, LIST)
+                uc.reg_write(UC_X86_REG_EIP, 0x0047CE20)
+                probe._code_trace.clear()
+                probe._trace_active = True
+                gate_error = None
+                try:
+                    uc.emu_start(0x0047CE20, STOP, count=500000)
+                    if uc.reg_read(UC_X86_REG_EIP) != STOP:
+                        gate_error = f"pair phase returned at {uc.reg_read(UC_X86_REG_EIP):#x}"
+                except Exception as exc:
+                    gate_error = f"{type(exc).__name__}: {exc} at {uc.reg_read(UC_X86_REG_EIP):#x}"
+                finally:
+                    probe._trace_active = False
+                gate_trace = [hex(pc) for pc in probe._code_trace[-80:]]
+                gate_calls = [hex(pc) for pc in probe._code_trace
+                              if pc in (0x47CA70, 0x47C990, 0x47B660, 0x47A5B0)]
+                post_pair_geometry = run_original_hit_hurt_pair(probe, child, defender)
+                gate_hp_after = struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
+                pair_dispatch["gate_open_trial"] = {
+                    "synthetic": True, "changed_frame_flags": "OR 0x40",
+                    "changed_object_field_1ac": 1, "error": gate_error,
+                    "reached_hit_response": "0x47b660" in gate_calls,
+                    "reached_geometry": "0x47a5b0" in gate_calls,
+                    "call_sites": gate_calls,
+                    "geometry_after_dispatch": post_pair_geometry,
+                    "defender_hp_before": pair_hp_before,
+                    "defender_hp_after": gate_hp_after,
+                    "trace": gate_trace,
+                }
+                if gate_hp_after < pair_hp_before or gate_error:
+                    damage_response = {
+                        "function": "pair-dispatch-gate-open", "pat_damage": 120,
+                        "defender_hp_before": pair_hp_before,
+                        "defender_hp_after": gate_hp_after,
+                        "damage_applied": gate_hp_after < pair_hp_before,
+                        "attacker_frame_damage_field": struct.unpack("<H", uc.mem_read(
+                            u32(uc, child + 0x1C0) + 0x1C, 2))[0],
+                        "attacker_frame_flags": hex(struct.unpack("<I", uc.mem_read(
+                            u32(uc, child + 0x1C0) + 0x4C, 4))[0]),
+                        "attacker_attack_flags": hex(struct.unpack("<I", uc.mem_read(
+                            u32(uc, child + 0x1C0) + 0x50, 4))[0]),
+                        "attacker_hitbox_count": uc.mem_read(child + 0x1CB, 1)[0],
+                        "defender_hurtbox_count": uc.mem_read(defender + 0x1CC, 1)[0],
+                        "attacker_cooldown_190": u32(uc, child + 0x190),
+                        "error": gate_error,
+                        "failure_after_damage": bool(gate_error and gate_hp_after < pair_hp_before),
+                        "external_callback_pointer": "0x0" if gate_error and "0x0" in gate_error else None,
+                        "trace": gate_trace,
+                    }
+                    if gate_hp_after < pair_hp_before:
+                        resolve_damage = False
+            if pair_error or pair_dispatch["defender_hp_after"] < pair_hp_before:
+                damage_response = {
+                    "function": "pair-dispatch", "pat_damage": 120,
+                    "defender_hp_before": pair_hp_before,
+                    "defender_hp_after": pair_dispatch["defender_hp_after"],
+                    "damage_applied": pair_dispatch["defender_hp_after"] < pair_hp_before,
+                    "error": pair_error,
+                    "failure_after_damage": bool(pair_error and
+                        pair_dispatch["defender_hp_after"] < pair_hp_before),
+                    "external_callback_pointer": "0x0" if uc.reg_read(UC_X86_REG_EIP) == 0 else None,
+                    "trace": pair_dispatch["trace"],
+                }
+                # If pair dispatch actually applies the contact, retain its
+                # proof and skip the standalone response below.
+                resolve_damage = False
         if resolve_damage:
             # Reach the original hit-response function after a verified PAT box overlap.
             # Its presentation callback is outside this harness; keep this opt-in.
@@ -516,6 +663,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "factory_returns": factory_returns,
         "create_object_helper_calls": create_object_helper_calls,
         "collision_matrix": collision_matrix,
+        "pair_dispatch": pair_dispatch,
         "damage_response": damage_response,
         "callback_dispatch": callback,
         "main_update_dispatch_trace": dispatch_trace,
