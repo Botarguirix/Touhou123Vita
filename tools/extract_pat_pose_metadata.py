@@ -220,7 +220,9 @@ def action_sequence_metadata(pat: bytes, action_id: int) -> list[dict[str, objec
             hit_stop = struct.unpack_from("<H", traits, 14)[0]
             enemy_stun = struct.unpack_from("<H", traits, 16)[0]
             block_stun = struct.unpack_from("<H", traits, 20)[0]
-            reader.take(9)  # remaining flags and attack traits
+            reader.take(1)  # reserved/unknown frame byte
+            frame_flags = struct.unpack("<I", reader.take(4))[0]
+            attack_flags = struct.unpack("<I", reader.take(4))[0]
 
             def read_boxes(extra: bool) -> list[list[int]]:
                 count = reader.u8()
@@ -240,7 +242,8 @@ def action_sequence_metadata(pat: bytes, action_id: int) -> list[dict[str, objec
             frames.append({"frame": frame, "image": images[image], "duration": duration,
                            "damage": damage, "chip": chip, "hit_stop": hit_stop,
                            "enemy_stun": enemy_stun,
-                           "block_stun": block_stun, "collision_boxes": collision_boxes,
+                           "block_stun": block_stun, "frame_flags": frame_flags,
+                           "attack_flags": attack_flags, "collision_boxes": collision_boxes,
                            "hurt_boxes": hurt_boxes, "attack_boxes": attack_boxes})
         if action == action_id:
             result.append({"sequence": sequence, "loop_mode": loop_mode, "frames": frames})

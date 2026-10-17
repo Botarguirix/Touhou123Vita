@@ -453,6 +453,11 @@ class Suwako808FactoryProbe:
                                           (0x30, "block_stun")):
                     uc.mem_write(pose + field_offset,
                                  struct.pack("<H", int(frame_data.get(key, 0))))
+                # PAT's trailing nine-byte block is reserved byte,
+                # CharacterFrameData.frameFlags, then attackFlags.
+                for field_offset, key in ((0x4C, "frame_flags"), (0x50, "attack_flags")):
+                    uc.mem_write(pose + field_offset,
+                                 struct.pack("<I", int(frame_data.get(key, 0))))
                 # CharacterFrameData embeds three Soku vectors: hurt boxes
                 # at +0x58, attack boxes at +0x68, and extra-box pointers at
                 # +0x78. Their begin/end/capacity pointers start +4/+8/+0xc.

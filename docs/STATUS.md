@@ -2,9 +2,14 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Build Vita3K vigente — 17 octubre 2026
+
+Se regeneró `artifacts/Touhou123Vita-current.vpk` desde el código actual con VitaSDK. Vita3K SDL pasó schema31/600 frames; la evidencia fresca `artifacts/vita3k-result.json` lleva el hash del paquete. Pasaron las comprobaciones de 20/20 PAT/personajes/tarjetas, BG34, dash, B/C y skills 102/103/104/107. Hash SHA-256: `577c1388ae8a6ddc263025f42fe481896440ebae1ff2f4e1ec522875018b60d9`. Este VPK reproduce el runtime actual y no incluye la instrumentación x86 de Remilia (herramienta de análisis); combate completo y demás faltantes del roadmap siguen pendientes.
+
 ## Iteración 2.08: callsite Remilia 412 → objeto 801
 
 - **Iteración 2.14:** `0x47b660` ejecutada después del overlap PAT resta el daño real 120 (HP 1000→880) y fija cooldown 9; después el callback global de presentación termina en nulo. Prueba separada opt-in; pair dispatch manager y guardia/hitstop siguen pendientes. Ver [ITERATION114.md](ITERATION114.md).
+- En la fixture x86 se completó el layout PAT posterior a los 40 bytes de traits: byte reservado + `frameFlags` + `attackFlags`. Remilia 801 seq.0 publica `0x01000000/0x0041040e`; ahora el fixture escribe esos campos en `CharacterFrameData+0x4c/+0x50`, que son filtros del pair dispatcher. La metadata y la prueba de daño contrastan estos valores; ejecutar `0x47ce20` con manager/listas válidas sigue siendo el paso inmediato.
 - **Iteración 2.13:** el dispatcher `0x7879da` de 801 seq.0 genera otro 801 cada tres frames por `vtable+0x44`; 19 requests salen del padre inicial durante sus 55 ticks y seis secundarios siguen activos tras su retiro. Se fijaron las firmas y la traza dinámica en tests. Sigue pendiente pair dispatch y daño. Ver [ITERATION113.md](ITERATION113.md).
 - **Iteración 2.12:** corregida la interfaz secundaria del manager (`LIST-4`). El update indirecto por slot4 corre 55 ticks desde el objeto recién creado, llega a `+0x34c=0` y elimina su nodo; quedan seis otros 801 activos y se observaron 19 retornos adicionales de factory. El crecimiento de objetos y el daño de parejas aún requieren explicación. Ver [ITERATION112.md](ITERATION112.md).
 - **Iteración 2.11 (supersedida):** al poner la factory sobre `LIST` en lugar de `LIST-4`, el iterador recorría la lista incorrecta y despachaba `ESI=1` en el tick18. La corrección está demostrada en Iteración 2.12. Ver [ITERATION111.md](ITERATION111.md).

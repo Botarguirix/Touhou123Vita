@@ -89,6 +89,8 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual((response["defender_hp_before"], response["defender_hp_after"]),
                          (1000, 880))
         self.assertEqual(response["attacker_frame_damage_field"], 120)
+        self.assertEqual(response["attacker_frame_flags"], "0x1000000")
+        self.assertEqual(response["attacker_attack_flags"], "0x41040e")
         self.assertEqual(response["attacker_cooldown_190"], 9)
         self.assertTrue(response["failure_after_damage"])
         self.assertEqual(response["external_callback_pointer"], "0x0")

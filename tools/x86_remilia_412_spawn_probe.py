@@ -403,6 +403,10 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "pat_damage": int(probe.pat_fixture["sequences"][0]["frames"][0]["damage"]),
                 "attacker_frame_damage_field": struct.unpack("<H", uc.mem_read(
                     u32(uc, child + 0x1C0) + 0x1C, 2))[0],
+                "attacker_frame_flags": hex(struct.unpack("<I", uc.mem_read(
+                    u32(uc, child + 0x1C0) + 0x4C, 4))[0]),
+                "attacker_attack_flags": hex(struct.unpack("<I", uc.mem_read(
+                    u32(uc, child + 0x1C0) + 0x50, 4))[0]),
                 "attacker_hitbox_count": uc.mem_read(child + 0x1CB, 1)[0],
                 "defender_hurtbox_count": uc.mem_read(defender + 0x1CC, 1)[0],
                 "defender_hp_before": hp_before,
