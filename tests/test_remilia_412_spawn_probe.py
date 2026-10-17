@@ -15,6 +15,7 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         plus = run_case(self.dat_dir, 320.0, 180.0, 1, 1)
         minus = run_case(self.dat_dir, 320.0, 180.0, -1, 1)
 
+        self.assertEqual(plus["main_update_dispatch_trace"], ["0x587bab", "0x58a3a1", "0x58cce7"])
         self.assertEqual(plus["spawn_call"]["object_id"], 801)
         self.assertEqual(plus["spawn_call"]["x"], 403.0)
         self.assertEqual(minus["spawn_call"]["x"], 237.0)
