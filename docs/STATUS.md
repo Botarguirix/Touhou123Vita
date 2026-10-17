@@ -2,6 +2,15 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.90: geometría PAT de Remilia 2C
+
+- La pose dañina 412/seq.0/pose5 declara 750 de daño, flags `0x00204002`, cero `attack_boxes` y una `collision_box` `[-20,-155,20,-1]` en el PAT efectivo de th123c.dat.
+- Vtable: `initializeAction` 412 → `0x59ad64` (resetea estado/counters, sin spawn); `update` `0x5879a0` no tiene rama directa 412; no se atribuye todavía semántica ofensiva a `collision_box`.
+- `0x465e10` lee `CharacterFrameData+0x54`, transforma la caja con `0x4640b0`, la guarda en `object+0x310` y publica `object+0x348`. La semántica posterior de ese puntero sigue sin identificar.
+- El resolutor `0x47c770` usa `object+0x348` en la rama `grab` (bit `0x80`) y `0x47a5b0` para hit-vs-hurt en la ruta normal. Remilia 412 tiene byte bajo `0x02`; su vector `attackBoxes` sigue vacío, por lo que falta explicar el daño registrado.
+- `ExportKernel.java` añade `0x4640b0/0x464200`, `0x47c770` y `0x47a040`. Siguiente: rastrear el productor de attackBoxes/camino alterno de Remilia 412 y validar el primer impacto. Sin cambio de runtime/VPK.
+- Ver [ITERATION90.md](ITERATION90.md).
+
 ## Iteración 1.89: handler x86 de Remilia 2C
 
 - Regeneré CFG de los 20 handlers desde el PE fijado, span `0x8000`; Remilia `0x0059c010` consulta lock 412 y despacha 2C. La salida analítica permanece local/ignorada.

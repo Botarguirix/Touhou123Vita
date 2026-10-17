@@ -21,7 +21,7 @@ public class ExportKernel extends GhidraScript {
         if(!resourcesOnly){
             // Shared input helpers for ground/air attacks and dash/flight routing.
             // 0x487ba0 is intentionally omitted: SokuLib identifies it as useSkill.
-            long[] refs={0x438c60L,0x465e10L,0x47a5b0L,0x47a740L,0x47a110L,0x479e10L,
+            long[] refs={0x438c60L,0x4640b0L,0x464200L,0x465e10L,0x47c770L,0x47a040L,0x47a5b0L,0x47a740L,0x47a110L,0x479e10L,
                          0x487020L,0x487740L,0x4877c0L,0x487900L,0x487990L,0x487ab0L,
                          0x489610L,0x489e90L,0x48a220L,0x48a380L,0x48a470L,0x48a560L,
                          0x4397f0L,0x439850L,0x4636b0L,0x43e9a0L,0x4396c0L,

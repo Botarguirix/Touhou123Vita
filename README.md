@@ -9,6 +9,7 @@ El repositorio contiene código, pruebas y documentación. Los ejecutables de PC
 ## Documentación
 
 - [Roadmap y criterios de aceptación](docs/ROADMAP.md)
+- [Iteración 1.90: caja collision de Remilia 2C](docs/ITERATION90.md)
 - [Iteración 1.89: handler x86 de Remilia 2C](docs/ITERATION89.md)
 - [Iteración 1.88: sincronización de cajas PAT desde el PE](docs/ITERATION88.md)
 - [Iteración 1.87: inventario de attack_flags PAT](docs/ITERATION87.md) y [reporte de combinaciones](docs/PAT_ATTACK_FLAGS.md)
