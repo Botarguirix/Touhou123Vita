@@ -1,18 +1,90 @@
-# Roadmap
+# Roadmap: reconstrucción integral de Touhou 12.3
 
-Cada hito se cierra con evidencia, no con un porcentaje estimado de código escrito.
+## Objetivo
 
-| Hito | Trabajo | Criterio para cerrar | Estado inicial |
+Entregar una demo funcional para PS Vita que cargue los recursos originales locales de todo el elenco, recorra todos los escenarios con sus capas y efectos, y reconstruya progresivamente las mecánicas del juego con referencia al ejecutable de PC. Cada subsistema debe tener una traza o contrato comparable, un VPK reproducible y evidencia en Vita3K. La compatibilidad y los FPS en hardware real se miden después de estabilizar la paridad funcional.
+
+## Inventario actual
+
+### Seguimiento activo de objetos — Iteración 1.81
+
+`GameObjectBase::BoxInfo` inicia en `object+0x1b4`: frameData `+0x1c0`, conteos hit/hurt `+0x1cb/+0x1cc`, hurt boxes `+0x1d0`, hit boxes `+0x220`, buffers rotados `+0x270` y punteros auxiliares `+0x320`. El PE fija `0x465e10` como sincronizador de vectores PAT al runtime. El manager ejecuta fases de pares en `0x47cb70/0x47ce20`; `0x47a5b0` prueba hit boxes contra hurt boxes y `0x47a740` hurt contra hurt, con helpers para formas rotadas y AABB. Falta la traza dinámica que conecte el action 808 con respuesta/daño. Ver [ITERATION80.md](ITERATION80.md) y [ITERATION81.md](ITERATION81.md).
+
+El handler 808 de seq.0 consulta el action del owner con `0x48ce90` y el suelo por separado con `0x4397f0`; el primero no es detección geométrica. El manager retira el objeto cuando `object+0x34c==0`, pero pool/handles/lista no están integrados dinámicamente en el harness. Siguiente: localizar por CFG/traza la resolución real del impacto y el ciclo de vida 808. El baseline compilado y validado en Vita3K SDL schema28/600 frames es [Touhou123Vita-TH75-review-current.vpk](../artifacts/Touhou123Vita-TH75-review-current.vpk), SHA-256 `c360c89d923e554bcff0cccf7c7ecb94164d3825f84958bcf7314e30daae9129`; conserva roster 20/20, BG34 y rutas existentes, pero no incluye mecánica 808 nueva. Ver [ITERATION79.md](ITERATION79.md), [ITERATION78.md](ITERATION78.md), [ITERATION76.md](ITERATION76.md), [ITERATION77.md](ITERATION77.md) y el reporte `artifacts/x86-suwako-808-factory-probe.json`.
+
+La revisión TH75 recomienda instrumentación por evidencia, contratos ABI y watchdog; el prototipo semántico x86→C del chat solo pasó un smoke test sintético y su bootstrap VitaSDK no se validó. No importar runtime/renderer/imports ni datos TH075. Ver [TOUHOU75_REUSE_REVIEW.md](TOUHOU75_REUSE_REVIEW.md).
+
+### Seguimiento activo de objetos — Iteración 1.65
+
+La ruta original de Suwako 808 ya está reubicada en su handler real `00788d3e`. El oracle Unicorn ejecuta el dispatcher/update original y captura dos llamadas hijas con posición compartida y custom data; casos controlados de colisión, suelo y latch confirman guards sin split. El delta `0.075/0.005` afecta `object+0x11c`, mientras `vy` pierde `0.2` en ambas secuencias. El port sigue usando `vx=4`/vida 90 provisionales; seguir initializer/update/hit/terminación del hijo y contrastar una traza natural antes de corregir la mecánica. Ver [ITERATION65.md](ITERATION65.md) y [ITERATION66.md](ITERATION66.md). Esta evidencia también corrige el callback mal atribuido en la Iteración 36.
+
+Los tres DAT de 12.3 contienen 11,283 entradas (1,088,266,746 bytes sin comprimir), 22 carpetas bajo `data/character` y 14 carpetas de escenario bajo `data/background`. El índice de 10.5 aporta los recursos heredados que nueve PAT de 12.3 referencian para sus poses idle. El inventario también identifica cartas, efectos, escenas, audio, clima y recursos de menú. La carpeta `common` y el contenido `namazu` aún necesitan clasificarse frente al roster jugable. Ver [RESOURCE_INVENTORY.md](RESOURCE_INVENTORY.md); los manifiestos locales están en `artifacts/th123-resource-manifest.tsv` y `artifacts/th105-resource-manifest.tsv`.
+
+## Actualización de combate — Iteración 1.51
+
+Las skills terrestres de Reimu usan la tabla x86 de 12 cartas. Acciones 540 y 565 conectan sus primeras cajas PAT: Vita3K confirma 1100 en seq.3/imagen39 (carta102) y 450 en seq.1/imagen47 (carta107), en los ticks derivados de sus duraciones PAT. Carta103/acción560 conserva startup, impacto, vuelo vertical/horizontal y aterrizaje. El movimiento de escenario sigue parcialmente modelado; otras rutas, traza PC end-to-end, rutas aéreas, mano/costo/consumo, efectos y objetos siguen pendientes. Ver [ITERATION54.md](ITERATION54.md), [ITERATION55.md](ITERATION55.md), [ITERATION56.md](ITERATION56.md), [ITERATION57.md](ITERATION57.md), [ITERATION58.md](ITERATION58.md) y [ITERATION59.md](ITERATION59.md). La revisión de Touhou75Vita aporta método CFG/cobertura, mientras los oráculos del PE 12.3 siguen siendo la referencia. Ver [TOUHOU75_REUSE_REVIEW.md](TOUHOU75_REUSE_REVIEW.md).
+
+La Iteración 1.48 ejecuta `nextPose` y localiza la transición de touchdown: action 560 (`00490490 -> 004A0639`) invoca `applyAirMechanics` y, al contactar el suelo descendiendo, el bloque `0049295D` pide `setSequence(3)`. El helper `00463550` añade la integración horizontal con direction/speedPower; el port representa y valida en Vita3K el caso base. Faltan reglas completas de movimiento, colisiones y cartas/cancelaciones.
+
+## Hitos
+
+| Hito | Trabajo | Criterio de cierre | Estado |
 |---|---|---|---|
-| M0: referencias | Inventario, versión, hashes, fuentes y análisis Ghidra | Ejecutable identificado, análisis guardado, límites documentados | Análisis inicial realizado; análisis automático parcial por timeout |
-| M1: plataforma | C11 portable, VitaSDK, VPK, controles, framebuffer, CI | Compilación host y ARM, pruebas host y arranque Vita3K | Host/ARM y arranque automático Vita3K verificados |
-| M2: demo de práctica | Menú, práctica, movimiento, salto, golpe, disparo, guardia, CPU, reset | Escenario automático y controles manuales en Vita3K | Prueba automática y framebuffer revisados; teclado manual pendiente; reglas propias |
-| M3: recursos originales | Paquetes, paletas, CV2/CV3, PAT, capas de escenario, caché | Importador reproducible; sprites/animaciones/audio verificados contra PC | Extracción y conversión inicial; layout y animación pendientes |
-| M4: combate original mínimo | Recuperar selección, práctica, estados, gravedad, colisiones y acciones de dos personajes | Práctica original reconstruida; secuencias PC/Vita comparadas fotograma a fotograma | Pendiente |
-| M5: sistema completo | Cartas, clima, spirit, combos, estados especiales, todos los personajes | Replays representativos sin desincronización contra referencia | Pendiente |
-| M6: optimización y hardware | GPU, atlas, cargas asíncronas, sonido, perfiles de memoria | 60 Hz sostenidos en Vita real; sin fugas ni fallos en sesiones largas | Pendiente |
-| M7: distribución | Importador de datos del usuario, documentación, releases | VPK sin datos comerciales, instalación reproducible y suite verde | Pendiente |
+| M0: referencias | Versiones/hash del ejecutable y DAT, análisis Ghidra, dependencias y formatos | Referencias separadas por versión y cada hipótesis vinculada a funciones/datos | Base x86 y exportación Ghidra disponibles; inventario de mnemonics de los 20 handlers de input; análisis de objetos y escenas incompleto. Ver [ITERATION41.md](ITERATION41.md) |
+| M1: pipeline | Build host/ARM, VPK interactivo/automático, runner aislado y evidencia por corrida | Checkout limpio genera ambos VPK y archiva log, hash y reporte | Build ARM/VPK nativo Windows con `tools/build-vita-native.ps1`; consolidar con pipeline host y repetir desde checkout limpio |
+| M2: inventario integral | Manifiesto de todos los DAT, clasificación de roster, PAT, sprites, audio, fondos, escena y efectos | Cada entrada tiene tipo, consumidor, conversor y cobertura de demo | Primera pasada: 11,283 entradas, 22 carpetas de personaje y 14 de escenario |
+| M3: demo de recursos | Galería navegable de cada personaje/pose y visor de escenarios/capas/efectos | Cobertura del 100% de recursos renderizables esperados y ausencia de referencias rotas | Galería PAT 20/20; para BG34, Vita3K decodifica 30+30 tiles, 4 bitmaps y 30 sprites `objectFa`. Los 34 recursos auxiliares se inspeccionan en catálogo, pero aún no se presentan como objetos animados del escenario. Falta auditar composición y referencias de todos los IDs. La auditoría PAT cubre las 12,189 imágenes de pose de 20 candidatos |
+| M4: motor de personajes | Locomoción, ataques A/B/C, habilidades, proyectiles, hitboxes, combo, guardia, hitstop, daño, KO y rondas para todo el roster | Acciones alcanzables comparadas por frame contra PC en personajes y casos acordados | 19 handlers con rutas 408/418 y moveLocks comprobados; 35 impactos directos PAT verificados. Los dispatchers seleccionan Alice 849 seq. 19 (408), 21/23 (418), Suwako 989 seq. 5 (408) y 808 seq. 0 (418); cuatro variantes ofensivas PAT (Alice 418 seq. 21/23 y Suwako 408/418) más Alice 408 sin caja. Hay runtime experimental visible; spawn/anclaje parcial contrastados con x86 y Vita3K 5/5. En Suwako 418, poses 5–17 ajustan movimiento y el gate de creación es contador impar 1–19; Vita3K schema19 verificó diez spawns. La asociación DI-secuencia0 es hipótesis; coordenadas, trayectoria, vida, ciclo de vida y daño por frame siguen pendientes. Remilia 2C/412 tiene probe dedicado. Reimu tiene 12 cartas mapeadas por contexto; `00489660` modifica niveles/variantes y consume cartas. El gate estático requiere cancellable, `actionLock<51`, spellcard, estado y costo válido. Ruta Vita de prueba 103 → acción PAT 560: Iteración 49 conserva el orden original, sin daño en los primeros 11 updates y primer impacto al entrar en seq. 1 en el update 12; Vita3K schema21 conserva las regresiones del roster, escenario, dash y B/C. La asignación de slot es fija: mano/costo/consumo/mejora, cancelaciones, aire, objetos de las otras skills, byte `+0x836` y paridad por frame PC siguen pendientes. También faltan objetos completos, cartas, hitstop y KO. Ver [ITERATION49.md](ITERATION49.md), [ITERATION48.md](ITERATION48.md), [ITERATION47.md](ITERATION47.md), [ITERATION45.md](ITERATION45.md), [ITERATION44.md](ITERATION44.md), [ITERATION42.md](ITERATION42.md), [ITERATION40.md](ITERATION40.md), [ITERATION39.md](ITERATION39.md), [ITERATION38.md](ITERATION38.md), [ITERATION37.md](ITERATION37.md), [ITERATION36.md](ITERATION36.md), [ITERATION35.md](ITERATION35.md), [ITERATION34.md](ITERATION34.md), [ITERATION33.md](ITERATION33.md), [ITERATION32.md](ITERATION32.md), [ITERATION31.md](ITERATION31.md), [ITERATION30.md](ITERATION30.md) y [DASH_DISPATCH_COVERAGE.md](DASH_DISPATCH_COVERAGE.md) |
+| M5: escenarios y sistemas | Escenarios multicapa, animaciones, colisiones, clima, spirit, cartas, menú/selección y transiciones | Reproducción de cada escenario y mecánica con secuencias trazables y sin recursos ausentes | Pendiente; hay assets de fondo, escena, clima y cartas en los DAT |
+| M6: demo integral | Flujo de selección, combate, fin de ronda y galería completa dentro del VPK | Recorrido de todos los personajes y escenarios en Vita3K, cargas/reinicios y regresión determinista | Pendiente |
+| M7: rendimiento y hardware | Perfil de CPU/GPU/memoria, optimización del renderer y prueba física | Objetivos FPS acordados sostenidos en PS Vita y sin regresiones visuales/funcionales | Pendiente; Vita física aún no probada |
 
-Prioridad siguiente: mapear vtables y funciones de práctica/combat manager, fijar una versión base japonesa compatible con referencias, recuperar formatos PAT y comparaciones observables de física. La edición SokuLauncher aportada incluye mods/traducción; no asumir direcciones o hashes intercambiables con otra edición.
+## Siguiente secuencia de trabajo
 
-Netplay, rollback y modo historia se posponen hasta que el combate offline sea correcto y determinista. No hay fecha fiable para un port completo: el motor no está disponible como fuente ARM portable en las referencias verificadas.
+1. La demo interactiva actual incluye la galería de 20 PAT. El gate automático comprueba entradas de navegación y textura, pero no es un build de juego completo. Las tarjetas `data/stand/<slug>.cv2` son arte de selección, no frames de pelea.
+2. Muestrear visualmente en Vita3K animaciones/poses de los 20 personajes; recorrer y auditar las 24 carpetas de escenario presentes en DAT 10.5/12.3, sus objetos/efectos, y rastrear `common/000 hikakuyou.bmp`.
+3. Loader Ghidra: `00408cf0` hace lookup de variantes (`DAT_00896b84=0` en el EXE base); `00409b50` calcula CRC32 plegado a mayúsculas, `0041c530` busca el árbol y `0041c080` comprueba nombres ante colisiones. `0041bb50` descifra y enumera el DAT, `0041bdd0` inserta rutas, offset y tamaño. Los 74 nombres idle heredados ya se resuelven con `th105a.dat`.
+4. Correlacionar transiciones, variantes PAT y daño con pseudocódigo/trace por personaje. El port C del helper `0046cc90` se contrasta como ARMv7 contra x86: 17 casos fijos más 384 secuencias generadas pasan. El historial de 90 muestras también se prueba con wrap, y `NRNR`/`NLNL` reemplazó el atajo de dos toques en el combate. En Vita3K, 35 dashes aplican daño PAT directo. El análisis estático resuelve las secuencias creadas por Alice 408/418 (849: 19, 21/23) y Suwako 408/418 (989: 5; 808: 0); tres tienen cajas ofensivas en PAT y una no. Falta portar y validar update, colisión y daño de esos objetos. El empaque de `0046d5d0` ya está fuente-base; controles configurados, neutralización exacta, replays y timing PC todavía deben probarse. `0046d950` resembraría `Player+0x7b0` durante inicialización/transiciones. Remilia conserva su 2C/412. Próximo: recuperar update y colisión y comparar con trazas PC. Ver [ITERATION34.md](ITERATION34.md), [ITERATION32.md](ITERATION32.md), [PORT_REFERENCES.md](PORT_REFERENCES.md), [INPUT_STATE.md](INPUT_STATE.md), [ITERATION27.md](ITERATION27.md), [ITERATION26.md](ITERATION26.md), [ITERATION22.md](ITERATION22.md) e [ITERATION23.md](ITERATION23.md).
+5. Ghidra confirmó el dispatch `00470e40`, la rejilla 6×5 y orientación x del loader `0046fe40`, más dos rejillas y un desplazamiento vertical de 1200 unidades en `bg34` (`00474f70`). La vtable `0085afa4` prueba que el contador `+0x64` avanza cada tick y que el renderer selecciona `objectFa((tick % 60)/2)`; Vita3K reproduce el ciclo. El mapa de colocación está disponible para inspección, con proyección todavía provisional ([ITERATION15.md](ITERATION15.md)). Recuperar transformaciones de cámara, condiciones de dibujo, parallax y colisión antes de integrarlos como mundo jugable. Extender la auditoría a los otros 23 IDs.
+6. Recuperar el combate por subsistema y personaje; integrar clima, cartas, audio y flujo de ronda. Cada entrega incluye entrada fija, traza x86/Vita y prueba fresca Vita3K.
+7. Perfilar y optimizar tras cerrar cobertura/paridad en emulador, y finalmente validar FPS en una PS Vita física.
+
+## Pruebas y evidencia
+
+Iter06 conserva el alcance interactivo conocido; iter07 añadió detalle de 76,357 poses PAT; iter10 añadió tarjetas 20/20; iter11–12 resolvieron los idle heredados con DAT de 10.5. La iteración 1.6 valida galería PAT en Vita3K con navegación de personajes/acciones/poses y textura visible; la auditoría decodifica 12,189 imágenes de poses para los 20 candidatos. El combate B/C sigue siendo experimental; escenarios, mecánicas y paridad quedan pendientes. Ver [PAT_RESOURCE_COVERAGE.md](PAT_RESOURCE_COVERAGE.md), [PAT_IMAGE_DECODE.md](PAT_IMAGE_DECODE.md), [ITERATION04.md](ITERATION04.md), [ITERATION05.md](ITERATION05.md), [ITERATION06.md](ITERATION06.md), [ITERATION07.md](ITERATION07.md), [ITERATION09.md](ITERATION09.md), [ITERATION10.md](ITERATION10.md), [ITERATION11.md](ITERATION11.md) y [STATUS.md](STATUS.md).
+
+Cada corrida de recursos o mecánica debe empezar en instalación fresca, archivar el reporte anterior y verificar hash del VPK, cierre sin error y digest/traza. Vita3K sirve para regresión, no sustituye una prueba en hardware.
+
+Las decisiones de arquitectura de recompilación están contrastadas con [D2Vita, repentogxm y Touhou75Vita](PORT_REFERENCES.md). Esas referencias inspiran el pipeline de análisis y validación; no son código integrado ni evidencia de paridad.
+
+## Actualización Iteración 1.67
+
+Para Suwako 808 ya se ejecuta el handler de split, initializer radial y ocho updates por hijo bajo Unicorn. La secuencia sigue explícita como hipótesis porque falta emular la cadena virtual de factory; tampoco está cerrada persistencia por tick, colisión, vida ni terminación. El runtime Vita sigue con placeholder y requiere estos contratos antes del port fiel. Siguiente paso: ejecutar la factory del PE hasta la llamada del initializer de acción y capturar +0x13e, luego conservar el layout de objeto entre ticks y comparar colisión/ciclo de vida. Ver [ITERATION67.md](ITERATION67.md).
+
+## Gate de regresión Iteración 1.68
+
+El build actual de auto-test pasó 600 frames en Vita3K aislado con hash 11d0c4df4f35a27edd275ef0bb96ed4f8751df26ba9a68c3576700ad385873c3. Confirma los gates automatizados existentes para roster 20/20, BG34, objetos/dashes y tres rutas de skill Reimu. No eleva el alcance de paridad; la mecánica Suwako 808 radial sigue en análisis x86 y fuera de este VPK. Ver [ITERATION68.md](ITERATION68.md).
+
+## Actualización Iteración 1.69
+
+Se corrigió el cadence del oracle 808: el movimiento espacial ocurre cada ocho subframes, mientras gravedad/escalar avanzan cada callback. El JSON de trayectoria anterior se regeneró con subframe persistente; la secuencia aún se pasa explícitamente y no es prueba del factory real. Siguiente gate sigue siendo instrumentar la cadena virtual para capturar +0x13e natural, luego hitbox/ciclo de vida. Ver [ITERATION69.md](ITERATION69.md).
+
+## Actualización Iteración 1.70
+
+La secuencia del objeto 808 está resuelta por customData[2] según el initializer de Suwako ya auditado en ITERATION34; no depende de rg4. Unicorn ejecuta el initializer original y confirma secuencia 1 para ambos hijos. El factory virtual y el reloj externo del subframe siguen pendientes para una trayectoria nativa comparable, además de hitbox/ciclo de vida. Ver [ITERATION70.md](ITERATION70.md).
+
+## Actualización Iteración 1.71
+
+Se corrigió otro offset crítico en el modelo 808: +0x113 es alpha RGBA, no subframe. Seq.1 reduce alpha en pasos de 8 y deja de integrar posición bajo 8. El constructor/factory debe confirmar alpha inicial y valores RGB; collision, vida y salida siguen pendientes antes del port Vita. Ver [ITERATION71.md](ITERATION71.md).
+
+## Iteración 1.72: auditoría de transferencia TH075 y alpha 808
+
+La revisión comparativa de TH075 confirma que su mapa CFG/cobertura, contratos ABI, watchdog y metodología de medición son buenas referencias; su runtime x86→C, loader, imports, renderer y direcciones son específicos/no validados para TH123 y no se copiaron. Detalle en [TOUHOU75_REUSE_REVIEW.md](TOUHOU75_REUSE_REVIEW.md).
+
+Se corrige una suposición del harness 808: `object+0x113` es alpha; el valor inicial 255 era inyectado. `0x799000` no escribe el byte y `0x438bb0` configura color desde `+0x10c`, sin tocar `+0x113`. La ruta de creación real está pausada antes del objeto por el pool/manager y sus datos de animación. Se requiere reconstruir ese estado antes de calcular una trayectoria natural o cambiar el placeholder Vita.
+
+### Gate técnico 808 actualizado (Iteración 1.72)
+
+El ctor aislado `783a70` y la cadena `setAction→setSequence→initializeAction` ya corren con asignaciones internas cdecl controladas y mapa PAT sintético. El constructor del sprite deja color blanco/alpha 255; los setters preservan el color. Sigue pendiente integrar manager/handles del factory, además de frame data auténtico, colisión y vida antes de portar. Véase [ITERATION72.md](ITERATION72.md).
+
+La prueba aislada `x86_suwako_808_action_probe.py` ahora ejecuta `setAction→setSequence→setPose→initializeAction` con mapa PAT sintético y demuestra la selección de seq.1/frame0, la velocidad radial, y que no hay escritura de RenderInfo al inicializar. El alpha de entrada depende todavía del allocator/pool de la factory; no marcar el proyectil completo ni portarlo hasta medir la asignación/reuso y recuperar update/colisión/vida. Ver [ITERATION72.md](ITERATION72.md).

@@ -1,0 +1,7 @@
+# Iteración 1.47: setter de secuencia PAT ejecutado contra x86
+
+Extendí `tools/x86_skill_sequence_oracle.py` para ejecutar la función original `004652a0` (`setSequence`) con Unicorn. El fixture reproduce el índice de variantes, punteros enlazados y cantidades de poses del PAT local de Reimu 560: seq. 0 = 4, seq. 1 = 7, seq. 2 = 2 y seq. 3 = 3. La rutina x86 selecciona en cada caso el índice, nodo y cantidad correctos; seq. 2 conserva loop=1 y seq. 3 loop=0. El callback de refresco gráfico y el lookup del árbol PAT son sintéticos; la función `setSequence` ejecutada es código original protegido por el SHA-256 del EXE.
+
+La nueva prueba `tests/test_skill_sequence_oracle.py` valida los cuatro destinos. La suite Python completa pasó 17/17 y el oráculo regeneró `artifacts/x86-skill-sequence-oracle.json`. Esto prueba cómo se selecciona un nodo cuando el juego solicita la secuencia; no identifica el input ni la condición que invoca el setter al salir de seq. 2.
+
+El barrido Capstone no encontró llamadas directas a `004652a0`; los vtables de Reimu y Cirno lo exponen como slot virtual 3. La siguiente investigación debe localizar las llamadas indirectas a ese slot en los métodos de actualización del jugador y establecer si Reimu selecciona seq. 3 al cancelar la skill, aterrizar o terminar una transición. No se modificó el runtime ni se reconstruyó el VPK en esta iteración, porque la nueva evidencia es del oráculo x86 y no demuestra aún una regla portable de gameplay.

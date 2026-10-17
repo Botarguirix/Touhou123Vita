@@ -1,0 +1,9 @@
+# Iteración 1.17: delimitación de la ruta real de update de input
+
+La revisión del inicio de función aclaró una confusión en las referencias anteriores: `0046d050` es una rutina genérica de edición de deque/rango, tiene cinco argumentos (`ret 0x14`) y el barrido lineal propone `0046d939` como caller directo; ese caller debe confirmarse en Ghidra. No es la actualización del jugador. El update que interesa comienza en `0046d5d0`, consulta `KeyManager*` en `this+0x750`, arma una muestra desde estados de input y llama `0042cf90` en `0046d78f`. Después delega al slot virtual `this->vtable[0x54]`, que corresponde a `checkAllMotionInputs` en el layout SokuLib.
+
+El append genérico escribe una palabra de 16 bits y aumenta el tamaño del deque. El código de `0046d79d–0046d7bd` avanza el índice circular y reduce ese tamaño si es distinto de cero; cuando el tamaño previo era 0, el append lo lleva a 1 y el decremento lo deja de nuevo en 0. Por eso esta ruta no basta para explicar la historia que el matcher ve; aún falta localizar cuándo y cómo se siembra o repone la ventana.
+
+Dump focalizado del update: `artifacts/kernel/<sha>/input-state/player-input-update.capstone.txt`. Referencias de los helpers y sus callers: `player-input-callers.tsv`; el archivo incluye candidatos de barrido lineal, que deben confirmarse en contexto.
+
+El runtime Vita no cambió y no hay VPK nuevo en esta iteración. **Corrección de la auditoría posterior:** `0046d939` cae dentro de la rutina de edición de rango del deque que termina en `0046d944`; el barrido lineal no identificó ahí un caller externo ni una rutina de Player. La siguiente investigación debe rastrear dónde se precarga/refresca el deque al entrar en combate y seguir las rutinas de buffer `0042ca80`/`0042b930`, con una traza por frame antes de portar el matcher. Ver [ITERATION22.md](ITERATION22.md) y el resumen vivo en [INPUT_STATE.md](INPUT_STATE.md).

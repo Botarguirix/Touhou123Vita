@@ -1,13 +1,18 @@
 param(
- [Parameter(Mandatory)][string]$Vita3K,
- [Parameter(Mandatory)][string]$Config,
- [Parameter(Mandatory)][string]$VitaFS,
+ [string]$Vita3K,
+ [string]$Config,
+ [string]$VitaFS,
  [string]$Distribution='Ubuntu',
- [string]$VitaSDK='/home/bota/vitasdk',
+ [string]$VitaSDK='/home/andy_pc/vitasdk',
  [string]$Frontend='sdl'
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
+$sharedVita3K=$env:VITA3K_HOME
+if(!$sharedVita3K){$sharedVita3K='G:\Vita3k'}
+if(!$Vita3K){$Vita3K=Join-Path $sharedVita3K 'Vita3K.exe'}
+if(!$Config){$Config=Join-Path $sharedVita3K 'config.yml'}
+if(!$VitaFS){$VitaFS=Join-Path $root 'artifacts/vitafs'}
 if(!(Test-Path "$root/assets/font.rgba")){throw 'Generate font/assets first; see README'}
 & wsl -d $Distribution --cd $root -- env "VITASDK=$VitaSDK" bash tools/build.sh
 if($LASTEXITCODE -ne 0){throw 'Host/Vita build or tests failed'}
