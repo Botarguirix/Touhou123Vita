@@ -26,6 +26,8 @@ Iteración 1.98 ejecuta el setter real después de los gates: `0x464930 → 0x43
 
 Iteración 1.99 ejecuta además el bloque exitoso de `0x59dd97`: `0x489610` recibe la clave 412 y retorna lock 0 desde un fixture; la rama alcanza setter/reset/initializer y secuencia PAT real de 12 poses. Se saltan los gates anteriores (estado/movimiento/recurso) y se controlan PAT lookup y callback de pose. Sigue pendiente demostrar entrada natural, probar el rechazo y rastrear actualización/daño. Ver [ITERATION99.md](ITERATION99.md).
 
+Iteración 2.00 añade el caso diferencial: BX 0 vs lock 0 acepta 412 y completa el setup; BX 1 vs lock 0 rechaza 412, consulta moveLock(410) y no alcanza el setter 412. Esto confirma ambas salidas del compare en el fragmento instrumentado, aún con gates previos omitidos y PAT/pose controlados. Falta input natural, update, factory/contacto y daño. Ver [ITERATION100.md](ITERATION100.md).
+
 ### Medición B/C actual — Iteración 1.86
 
 La última compilación de VitaSDK pasó schema31 en Vita3K SDL aislado, 600 frames; conserva roster PAT/recursos/tarjetas 20/20 y A natural 20/20. La sonda B/C intenta aproximación desde spawn, rutas terrestres/aéreas/dash y valida el daño PAT directo o de objeto; registró B 14/20 (`0x0EBBB6`) y C 15/20 (`0x0BF9B7`). Es una medición diagnóstica, no un gate final: el inventario ve variantes PAT, pero el selector provisional de runtime solo cubre dash 408/418; las demás variantes requieren contraste x86 y flags de ataque sin cajas quedan sin simular. Los fallos actuales incluyen rutas B en Reimu, Alice, Remilia, Udonge, Tenshi y Cirno, y rutas C en Alice, Remilia, Suika, Udonge y Utsuho. Ver [ITERATION86.md](ITERATION86.md) y [roster-bc-natural.tsv](../artifacts/roster-bc-natural.tsv).

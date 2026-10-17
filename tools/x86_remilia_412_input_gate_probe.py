@@ -48,7 +48,9 @@ POSE_CAPTURE = STOP + 0x100
 MOVE_LOCK_RETURN = 0x0059DDAC
 
 
-def run(dat_dir: Path) -> dict[str, object]:
+def run_case(dat_dir: Path, lock_value: int, comparison_value: int) -> dict[str, object]:
+    if min(lock_value, comparison_value) < 0 or max(lock_value, comparison_value) > 0x7FFF:
+        raise ValueError("lock and comparison fixtures must be signed-positive 16-bit values")
     _archive, _digest, frames = effective_pat(dat_dir)
     probe = Suwako808FactoryProbe(EXE, dat_dir)
     uc = probe.uc
@@ -88,7 +90,7 @@ def run(dat_dir: Path) -> dict[str, object]:
     uc.mem_write(LOCK_RESULT, struct.pack("<II", LOCK_OBJECT, LOCK_NODE))
     uc.mem_write(LOCK_OBJECT + 4, struct.pack("<I", LOCK_END))
     uc.mem_write(LOCK_NODE + 0x10, struct.pack("<I", LOCK_VALUE))
-    uc.mem_write(LOCK_VALUE + 0x10, struct.pack("<H", 0))
+    uc.mem_write(LOCK_VALUE + 0x10, struct.pack("<H", lock_value))
 
     reached: list[str] = []
     pose_requests: list[int] = []
@@ -132,7 +134,7 @@ def run(dat_dir: Path) -> dict[str, object]:
     uc.reg_write(UC_X86_REG_ESP, sp)
     uc.reg_write(UC_X86_REG_ESI, OBJECT)
     uc.reg_write(UC_X86_REG_ECX, OBJECT)
-    uc.reg_write(UC_X86_REG_EBX, 0)  # available resource covers zero lock cost
+    uc.reg_write(UC_X86_REG_EBX, comparison_value)
     uc.reg_write(UC_X86_REG_EDI, 0)
     uc.reg_write(UC_X86_REG_EIP, INPUT_GATE)
     uc.emu_start(INPUT_GATE, STOP, count=100000)
@@ -151,18 +153,33 @@ def run(dat_dir: Path) -> dict[str, object]:
         "pose_requests": pose_requests,
         "reached_original_functions": reached,
     }
-    if (result["action"] != ACTION or result["sequence"] != SEQUENCE
-            or result["pose"] != 0 or result["pose_count"] != len(frames)
-            or result["sequence_node"] != hex(SEQUENCE_NODE)
-            or lock_actions != [ACTION] or lock_results != [0] or pose_requests != [0]
-            or hex(MOVE_LOCK_LOOKUP) not in reached):
+    enters_2c = comparison_value <= lock_value
+    expected_2c_values = (result["action"] == ACTION and result["sequence"] == SEQUENCE
+                          and result["pose"] == 0 and result["pose_count"] == len(frames)
+                          and result["sequence_node"] == hex(SEQUENCE_NODE)
+                          and pose_requests == [0])
+    rejected_2c = result["action"] != ACTION and hex(ACTION_SETTER) not in reached
+    if (not lock_actions or lock_actions[0] != ACTION or lock_results[:1] != [lock_value]
+            or hex(MOVE_LOCK_LOOKUP) not in reached
+            or (enters_2c and not expected_2c_values)
+            or (not enters_2c and not rejected_2c)):
         raise AssertionError(f"unexpected 2C gate result: {result}")
     return {
         "reference_sha256": probe.sha256,
         "action": ACTION,
-        "move_lock_fixture": 0,
+        "move_lock_fixture": lock_value,
+        "comparison_fixture": comparison_value,
+        "entered_2c": enters_2c,
         "result": result,
-        "scope": "Execution starts at 0x59dd97, the branch-success region immediately before the original moveLock(412) lookup; earlier input/ground/resource gates are bypassed. Original 0x489610, 0x464930, 0x438ca0, 0x465370, and Remilia initializer execute. The associative-map service routes controlled lock/PAT fixtures, and the pose/render callback is captured. No full input dispatch, frame update, collision response, or native fight is executed.",
+    }
+
+
+def run(dat_dir: Path) -> dict[str, object]:
+    cases = [run_case(dat_dir, lock_value=0, comparison_value=0),
+             run_case(dat_dir, lock_value=0, comparison_value=1)]
+    return {
+        "cases": cases,
+        "scope": "Both cases begin at 0x59dd97, bypassing earlier input/ground/resource gates. Original 0x489610, comparison, setter/reset and initializer execute; associative-map and PAT lookup plus pose/render callback are controlled. Case one covers lock 0 with comparison 0 and enters action 412; case two covers comparison 1 > lock 0 and must reject 2C. Neither case runs a frame update, collision response, or native fight.",
     }
 
 

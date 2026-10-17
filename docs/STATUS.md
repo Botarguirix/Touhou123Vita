@@ -2,6 +2,11 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 2.00: gate diferencial de Remilia 2C
+
+- Dos corridas x86 desde `0x59dd97`: con lock 0/BX 0 entra a 412 y selecciona PAT seq.0 (12 poses); con lock 0/BX 1 rechaza 412, consulta fallback 410 y no alcanza setter 412.
+- La sonda ejecuta `0x489610` y el setter/reset/init cuando aplica; PAT/pose siguen controlados y gates anteriores se omiten. Reporte ignorado: `artifacts/kernel/remilia-412-input-gate.json`. Ver [ITERATION100.md](ITERATION100.md).
+
 ## Iteración 1.99: moveLock(412) y setter desde handler
 
 - La sonda entra en `0x59dd97`, ejecuta el lookup original `0x489610`, registra la clave 412 y el retorno de lock 0; la rama alcanza el setter, reset PAT e initializer original. Resultado: action 412, seq.0, pose 0, 12 poses.
