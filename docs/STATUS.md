@@ -2,6 +2,12 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.95: dispatcher común de Remilia y action 412
+
+- El update `0x5879a0` enruta acciones mayores que 226 al método genérico `0x483f40`. Este último solo despacha explícitamente actions 50–181; 412 termina en el epílogo por defecto `0x484be3`.
+- El tramo común no muestra rama directa para 412 ni llamada directa a los callbacks `0x4649b0` de secuencias 2/3. Esto es evidencia estática, no excluye vtables, objetos secundarios ni otros managers.
+- Exportaciones locales ignoradas: `artifacts/kernel/remilia-update-full.tsv`, `remilia-update-dispatch-tail.tsv`, `remilia-generic-action-update.tsv`, `remilia-generic-action-default.tsv`. Siguiente: trazar setup/update desde initializer 412 `0x59ad64` e identificar spawn/callback runtime. Ver [ITERATION95.md](ITERATION95.md).
+
 ## Iteración 1.94: PAT Remilia 412 sincronizado por x86 original
 
 - `tools/x86_remilia_412_box_sync_probe.py` instala pose5 `attackBa002.bmp` desde th123c.dat y ejecuta `0x465e10` seguido del helper de pares `0x47a5b0` en Unicorn sobre el PE fijado por hash.
