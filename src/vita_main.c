@@ -22,6 +22,8 @@ static const char *roster[]={"reimu","marisa","sakuya","alice","patchouli","youm
 static unsigned roster_index[2]={0,16},roster_card_index[2]={ROSTER_COUNT,ROSTER_COUNT};
 static unsigned roster_pat_mask,roster_asset_mask,roster_card_mask,roster_attempt_mask,roster_texture_fail_mask;
 static unsigned dash_direct_hit_routes,dash_no_direct_boxes;
+static unsigned roster_b_natural_candidates[20],roster_c_natural_candidates[20];
+static int roster_b_natural_action[20],roster_c_natural_action[20];
 static unsigned object_route_probe,object_attack_routes;
 static unsigned suwako_418_burst_spawns;
 static unsigned object_anchor_probe;
@@ -370,6 +372,80 @@ static unsigned probe_roster_a_natural_attacks(void){
         if(load_character(0,character)==0&&probe_character_a_attack_natural(character))mask|=1u<<character;
     load_character(0,saved0);load_character(1,saved1);
     return mask;
+}
+static int probe_character_natural_bc(unsigned character,int button,unsigned *candidate_mask){
+    static const int b_actions[]={400,401,402,403,407,408,404,405,406,409};
+    static const uint32_t b_inputs[]={IN_SHOT,IN_RIGHT|IN_SHOT,IN_DOWN|IN_SHOT,
+        IN_DOWN|IN_RIGHT|IN_SHOT,IN_LEFT|IN_SHOT,IN_RIGHT|IN_SHOT,IN_SHOT,
+        IN_RIGHT|IN_SHOT,IN_DOWN|IN_SHOT,IN_LEFT|IN_SHOT};
+    static const int c_actions[]={410,411,412,418,414,415,416,417};
+    static const uint32_t c_inputs[]={IN_C_ATTACK,IN_RIGHT|IN_C_ATTACK,
+        IN_DOWN|IN_C_ATTACK,IN_RIGHT|IN_C_ATTACK,IN_C_ATTACK,
+        IN_RIGHT|IN_C_ATTACK,IN_DOWN|IN_C_ATTACK,IN_LEFT|IN_C_ATTACK};
+    const int *actions=button==IN_SHOT?b_actions:c_actions;
+    const uint32_t *inputs=button==IN_SHOT?b_inputs:c_inputs;
+    unsigned count=button==IN_SHOT?sizeof b_actions/sizeof b_actions[0]:sizeof c_actions/sizeof c_actions[0];
+    *candidate_mask=0;
+    for(unsigned route=0;route<count;route++){
+        int id=actions[route];
+        const T123Move *move=probe_selected_attack(&patterns[0],id);
+        int damaging=0;
+        if(move)for(unsigned pose=0;pose<move->sequence.count;pose++)
+            if(move->poses[pose].damage&&move->poses[pose].attack_count){damaging=1;break;}
+        if(button==IN_C_ATTACK&&id==418&&(character==3||character==19))damaging=1;
+        if(!damaging)continue;
+        *candidate_mask|=1u<<route;
+        int airborne=(button==IN_SHOT?id>=404&&id!=408:id>=414&&id<=417);
+        static const unsigned approaches[]={55,75,95,115,130};
+        for(unsigned approach=0;approach<sizeof approaches/sizeof approaches[0];approach++)
+        for(unsigned airtime=0;airtime<(airborne?5u:1u);airtime++){
+            Fight probe;fight_init(&probe);
+            fight_bind_character_patterns(&probe,&patterns[0],(int)character,
+                &patterns[1],(int)roster_index[1]);
+            probe.ai=0;probe.scene=SCENE_FIGHT;
+            for(unsigned tick=0;tick<approaches[approach];tick++)fight_step(&probe,IN_RIGHT);
+            if(airborne){
+                fight_step(&probe,IN_JUMP|IN_RIGHT);
+                for(unsigned tick=0;tick<airtime;tick++)fight_step(&probe,IN_RIGHT);
+                if(probe.p[0].y<=0)continue;
+            }
+            if(id==408||id==418){
+                fight_step(&probe,0);fight_step(&probe,IN_RIGHT);fight_step(&probe,0);
+                fight_step(&probe,IN_RIGHT);
+                if(probe.p[0].action!=200||!probe.p[0].dash_ticks)continue;
+            }
+            fight_step(&probe,inputs[route]);
+            if(probe.p[0].action!=id)continue;
+            for(unsigned tick=0;tick<180;tick++){
+                unsigned before=probe.p[1].hp;fight_step(&probe,0);
+                if(probe.p[1].hp<before){
+                    unsigned damage=before-probe.p[1].hp;int exact=0;
+                    const T123Pose *hit=fight_pose(&probe,0);
+                    if(hit&&damage==(unsigned)hit->damage)exact=1;
+                    for(unsigned oi=0;!exact&&oi<sizeof probe.objects/sizeof probe.objects[0];oi++){
+                        const T123Object *object=&probe.objects[oi];
+                        if(object->owner!=0||object->owner_action!=id)continue;
+                        const T123Move *source=t123_pattern_move(&patterns[0],object->action,object->sequence);
+                        if(source&&object->animation.pose<source->sequence.count&&
+                            damage==(unsigned)source->poses[object->animation.pose].damage)exact=1;
+                    }
+                    unsigned hits=button==IN_SHOT?probe.p[0].b_hits:probe.p[0].c_hits;
+                    if(exact&&hits>0)return id;
+                }
+            }
+        }
+    }
+    return 0;
+}
+static void probe_roster_natural_bc(unsigned *bmask,unsigned *cmask){
+    unsigned saved0=roster_index[0],saved1=roster_index[1];*bmask=*cmask=0;
+    for(unsigned character=0;character<ROSTER_COUNT;character++)if(load_character(0,character)==0){
+        roster_b_natural_action[character]=probe_character_natural_bc(character,IN_SHOT,&roster_b_natural_candidates[character]);
+        roster_c_natural_action[character]=probe_character_natural_bc(character,IN_C_ATTACK,&roster_c_natural_candidates[character]);
+        if(roster_b_natural_action[character])*bmask|=1u<<character;
+        if(roster_c_natural_action[character])*cmask|=1u<<character;
+    }
+    load_character(0,saved0);load_character(1,saved1);
 }
 static int probe_reimu_505_routes(void){
     static const int counts[3]={3,4,5};
@@ -735,6 +811,8 @@ int main(void){
     if(automated&&data_ready)object_render_capture=capture_object_render_probe(&g);
     unsigned roster_a_attack_mask=automated&&data_ready?probe_roster_a_attacks():0;
     unsigned roster_a_natural_attack_mask=automated&&data_ready?probe_roster_a_natural_attacks():0;
+    unsigned roster_b_natural_attack_mask=0,roster_c_natural_attack_mask=0;
+    if(automated&&data_ready)probe_roster_natural_bc(&roster_b_natural_attack_mask,&roster_c_natural_attack_mask);
     int f=0,menu_seen=0,practice_seen=0,fight_seen=0,jump_seen=0,gallery_seen=0,stage_seen=0,skill_probe_inputs=0,skill_probe_success=0,skill_probe_sequence_ok=0,skill_probe_action=-1,skill_probe_image=-1,skill_probe_hit_delta=0,skill_probe_start_sequence=-1,skill_probe_hit_sequence=-1,skill_probe_startup_hit_delta=-1,skill_air_launch_ok=0,skill_landing_sequence=-1,skill_landing_ok=0,skill_x_delta=0,skill_reverse_motion_ok=0;
     Fight skill_probe_game,skill_102_probe_game,skill_107_probe_game,skill_104_probe_game;int skill_probe_ready=0,skill_102_probe_ready=0,skill_107_probe_ready=0,skill_104_probe_ready=0,skill_104_action=-1,skill_104_sequence_ok=0,skill_104_spawn_count=0,skill_104_object_action=-1,skill_104_sprite_seen=0,skill_104_hit_delta=0,skill_104_phase_mask=0,skill_102_action=-1,skill_102_image=-1,skill_102_sequence_ok=0,skill_102_hit_delta=0,skill_102_hit_sequence=-1,skill_102_hit_image=-1,skill_102_followup_ticks=0,skill_107_action=-1,skill_107_image=-1,skill_107_sequence_ok=0,skill_107_hit_delta=0,skill_107_hit_sequence=-1,skill_107_hit_image=-1,skill_107_followup_ticks=0;unsigned skill_hits_baseline=0;
     for(;;){
@@ -872,8 +950,9 @@ int main(void){
             int pat_effect_fixture=probe_pattern_effect_payload();
             int pass=data_ready&&(resources.opened==31u)&&menu_seen&&gallery_seen&&gallery_texture_seen&&gallery_character_seen&&gallery_action_seen&&gallery_pose_seen&&stage_seen&&stage_index==20&&stage_layer==3&&stage_layout_seen&&stage_texture_seen&&stage_navigation_seen&&stage_tiles_loaded==30&&stage_alt_tiles_loaded==30&&stage_static_loaded==4&&stage_objects_loaded==30&&practice_seen&&fight_seen&&jump_seen&&dash_gate_probe==1&&object_route_probe==5&&object_attack_routes==4&&suwako_418_burst_spawns==10&&object_anchor_probe==2&&object_sprite_seen&&object_render_capture&&dash_direct_hit_routes>0&&dash_direct_hit_routes+dash_no_direct_boxes==38&&pat_effect_fixture&&roster_card_count()==ROSTER_COUNT&&roster_asset_count()==ROSTER_COUNT&&roster_a_attack_mask==((1u<<ROSTER_COUNT)-1u)&&roster_a_natural_attack_mask==((1u<<ROSTER_COUNT)-1u)&&g.p[0].hits>0&&g.p[0].a_hits>0&&g.p[0].dashes>0&&g.p[0].b_hits>0&&g.p[0].c_hits>0&&skill_probe_success&&skill_probe_sequence_ok&&skill_probe_action==560&&skill_probe_image>=0&&skill_probe_hit_delta>0&&skill_air_launch_ok&&skill_landing_ok&&skill_x_delta>0&&skill_reverse_motion_ok&&skill_102_sequence_ok&&skill_102_image==774&&skill_102_hit_delta==1100&&skill_102_hit_sequence==3&&skill_102_hit_image==39&&skill_102_followup_ticks==47&&skill_107_sequence_ok&&skill_107_action==565&&skill_107_image==12&&skill_107_hit_delta==450&&skill_107_hit_sequence==1&&skill_107_hit_image==47&&skill_107_followup_ticks==63&&skill_104_phase_mask==7&&skill_104_sequence_ok&&skill_104_action==505&&skill_104_spawn_count==4&&skill_104_object_action==811&&skill_104_sprite_seen&&skill_104_hit_delta>0&&g.p[1].hp<g.max_hp&&loaded_textures>2;
             FILE *r=fopen("ux0:data/touhou123vita-smoke.json","w");
-            if(r){fprintf(r,"{\"schema\":30,\"status\":\"%s\",\"frames\":600,\"menu\":%d,\"gallery\":%d,\"gallery_texture\":%d,\"gallery_character\":%d,\"gallery_action\":%d,\"gallery_pose\":%d,\"stage_view\":%d,\"stage\":\"%s\",\"stage_layer\":%u,\"stage_layout\":%d,\"stage_texture\":%d,\"stage_navigation\":%d,\"stage_tiles\":%d,\"stage_alt_tiles\":%d,\"stage_static_assets\":%d,\"stage_object_assets\":%d,\"stage_animation_tick\":%u,\"stage_animation_frame\":%u,\"practice\":%d,\"fight\":%d,\"jump\":%d,\"dash_gate_probe\":%d,\"object_route_probe\":%u,\"object_attack_routes\":%u,\"suwako_418_burst_spawns\":%u,\"object_anchor_probe\":%u,\"object_sprite_seen\":%d,\"object_render_capture\":%d,\"dash_direct_hits\":%u,\"dash_no_direct_boxes\":%u,\"pat_effect_fixture\":%d,\"hits\":%u,\"dashes\":%u,\"a_hits\":%u,\"roster_a_attack_mask\":%u,\"roster_a_natural_attack_mask\":%u,\"b_hits\":%u,\"c_hits\":%u,\"skill_uses\":%d,\"skill_action\":%d,\"skill_image\":%d,\"skill_sequence_ok\":%d,\"skill_start_sequence\":%d,\"skill_hit_sequence\":%d,\"skill_startup_hit_delta\":%d,\"skill_hit_delta\":%d,\"skill_air_launch_ok\":%d,\"skill_landing_ok\":%d,\"skill_landing_sequence\":%d,\"skill_x_delta\":%d,\"skill_reverse_motion_ok\":%d,\"skill_102_action\":%d,\"skill_102_image\":%d,\"skill_102_sequence_ok\":%d,\"skill_102_hit_delta\":%d,\"skill_102_hit_sequence\":%d,\"skill_102_hit_image\":%d,\"skill_102_followup_ticks\":%d,\"skill_107_action\":%d,\"skill_107_image\":%d,\"skill_107_sequence_ok\":%d,\"skill_107_hit_delta\":%d,\"skill_107_hit_sequence\":%d,\"skill_107_hit_image\":%d,\"skill_107_followup_ticks\":%d,\"skill_104_phase_mask\":%d,\"skill_104_action\":%d,\"skill_104_sequence_ok\":%d,\"skill_104_spawn_count\":%d,\"skill_104_object_action\":%d,\"skill_104_sprite_seen\":%d,\"skill_104_hit_delta\":%d,\"skill_inputs\":%d,\"scene_end\":%d,\"p0_character\":%d,\"p0_skill_card\":%d,\"p0_action\":%d,\"cpu_hp\":%d,\"max_hp\":%d,\"digest\":%u,\"external_dat\":%u,\"textures_decoded\":%u,\"roster_pat_mask\":%u,\"roster_assets\":%u,\"roster_asset_mask\":%u,\"roster_cards\":%u,\"roster_card_mask\":%u,\"roster_attempt_mask\":%u,\"roster_texture_fail_mask\":%u}\n",pass?"passed":"failed",menu_seen,gallery_seen,gallery_texture_seen,gallery_character_seen,gallery_action_seen,gallery_pose_seen,stage_seen,stage_names[stage_index],stage_layer,stage_layout_seen,stage_texture_seen,stage_navigation_seen,stage_tiles_loaded,stage_alt_tiles_loaded,stage_static_loaded,stage_objects_loaded,stage_tick%60u,(stage_tick%60u)/2u,practice_seen,fight_seen,jump_seen,dash_gate_probe,object_route_probe,object_attack_routes,suwako_418_burst_spawns,object_anchor_probe,object_sprite_seen,object_render_capture,dash_direct_hit_routes,dash_no_direct_boxes,pat_effect_fixture,g.p[0].hits,g.p[0].dashes,g.p[0].a_hits,roster_a_attack_mask,roster_a_natural_attack_mask,g.p[0].b_hits,g.p[0].c_hits,skill_probe_success,skill_probe_action,skill_probe_image,skill_probe_sequence_ok,skill_probe_start_sequence,skill_probe_hit_sequence,skill_probe_startup_hit_delta,skill_probe_hit_delta,skill_air_launch_ok,skill_landing_ok,skill_landing_sequence,skill_x_delta,skill_reverse_motion_ok,skill_102_action,skill_102_image,skill_102_sequence_ok,skill_102_hit_delta,skill_102_hit_sequence,skill_102_hit_image,skill_102_followup_ticks,skill_107_action,skill_107_image,skill_107_sequence_ok,skill_107_hit_delta,skill_107_hit_sequence,skill_107_hit_image,skill_107_followup_ticks,skill_104_phase_mask,skill_104_action,skill_104_sequence_ok,skill_104_spawn_count,skill_104_object_action,skill_104_sprite_seen,skill_104_hit_delta,skill_probe_inputs,g.scene,g.character[0],g.p[0].skill_card_id,g.p[0].action,g.p[1].hp,g.max_hp,(unsigned)fight_digest(&g),resources.opened,loaded_textures,roster_pat_mask,roster_asset_count(),roster_asset_mask,roster_card_count(),roster_card_mask,roster_attempt_mask,roster_texture_fail_mask);fclose(r);}
+            if(r){fprintf(r,"{\"schema\":31,\"status\":\"%s\",\"frames\":600,\"menu\":%d,\"gallery\":%d,\"gallery_texture\":%d,\"gallery_character\":%d,\"gallery_action\":%d,\"gallery_pose\":%d,\"stage_view\":%d,\"stage\":\"%s\",\"stage_layer\":%u,\"stage_layout\":%d,\"stage_texture\":%d,\"stage_navigation\":%d,\"stage_tiles\":%d,\"stage_alt_tiles\":%d,\"stage_static_assets\":%d,\"stage_object_assets\":%d,\"stage_animation_tick\":%u,\"stage_animation_frame\":%u,\"practice\":%d,\"fight\":%d,\"jump\":%d,\"dash_gate_probe\":%d,\"object_route_probe\":%u,\"object_attack_routes\":%u,\"suwako_418_burst_spawns\":%u,\"object_anchor_probe\":%u,\"object_sprite_seen\":%d,\"object_render_capture\":%d,\"dash_direct_hits\":%u,\"dash_no_direct_boxes\":%u,\"pat_effect_fixture\":%d,\"hits\":%u,\"dashes\":%u,\"a_hits\":%u,\"roster_a_attack_mask\":%u,\"roster_a_natural_attack_mask\":%u,\"roster_b_natural_attack_mask\":%u,\"roster_c_natural_attack_mask\":%u,\"b_hits\":%u,\"c_hits\":%u,\"skill_uses\":%d,\"skill_action\":%d,\"skill_image\":%d,\"skill_sequence_ok\":%d,\"skill_start_sequence\":%d,\"skill_hit_sequence\":%d,\"skill_startup_hit_delta\":%d,\"skill_hit_delta\":%d,\"skill_air_launch_ok\":%d,\"skill_landing_ok\":%d,\"skill_landing_sequence\":%d,\"skill_x_delta\":%d,\"skill_reverse_motion_ok\":%d,\"skill_102_action\":%d,\"skill_102_image\":%d,\"skill_102_sequence_ok\":%d,\"skill_102_hit_delta\":%d,\"skill_102_hit_sequence\":%d,\"skill_102_hit_image\":%d,\"skill_102_followup_ticks\":%d,\"skill_107_action\":%d,\"skill_107_image\":%d,\"skill_107_sequence_ok\":%d,\"skill_107_hit_delta\":%d,\"skill_107_hit_sequence\":%d,\"skill_107_hit_image\":%d,\"skill_107_followup_ticks\":%d,\"skill_104_phase_mask\":%d,\"skill_104_action\":%d,\"skill_104_sequence_ok\":%d,\"skill_104_spawn_count\":%d,\"skill_104_object_action\":%d,\"skill_104_sprite_seen\":%d,\"skill_104_hit_delta\":%d,\"skill_inputs\":%d,\"scene_end\":%d,\"p0_character\":%d,\"p0_skill_card\":%d,\"p0_action\":%d,\"cpu_hp\":%d,\"max_hp\":%d,\"digest\":%u,\"external_dat\":%u,\"textures_decoded\":%u,\"roster_pat_mask\":%u,\"roster_assets\":%u,\"roster_asset_mask\":%u,\"roster_cards\":%u,\"roster_card_mask\":%u,\"roster_attempt_mask\":%u,\"roster_texture_fail_mask\":%u}\n",pass?"passed":"failed",menu_seen,gallery_seen,gallery_texture_seen,gallery_character_seen,gallery_action_seen,gallery_pose_seen,stage_seen,stage_names[stage_index],stage_layer,stage_layout_seen,stage_texture_seen,stage_navigation_seen,stage_tiles_loaded,stage_alt_tiles_loaded,stage_static_loaded,stage_objects_loaded,stage_tick%60u,(stage_tick%60u)/2u,practice_seen,fight_seen,jump_seen,dash_gate_probe,object_route_probe,object_attack_routes,suwako_418_burst_spawns,object_anchor_probe,object_sprite_seen,object_render_capture,dash_direct_hit_routes,dash_no_direct_boxes,pat_effect_fixture,g.p[0].hits,g.p[0].dashes,g.p[0].a_hits,roster_a_attack_mask,roster_a_natural_attack_mask,roster_b_natural_attack_mask,roster_c_natural_attack_mask,g.p[0].b_hits,g.p[0].c_hits,skill_probe_success,skill_probe_action,skill_probe_image,skill_probe_sequence_ok,skill_probe_start_sequence,skill_probe_hit_sequence,skill_probe_startup_hit_delta,skill_probe_hit_delta,skill_air_launch_ok,skill_landing_ok,skill_landing_sequence,skill_x_delta,skill_reverse_motion_ok,skill_102_action,skill_102_image,skill_102_sequence_ok,skill_102_hit_delta,skill_102_hit_sequence,skill_102_hit_image,skill_102_followup_ticks,skill_107_action,skill_107_image,skill_107_sequence_ok,skill_107_hit_delta,skill_107_hit_sequence,skill_107_hit_image,skill_107_followup_ticks,skill_104_phase_mask,skill_104_action,skill_104_sequence_ok,skill_104_spawn_count,skill_104_object_action,skill_104_sprite_seen,skill_104_hit_delta,skill_probe_inputs,g.scene,g.character[0],g.p[0].skill_card_id,g.p[0].action,g.p[1].hp,g.max_hp,(unsigned)fight_digest(&g),resources.opened,loaded_textures,roster_pat_mask,roster_asset_count(),roster_asset_mask,roster_card_count(),roster_card_mask,roster_attempt_mask,roster_texture_fail_mask);fclose(r);}
             FILE *rf=fopen("ux0:data/touhou123vita-roster.tsv","w");if(rf){fprintf(rf,"character\tpat_loaded\ttexture_loaded\tfirst_image\n");for(unsigned i=0;i<ROSTER_COUNT;i++)fprintf(rf,"%s\t%d\t%d\t%s\n",roster[i],!!(roster_pat_mask&(1u<<i)),!!(roster_asset_mask&(1u<<i)),roster_first_image[i]);fclose(rf);}
+            FILE *bcf=fopen("ux0:data/touhou123vita-bc-natural.tsv","w");if(bcf){fprintf(bcf,"character\tb_candidates\tb_hit_action\tc_candidates\tc_hit_action\n");for(unsigned i=0;i<ROSTER_COUNT;i++)fprintf(bcf,"%s\t0x%02X\t%d\t0x%02X\t%d\n",roster[i],roster_b_natural_candidates[i],roster_b_natural_action[i],roster_c_natural_candidates[i],roster_c_natural_action[i]);fclose(bcf);}
             break;
         }
     }

@@ -6,7 +6,11 @@ Entregar una demo funcional para PS Vita que cargue los recursos originales loca
 
 ## Inventario actual
 
-### Gate de reconstrucción — Iteración 1.85
+### Medición B/C actual — Iteración 1.86
+
+La última compilación de VitaSDK pasó schema31 en Vita3K SDL aislado, 600 frames; conserva roster PAT/recursos/tarjetas 20/20 y A natural 20/20. La sonda B/C intenta aproximación desde spawn, rutas terrestres/aéreas/dash y valida el daño PAT directo o de objeto; registró B 14/20 (`0x0EBBB6`) y C 15/20 (`0x0BF9B7`). Es una medición diagnóstica, no un gate final: el inventario ve variantes PAT, pero el selector provisional de runtime solo cubre dash 408/418; las demás variantes requieren contraste x86 y flags de ataque sin cajas quedan sin simular. Los fallos actuales incluyen rutas B en Reimu, Alice, Remilia, Udonge, Tenshi y Cirno, y rutas C en Alice, Remilia, Suika, Udonge y Utsuho. Ver [ITERATION86.md](ITERATION86.md) y [roster-bc-natural.tsv](../artifacts/roster-bc-natural.tsv).
+
+### Gate A de reconstrucción — Iteración 1.85
 
 Build VitaSDK fresco, VPK de 96,291 bytes, SHA-256 `1a1461e7197ac65694ce45f01f45f3460288301bd7029c27a1b072300372fd08`; Vita3K SDL aislado schema30 pasó 600 frames. El gate prueba rutas A con aproximación natural desde spawns normales contra Cirno inmóvil para los 20 PAT (`roster_a_natural_attack_mask=0xFFFFF`), además de ataque A con geometría controlada, hits A/B/C en la pelea principal, roster de recursos 20/20 y BG34. No verifica todos los matchups, IA/guardia ni paridad por frame. La evidencia visual está en [fight-natural-a.bmp](../artifacts/screenshots/fight-natural-a.bmp); los otros escenarios y sus mecánicas siguen pendientes. El VPK queda local en `artifacts/`. Ver [ITERATION85.md](ITERATION85.md), [ITERATION84.md](ITERATION84.md), [ITERATION83.md](ITERATION83.md) y [STATUS.md](STATUS.md).
 

@@ -2,6 +2,16 @@
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
+## Iteración 1.86: medición natural B/C por personaje
+
+- La sonda ahora intenta acciones B/C terrestres, aéreas y dash desde el spawn normal, con cinco distancias y ventanas de salto; valida daño contra la pose PAT directa o el objeto dueño. Los objetos también incrementan el contador B/C de la acción que los generó. El inventario detecta variantes PAT dañinas, pero el selector provisional del runtime sigue limitado a dash 408/418; otros selectores faltan.
+- Vita3K SDL schema31 pasó 600 frames; siguen verdes BG34, PAT/sprites/tarjetas 20/20 y A natural 20/20. B natural conectó 14/20 (`0x0EBBB6`); C conectó 15/20 (`0x0BF9B7`). Estas máscaras son telemetría, no gates de completitud.
+- B pendiente: Reimu, Alice, Remilia, Udonge, Tenshi y Cirno. C pendiente: Alice, Remilia, Suika, Udonge y Utsuho. Remilia 412/416 y varios otros ataques conservan daño PAT expresado en flags sin cajas explícitas; Alice 418 usa el objeto 849 y aún no conecta con la aproximación probada.
+- VPK: [Touhou123Vita-bc-natural-final.vpk](../artifacts/Touhou123Vita-bc-natural-final.vpk), 98,275 bytes, SHA-256 `493f2294ca58ae21357ab6349091119d1e81ce12e6a2afbbe912de6854943a47`. Diagnóstico: [roster-bc-natural.tsv](../artifacts/roster-bc-natural.tsv); corrida: [vita3k-result.json](../artifacts/vita3k-result.json).
+- Siguiente: recuperar selección real de variantes y colisiones `attack_flags` desde el ejecutable x86, empezando por Remilia 412, y validar una pelea con IA/guardia y trazas comparables.
+
+Ver [ITERATION86.md](ITERATION86.md).
+
 ## Iteración 1.85: ataque A natural para todo el roster
 
 - El auto-test schema30 ejecuta cada PAT desde el spawn normal `(190,450)` contra Cirno quieto: aproxima al jugador con 130 updates de `IN_RIGHT`, intenta las entradas A terrestres disponibles y espera a que conecte usando únicamente `fight_step`, PAT y sus hitboxes/hurtboxes. No acomoda manualmente las coordenadas para esta medición.

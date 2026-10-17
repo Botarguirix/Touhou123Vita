@@ -29,6 +29,8 @@ static unsigned current_sequence(const Fighter *p){
 static void action(Fight *g,int i,int id){
  Fighter *p=&g->p[i];p->action=id;p->action_ticks=0;p->hit_done=0;p->object_counter=0;if(id!=200)p->dash_ticks=0;
  if(id!=560){p->skill_air_active=0;p->skill_air_x_q=0;p->skill_air_vx_q=0;p->skill_air_y_q=0;p->skill_air_vy_q=0;}
+ /* Dash attacks have authored variants whose offensive sequence must be
+    selected from PAT; other B/C variant selectors still need x86 recovery. */
  p->action_index=(id==408||id==418)?attack_variant(g->patterns[i],id):0;
  p->action_sequence_count=0;
  if(is_skill_action(id)&&g->patterns[i]){
@@ -66,7 +68,7 @@ static void update_objects(Fight *g){
   if(!m->poses||o->animation.pose>=m->sequence.count)continue;
   const T123Pose *pose=&m->poses[o->animation.pose];Fighter *victim=&g->p[1-o->owner];if(!pose->damage||!pose->attack_count||!victim->hp)continue;
   for(unsigned a=0;a<pose->attack_count;a++){T123Box box=pose->attack[a];box.left+=o->x-g->p[o->owner].x;box.right+=o->x-g->p[o->owner].x;box.up+=g->p[o->owner].y-o->y;box.down+=g->p[o->owner].y-o->y;
-   for(unsigned b=0;b<T123_BOX_LIMIT;b++){const T123Pose *vp=fight_pose(g,1-o->owner);if(!vp||b>=vp->hurt_count)break;if(overlap(&box,&g->p[o->owner],&vp->hurt[b],victim)){victim->hp-=victim->guard?pose->chip:pose->damage;if(victim->hp<0)victim->hp=0;victim->stun=victim->guard?pose->block_stun:pose->enemy_stun;if(victim->stun<1)victim->stun=1;++g->p[o->owner].hits;o->active=0;break;}}
+   for(unsigned b=0;b<T123_BOX_LIMIT;b++){const T123Pose *vp=fight_pose(g,1-o->owner);if(!vp||b>=vp->hurt_count)break;if(overlap(&box,&g->p[o->owner],&vp->hurt[b],victim)){victim->hp-=victim->guard?pose->chip:pose->damage;if(victim->hp<0)victim->hp=0;victim->stun=victim->guard?pose->block_stun:pose->enemy_stun;if(victim->stun<1)victim->stun=1;Fighter *attacker=&g->p[o->owner];++attacker->hits;if(o->owner_action>=400&&o->owner_action<410)++attacker->b_hits;else if(o->owner_action>=410&&o->owner_action<420)++attacker->c_hits;o->active=0;break;}}
   }
  }
 }
