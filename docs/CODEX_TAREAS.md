@@ -14,8 +14,8 @@ edita solo los archivos que indica la tarea y termina con el informe final.
 
 | # | Tarea | Prioridad | Estado |
 |---|---|---|---|
-| T1 | Flags de `CreateDevice` y modo x87 | Alta, bloquea el modelo x87 del lifter | Pendiente |
-| T2 | Efectos D3DX embebidos | Media | Pendiente |
+| T1 | Flags de `CreateDevice` y modo x87 | Alta, bloquea el modelo x87 del lifter | Hecha (21 oct 2026), integrada en `main`: [X87_MODE.md](X87_MODE.md) |
+| T2 | Efectos D3DX embebidos | Media | Hecha (21 oct 2026), integrada en `main`: [D3DX_EFFECTS.md](D3DX_EFFECTS.md) |
 | T3 | Censo de métodos COM usados | Media | Pendiente |
 | T4 | zlib, libpng y vorbis nativos para Vita | Media | Pendiente |
 | T5 | Peticiones de fuente y sustituto de `GetGlyphOutlineA` | Baja | Pendiente |
