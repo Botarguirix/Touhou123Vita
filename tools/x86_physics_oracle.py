@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "local/python-deps"))
 import pefile
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
-from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_ESP
+from unicorn.x86_const import UC_X86_REG_ECX, UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EIP
 
 REFERENCE_SHA256 = "f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e"
 PHYSICS = 0x463550
@@ -34,18 +34,29 @@ class PhysicsOracle:
             self.uc.mem_map(address, size)
         self.uc.hook_add(UC_HOOK_CODE, self._hook)
 
-    @staticmethod
-    def _hook(uc, address, _size, _user):
+    def _hook(self, uc, address, _size, _user):
         if address == STOP:
             uc.emu_stop()
+        elif self.stage_locked and address in (0x4393B0, 0x4393F0):
+            # Flat-arena fixture: allow movement toward the wall and report
+            # no stage collision. The original physics/clamp code still runs.
+            esp = uc.reg_read(UC_X86_REG_ESP)
+            ret = struct.unpack('<I', uc.mem_read(esp, 4))[0]
+            uc.reg_write(UC_X86_REG_EAX, (self.movement_sign & 0xFFFFFFFF) if address == 0x4393B0 else 0)
+            uc.reg_write(UC_X86_REG_ESP, esp + (8 if address == 0x4393F0 else 4))
+            uc.reg_write(UC_X86_REG_EIP, ret)
 
     def step(self, x: float, speed_x: float, direction: int,
              speed_power: float = 1.0, opponent_additional_speed_x: float = 0.0,
-             player_motion_lock: int = 0, opponent_motion_lock: int = 0):
+             player_motion_lock: int = 0, opponent_motion_lock: int = 0,
+             stage_locked: bool = False):
         if direction not in (-1, 1):
             raise ValueError("direction must be -1 or 1")
         u = self.uc
         player = bytearray(0x1000)
+        self.stage_locked = stage_locked
+        self.movement_sign = -1 if (speed_x + opponent_additional_speed_x) * direction < 0 else 1
+        player[0x571] = int(stage_locked)
         struct.pack_into("<I", player, 0x170, OPPONENT)
         struct.pack_into("<h", player, 0x196, player_motion_lock)
         struct.pack_into("<f", player, 0x0EC, x)

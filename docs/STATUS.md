@@ -1,10 +1,636 @@
+## Iteración 2.199: escala de cajas y detección de impactos
+
+Cajas PAT ordinarias y separación corporal pasan a unidades completas, contrastadas con el helper x86 (incluido ceil de posición). Se corrigió el registro de impactos en el frame del comando: Udonge 408:1/800 se registra en frame 0 y 409:1/400 conserva una sonda dedicada. Suite Python completa 146/146 y pruebas nativas de arena/colisión aprobadas; Vita3K SDL 600 frames passed, ambos VPK verificados. La suite C general conserva el fallo previo del fixture Suika. Falta migrar offsets/movimiento de objetos que siguen a media escala, especialmente Remilia 801. [ITERATION299.md](ITERATION299.md).
+
+## Iteración 2.198: inicio PAT en 480/800 y cámara 640
+
+El reset común x86 confirmó posiciones (480,0)/(800,0), orientación +1/−1 y velocidades cero; el constructor de cámara confirmó (640,0,1). El port aplica esos valores al reinicio PAT y mantiene explícitas las disposiciones de pruebas y selección. Python 23/23, prueba nativa de arena/reinicio aprobada y Vita3K SDL 600 frames passed, incluido `arena_spawn_contract=1`. Ambos VPK están reconstruidos y verificados. Persiste el fallo previo del fixture nativo Suika; falta escala de cajas y comparación visual con PC. [ITERATION298.md](ITERATION298.md).
+
+## Iteración 2.197: arena PAT de 40 a 1240
+
+Se reemplazó el límite de demo 35–605 en movimiento PAT y habilidad aérea por 40–1240, contrastado ejecutando la rama PE de arena plana. La prueba nativa nueva atraviesa la mitad derecha y verifica cámara/paredes; Python 11/11. Vita3K SDL pasó 600 frames y ambos VPK pasan validación estructural. La suite nativa general conserva un fallo previo del fixture Suika, reproducido antes y después del cambio. Posiciones iniciales, escala de cajas y paridad visual siguen pendientes; 27%. [ITERATION297.md](ITERATION297.md).
+
+## Iteración 2.196: presentación dentro del lienzo 4:3
+
+Los quads ya no invaden las bandas laterales. El runner comprueba los píxeles de las dos bandas de BG36; Vita3K SDL pasó 600 frames y las pruebas focales 7/7. Ambos VPK reconstruidos pasan validación estructural. Se abrió el original, pero Computer Use no pudo capturar imágenes del juego ni del Explorador: no se observó combate PC. La referencia BG36 debe obtenerse en Meiling contra Marisa; el contenido del replay Sanae corresponde a BG30/BG12/BG33. Posicionamiento y paridad visual siguen pendientes; global 27%. [ITERATION296.md](ITERATION296.md).
+
+## Iteración 2.195: cámara de captura BG36
+
+El reporte guarda cámara x/y/zoom en el mismo frame de BG36 y el runner valida su rango. Vita3K SDL schema46/600 pasó con cámara (392,0,1), nubes (-401.5,-301.0), 25 tiles y cuatro auxiliares. Auto VPK SHA-256 `ac19b63c4c2b0bec10f024210b83b8b1ede2197a4b00d08a8adfd250a43bc7f8`. Replay Story local compatible con el EXE por formato, todavía sin etapa identificada. Falta comparación visual; global 27%. [ITERATION295.md](ITERATION295.md).
+
+## Iteración 2.194: gate de scroll BG36 en combate
+
+El contrato Vita3K verifica el estado de las dos nubes BG36 tras los updates de combate, con la cadencia y wraps del PE. Tests focales 7/7; Vita3K SDL schema46/600 pasó, incluyendo posiciones −401.5/−301.0 tras un tick, 25 tiles y 4 auxiliares. VPK auto SHA-256 `e51a14a26d816133641acefcee6ae74bf6103f38813e511e7c7adc1c6a67534c` (8 entradas válidas); VPK interactivo SHA-256 `fef364b7eca5b878e872764f14a6c9a767056c077df6daaf029218448ccf16f4` (7 entradas válidas). Sigue pendiente la composición/cámara comparada con PC; el avance global permanece en 27%. Ver [ITERATION294.md](ITERATION294.md).
+
 # Estado del proyecto
+
+## Iteración 2.193: retícula BG36 en orden de slots PE
+- El constructor carga `[01][01]` en slot 0 y aumenta las filas; se eliminó la inversión `[05]` que el port aplicaba en combate. La máscara de las 25 texturas disponibles ahora es `0x3ffff79c`, que refleja los cinco slots ausentes del DAT local.
+- Pruebas focales BG36/BG37/BG38 7/7. Vita3K SDL pasó schema46/600, `regression_gate=1`, selector interactivo BG36, 25 tiles, auxiliares 4/4 y BG33 24 tiles. Auto VPK SHA-256 `bd7f3c82b324ee2f64b4b9625313129f6e314d0d42867bc6ecea47dfd85bcc4f`; captura: [fight-bg36.bmp](../artifacts/screenshots/fight-bg36.bmp).
+- La cuadrícula ahora enlaza correctamente sus filas, pero falta verificar contra el mismo replay en PC la composición y cámara completas. Global 27%; BG36 no se marca terminado. [ITERATION293.md](ITERATION293.md).
+
+## Iteración 2.192: selector BG33/BG36 utilizable en combate
+- La preparación de práctica alterna el escenario con arriba/abajo y carga BG36/BG33 al entrar a la pelea. El autotest usa el mismo flujo, exige `battle_stage_selected_interactively=1`, luego recorre BG36 y BG33.
+- Vita3K SDL pasó schema46/600 y `regression_gate=1`; BG36: 25 tiles, cuatro auxiliares y captura; BG33: 24 tiles y 12,570 draws. Auto VPK SHA-256 `f8bb7f2b939cf89cd4f2951bf5dd92a8524ecf06f2fc73ccfda1ea6f2975ef69`. Captura: [fight-bg36.bmp](../artifacts/screenshots/fight-bg36.bmp).
+- La captura confirma el stage seleccionado, pero no paridad: el encuadre y las capas quedan mal distribuidos respecto al viewport. Falta cotejar el mismo frame/replay contra PC y ajustar origen/cámara/escala con evidencia. Global 27%; no se cuenta BG36 terminado. [ITERATION292.md](ITERATION292.md).
+
+## Iteración 2.191: orden de composición BG36 corregido
+- El renderer PE dibuja primero `clowd_l`/`clowd_s`, luego la retícula base `0x46f380` y después los torii. El render de combate Vita usa ahora cielo→nubes→tiles→torii.
+- Auto VPK: 108,432 bytes, SHA-256 `983ef4d0b520b4dbbd613817da3718730f4254fd638d4211b8615e5b59659f7f`; Vita3K SDL pasó 600 frames, BG36 25 tiles y cuatro auxiliares, captura confirmada, hash coincidente. Interactivo: 108,266 bytes, SHA-256 `f9c74b09a3776adf4f5425b10cae7dbff8f8c7f087f180f6d2c1fecb25771542`. Ambos VPK pasan validación estructural sin errores ni advertencias.
+- unittest BG36 3/3 y BG37/BG38 4/4; la captura pone nubes detrás de tiles y torii delante. Falta paridad con captura PC y selector/cámara completos; porcentaje permanece en 27%. [ITERATION291.md](ITERATION291.md).
+
+## Iteración 2.190: cielo base BG36 reconstruido desde el PE
+- El renderer dibuja el fondo de cielo BG36 con RGB base `(126,206,244)` antes de los tiles; el tono coincide con el fondo opaco del recurso `clowd_s`. El fondo BG10 sigue solo como fallback si no hay stage renderer.
+- Auto VPK: 108,453 bytes, SHA-256 `defd5c0c651e3ec2cd98821f82ec385f4ead6de64353960d9059b6e638285fed`; Vita3K SDL pasó 600 frames, 25 tiles BG36, cuatro auxiliares y captura confirmada, hash coincidente. Interactivo: 108,287 bytes. Ambos VPK pasan verificación estructural sin errores/advertencias.
+- unittest BG36 3/3 y BG37/BG38 4/4; el rectángulo de nube ahora se mezcla con el cielo en la captura. Parallax/tintes dinámicos y comparación PC pendientes; global permanece en 27%. [ITERATION290.md](ITERATION290.md).
+
+## Iteración 2.189: BG36 ya no dibuja BG10 debajo
+- El fondo BG10 ahora es fallback cuando no hay renderer BG33/BG36 listo; deja de aparecer bajo las capas transparentes del escenario activo.
+- VPK auto nuevo: 108,536 bytes, SHA-256 `7815f2f78fd5d3183f15f581633accd957cd6d9962ca2c27fbe6b7d791045ebe`. Vita3K SDL fresco pasó 600 frames, `regression_gate=1`, BG36 25 tiles y cuatro auxiliares, captura confirmada; el hash del reporte coincide. Interactivo: 108,370 bytes.
+- Contratos unittest: BG36 3/3 y BG37/BG38 4/4; `git diff --check` pasa. La nube conserva rectángulo azul y falta paridad visual con PC; el global sigue en 27%. Suite pytest global no ejecutada: falta pytest local y WSL denegó acceso. [ITERATION289.md](ITERATION289.md).
+
+## Iteración 2.188: retícula base BG36 integrada y validada en Vita3K
+- El código C calcula las 30 anclas PE de BG36 (x=700−256·col, y=946−256·fila), proyecta y dibuja los 25 tiles presentes; los cinco ausentes permanecen nulos. El gate de combate requiere 25/25 y máscara `0x1c7bffff` y captura fresca confirmada, además de cuatro auxiliares y su update.
+- VPK autotest actual: 108,392 bytes, SHA-256 `DB2E73029E052F39B40F5DCA84B620AEC2CF0CB20043A328B69B7AD12F74E95D`. Suite Python 139/139 y contrato BG36 3/3 pasaron. Se generó también VPK interactivo de 108,226 bytes.
+- Vita3K SDL fresco: 600 frames, `status=passed`, `regression_gate=1`, BG36 base 25/25 (máscara 477888511), auxiliares 4/4 y captura confirmada; hash del reporte coincide con el VPK. Captura muestra composición todavía incompleta y BG33 subyacente; avance global permanece 27%. [ITERATION288.md](ITERATION288.md).
+
+
+## Iteración 2.187: auxiliares BG36 en combate
+- La sonda automatizada de combate carga y dibuja `tori1`, `tori2`, `clowd_l` y `clowd_s` mediante los pivotes/proyección BG36 y actualiza el scroll. Exige máscara 15/15; el modo interactivo conserva BG33.
+- VPK autotest: 107,875 bytes, SHA-256 `3f7c9fd18ee0cdfad841a78a490be87fa1646ff71f301710189511126ed97373`; Vita3K SDL schema46/600, `status=passed`, `regression_gate=1`. Interactivo: 107,709 bytes, SHA-256 `2564103721a330fce175fbe6c7ab4e87f33ccc7cde0cfd948332faf09a33b4c5`.
+- Captura: [fight-bg36.bmp](../artifacts/screenshots/fight-bg36.bmp). Las auxiliares están sobredimensionadas; faltan escala/composición original y la matriz base, por lo que BG36 aún no es un escenario completo. Contrato focal BG36 3/3; suite completa 139/139. [ITERATION287.md](ITERATION287.md).
+
+## Iteración 2.186: BG33 integrado a la escena de combate
+- El combate carga los 24 tiles base BG33 en memoria separada del visor, avanza su contador original por tick y dibuja los 30 slots con la cámara activa.
+- VPK autotest `artifacts/Touhou123Vita-current-auto.vpk`: 107,140 bytes, SHA-256 `fbd76df93d02e9aab172060ada0b7f9805ed1a8e4df6dbd658a7083ce636ccd5`; `check_vpk.py`: 0 errores/advertencias.
+- Vita3K SDL: 600 frames, `status=passed`, `regression_gate=1`, 24 tiles, 420 updates, 12,600 draws, slots 30/30. Suite Python 139/139 y `git diff --check` pasan. Captura: [fight.bmp](../artifacts/screenshots/fight.bmp).
+- Esto verifica la capa base de BG33 en la arena del prototipo, no el stage completo ni paridad global. Faltan sus auxiliares/mecánicas, integración jugable de los otros stages, rutas del roster y comparación visual por frame con PC. [ITERATION286.md](ITERATION286.md).
+
+## Iteración 2.184: VPK instalables con LiveArea; Vita3K fresco pasa
+- Se corrigió el pipeline: los VPK incluían eboot/assets pero no icono, fondo, startup ni template LiveArea. El generador local produce PNG indexados y el build los empaqueta.
+- Autotest 106,680 bytes, SHA-256 `5c96965a2009caafcc061441899db3ffb449cbcca9e3c2b58b19190456d54613`; interactivo 106,514 bytes, SHA-256 `69d56fd332580c510fc71f661149d1c053c2464aea76649a503d6297d06bb82e`. Ambos pasan `check_vpk.py` con 0 errores/advertencias y comparten `eboot.bin` (`edeabed9bb5bcdcb09a851a54a86ba2a59fa6ba0bef2ac843f4ddb51fd2b90f6`).
+- Vita3K SDL aislado corrió el auto VPK exacto: schema46, 600 frames, `status=passed`, `regression_gate=1`; reporte fresco [vita3k-result.json](../artifacts/vita3k-result.json), capturas en [screenshots](../artifacts/screenshots/). Suite Python 137/137 más prueba focal del generador 1/1. El interactivo comparte eboot pero no se corrió por separado. [ITERATION284.md](ITERATION284.md).
+
+## Iteración 2.179: Namazu aparece en el final Story de Meiling
+- Se inventariaron 15 stages en tres CSV del DAT: Cirno, Meiling y Sanae, cinco cada uno. El único rival Namazu está en Meiling stage 4, con cinco cartas/variante 3. El registro concreta dónde debe aparecer como rival; aún no se ha verificado el spawn en una partida ni su combate entero.
+- La regresión valida las tres tablas y la fila única Namazu además de la conexión estática loader/factory. Sin runtime/VPK. [ITERATION279.md](ITERATION279.md).
+
+## Iteración 2.178: carga de CSV Story para el roster principal
+- `0x432bb0–0x43332f` recorre IDs 0–19 y arma `data/csv/<nombre>/story.csv`; `0x40f370` abre el recurso, el parser procesa filas y `0x43f440` consulta una cadena en el mapa global. Esto confirma que la tabla Meiling donde está la fila de Namazu participa en la carga Story, pero falta el stage activo y el enlace a `0x45ef50`/factory.
+- Regresión ampliada para ruta, loader, conversión por mapa y límite del bucle. Test focalizado y `py_compile` pasan; sin runtime/VPK. [ITERATION278.md](ITERATION278.md).
+
+## Iteración 2.177: Namazu es rival Story en la etapa 4 de Meiling
+- El CSV extraído `data/csv/meirin/story.csv` asigna `Namazu` a stage 4 con cinco cartas/variante 3; el índice del `th123a.dat` contiene `data/csv/meirin/story.cv1`. SokuLib mapea Namazu al ID 21, igual que el factory PE. Prueba el uso como rival/jefe Story, pero no su elegibilidad en roster normal ni el enlace dinámico completo con caller/factory.
+- Se añadió `tests/test_story_namazu_source.py`. Usa la extracción local CP932 y valida su ruta en índice/manifiesto; `shady-cli` no permitió repetir extracción limpia en esta sesión, por lo que no se afirma verificar el payload decodificado. La regresión también comprueba el orden PE lookup→store→factory bajo la condición `EBX >= 3`, y las referencias `data/csv/`/`/story.csv`. Sin runtime/VPK. Los otros callers `0x481c3d/e` preparan claves `win`/`lose`; la relación exacta con el CSV de etapa sigue sin probarse. Siguiente: trazar la instancia Story de Namazu, sus recursos y loop de combate. [ITERATION277.md](ITERATION277.md).
+
+## Iteración 2.176: el productor Story consulta los datos CSV
+- `0x43f440` busca una clave en la tabla CSV; el caller `0x45ef50` copia su resultado a `PlayerInfo.character` y solicita el slot 3 en `0x45f176`. El PE referencia `data/csv/story.csv`; esto acota el origen potencial de ID 21, pero todavía no prueba que un registro contenga 21 ni que Namazu sea seleccionable normalmente.
+- Se registraron los callers, referencias de rutas y la escritura del campo. Solo análisis estático; sin cambio runtime/VPK. Siguiente: inspeccionar los CSV originales para identificar fila, evento y ciclo de vida de Namazu. [ITERATION276.md](ITERATION276.md).
+
+## Iteración 2.175: desbloqueos persistentes limitados a 20 personajes
+- `SaveDataManager::enableCharacter` (`0x42ee80`) compara el ID con 20 y solo escribe `enabledCharacters[id]` para IDs 0..19; el factory llama al helper tras crear el Player. SokuLib enumera Random=20 y Namazu=21, y modela el array persistente con longitud 20.
+- Esto distingue un ID construible de un luchador dentro del roster guardado, y apoya tratar Namazu como ruta especial hasta identificar su productor. No prueba que no exista un acceso oculto alternativo. Regresión individual pasa, sin runtime/VPK. [ITERATION275.md](ITERATION275.md).
+
+## Iteración 2.174: cola de creación y factory común de Player
+- `GameDataManager::createQueue` (`List<pair<int,PlayerInfo*>>`) alimenta el factory `0x46da40`: helper `0x46ead0` puede crearlo síncrono o encolar; worker `0x46e6e0` drena la lista mediante `0x46e5c0`; el factory guarda cada Player en el arreglo `players[4]` (`+0x28`). Su dispatch de ID 21 llega a PlayerNamazu.
+- Se fijó ese enlace y el layout local en una nueva regresión; las seis pruebas focalizadas pasan. Los callers `0x4386e6`, `0x45f176`, `0x47fce0/f3` y `0x4818d4/e7` todavía no revelan qué fuente configura Namazu ni el modo correspondiente. Sin runtime/VPK. [ITERATION274.md](ITERATION274.md).
+
+## Iteración 2.173: writer del timer localizado en la clase Namazu
+- El barrido PE de `.text` localiza un décimo writer que carga `+0x884/+0x886=300` en `0x7d47b2`. Slot10 del vtable `0x85f824` y RTTI `.?AVNamazu@@` lo identifican fuera del manifest del roster. La entrada 21 (`0x15`) de la jump table central llega al caso que reserva `0x8a0` bytes y llama al constructor Namazu en `0x46de1c`; no se ha localizado aún quién solicita ese índice ni si está en la selección normal.
+- SokuLib también define `CHARACTER_NAMAZU=21`, `PlayerNamazu` y `GameObjectList_Namazu`; los DAT extraídos ya aportan 179 imágenes, 731 bloques y 3,276 poses PAT de `namazu`. Esto confirma soporte de clase/recursos, pero falta probar alcanzabilidad en modo normal y portar su comportamiento completo.
+- Su ruta exige `+0x7cc==2`, mano/carta 0, mapping de IDs 0..15 a un único caso y expira hacia factory de acción 1201 si HP sigue positivo. Escáner/reporte y regresión cubren la evidencia; pruebas focalizadas 5/5. Sin cambio runtime/VPK. [ITERATION273.md](ITERATION273.md).
+
+## Iteración 2.172: selector de input 2 asociado al lado derecho
+- `0x43dec0` configura `PlayerInfo` izquierdo (`0x899d10`) con `isRight=0`, selector `+6=1`, y el derecho (`0x899d30`) con `isRight=1`, selector `+6=2`. El campo `+6` es distinto del flag de lado `+4` y llega a `Player+0x7cc`, que el dispatcher `0x46d7d0` usa para elegir la ruta virtual de input.
+- Los callsites `0x42626c` y `0x44c2b1` prueban usos de la inicialización, pero no justifican generalizar ese enum a todos los modos. Regresión PE añadida; pruebas focalizadas 5/5. Sigue faltando alcanzar el timer de 300 de forma natural y resolver el productor de Suika/action96. [ITERATION272.md](ITERATION272.md).
+
+## Iteración 2.171: expiración del timer enlazada con acción común Spell Break
+- En Reimu, el caso con `+0x884=300` también inicializa `+0x886=300`. En el expiry limpia timers/campos auxiliares y, si HP sigue positivo, invoca `0x46eb30` para crear acción `0x4b1` (1201).
+- La acción 1201 del `common.pat` contiene `spellBreakGage`, `spellBreakBar` y poses `breakGage000..010`; enlaza el spawn con recursos nombrados Spell Break, pero aún falta confirmar su presentación natural.
+- Corrección: `+0x7cc` se copia de `PlayerInfo+6` junto al puntero `KeyManager` y `0x46d7d0` lo usa para elegir una ruta virtual de input. Iteración 2.172 vincula el valor 2 al lado derecho en una inicialización concreta; no es un “modo Spell Break”. El update consulta esa etiqueta y la carta al frente, sin prueba aún de que una activación de carta cause el timer.
+- Cuatro pruebas PE/PAT pasan, incluida ejecución Unicorn del expiry desde `+0x884=1` hasta el factory 1201 con HP intacto y timers en cero. El estado es forzado; no se modificó/recompiló VPK. Falta captura natural y productor de Suika. [ITERATION271.md](ITERATION271.md).
+
+## Iteración 2.170: nueve updates de personaje asignan 300 a `+0x884`
+- Al seguir los destinos de jump tables omitidos por el CFG directo, aparecen stores positivos en slot10 de Reimu, Marisa, Alice, Patchouli, Cirno, Meiling, Sanae, Suwako y Utsuho. Todos asignan `0x12c`; el flujo común decrementa/limpia el timer. Las rutas consultan `Player+0x5e8` (deque de la mano), pero falta fijar el índice/efecto de carta que activa cada caso.
+- Suika no tiene store positivo directo en su slot10; `+0x884` lo consulta el callback 97→96 y se encontró un helper que solo lo limpia. Estas otras clases aún no explican el productor natural de Suika. [ITERATION270.md](ITERATION270.md).
+- El hallazgo quedó reproducible en `tools/scan_player_field_884.py` y `artifacts/player-field-884-jumptable-cases.json`; test focal valida vtables, tablas y stores.
+- Las nueve rutas examinan tipo de input `Player+0x7cc==2`, mano no vacía y `Card.id` del elemento 0 vía `0x456c80`. `common/spellcard.csv` confirma IDs tipo 0 de sistema `0..20`; los rangos por personaje son subconjuntos y todos mapean al mismo caso que carga 300. El enum de input se copia en el constructor y se despacha en `0x46d7d0`; falta nombrar el tipo 2 y observar el timer en gameplay. El escáner/reporte/test fijan guards, índice, mapping y hash del CSV.
+
+## Iteración 2.169: action96 sigue 1.200 ticks con InfoManager HUD aislado
+- `0x8985e8` es `InfoManagerBase::instance`; constructor PE `0x47eaf0`, vtable `0x85b530`, callback +0x18 `0x47eb70` lee gauges/diseños. Un shim limitado al refresco HUD evita incluir recursos de UI en este harness y registra las tres llamadas originales del timer.
+- Corregido conflicto de dirección entre shim y stub de suelo. Timer/update PE completan 1.200 ticks de action96 sin fetch inválido; action sigue en 96, `+0x884` no cambia. Entrada a 96 sigue forzada y no se reproduce el manager de round. [ITERATION269.md](ITERATION269.md).
+- Referencias de otras clases muestran consumidores del mismo campo en Alice slot10 (`0x5100b0`) y Suwako slot10 (`0x765ab0`): decrementan/limpian `+0x884`; ningún escritor positivo directo encontrado. Falta ampliar rastreo a escrituras calculadas y estado compartido del round.
+
+## Iteración 2.168: fetch de action96 atribuido a callback global del timer
+- Los 181 updates PE válidos de action96 retornan al sentinel correcto; el fetch nulo del tick 182 ocurre dentro de `0x46a330` → `0x463b69`, donde se llama `object+0x18` del singleton `0x8985e8`, todavía ausente del harness. No indica corrupción del stack ni terminal/bloqueo de action96.
+- Siguiente: encontrar e inicializar ese manager/callback en el harness y seguir el camino real de recuperación. Probe y test actualizados; runtime/VPK sin cambios. [ITERATION268.md](ITERATION268.md).
+
+## Iteración 2.167: action96 PE recorre 181 actualizaciones válidas sin salir
+- Con Player construido, setter96, timer, handleInputs neutral y updater PE, action96 permanece activo en 181 ticks completados; `setSequence(3)` llega desde `0x4851e7`, el frame pointer sigue en los 10 frames originales y `+0x884` no se escribe.
+- En el siguiente tick el harness detiene un fetch de baja dirección al retornar de la ruta común. Manager/round caller y stack externo siguen incompletos; no se infiere que el juego real termine o se bloquee. Test del probe ya fija esos límites. Sin cambio Vita/VPK. [ITERATION267.md](ITERATION267.md), [reporte x86](../artifacts/x86-suika-constructed-handler.json).
+
+## Iteración 2.166: autociclo singleton de PAT96 coincide con loader original
+- `FUN_004679e0` (cargador `data/character/%s/%s.pat`) inicializa el primer nodo en `0x467df2–0x467df9` con `next=0` y `prev=self`. Action96 de Suika tiene un único nodo seq0 de diez frames; por tanto seq1/3 siguen usando ese mismo frame range en el juego original y en el fixture.
+- Corrige Iteración 2.165: no es un alias gráfico inventado por la fixture. El trigger natural de action96 y la semántica/final de la secuencia aún necesitan combate/manager real. Tres tests focalizados pasan, incluyendo bytes PE y construcción del singleton. [ITERATION266.md](ITERATION266.md).
+
+## Iteración 2.165: alias gráfico action96 causado por autociclo de fixture
+- `0x4652a0` sigue el enlace de secuencia `+0x1c` tantas veces como indica el índice. La fixture action96 tiene un solo nodo de 10 frames con prev/next apuntando al mismo nodo; por eso seq3 conserva el ID 3 pero carga el payload de seq0. Los índices son PE, el alias visual es fixture.
+- No inferir la animación original de levantamiento desde esa ruta; falta recuperar enlaces que construye el loader PAT o confirmar su lógica para action96. Testa el dispatch y autociclo: 2/2. [ITERATION265.md](ITERATION265.md).
+
+## Iteración 2.164: action96 comparte el update de derribo con action97
+- Resolución de tablas PE confirma que `0x483f40` enruta 96 y 97 al mismo handler `0x485115`; action98 va a `0x4852a0`. El callback de cambio de acción usa otra tabla: 96→default `0x48be20`, 97→consumer `0x48b85f`, 98→`0x48b8f6`.
+- En el probe PE action96 llega a sequence1 en tick30 y su handler solicita sequence3 en tick31 (`0x4851e7`). El PAT efectivo de action96 solo aporta diez frames de seq0, así que las secuencias siguientes siguen sin fixture gráfica fiel. Esto vincula 96 con la familia update de caída/recuperación, pero no demuestra el productor natural de `+0x884` ni el rol gameplay exacto. Test de dispatch añadido; [ITERATION264.md](ITERATION264.md).
+
+## Iteración 2.163: `+0x884` en call graph Suika solo se limpia
+- El escaneo interprocedural cubre 25 entradas ejecutables del vtable, 392 funciones y 29,963 instrucciones; encuentra una referencia: slot17 `0x608670→0x48b000→0x48b15a`, donde `xor eax,eax` precede a la escritura. Es reset a cero, no el productor positivo que activa action96.
+- Añadí el escáner reutilizable y un test que fija hash, referencia/cadena y límite de cobertura. JSON: [suika-field-884-callgraph.json](../artifacts/suika-field-884-callgraph.json). Falta resolver managers, tablas/saltos y llamadas indirectas. Sin cambio Vita/VPK. [ITERATION263.md](ITERATION263.md).
+
+## Iteración 2.162: scan CFG de métodos Suika y probe PAT de action96
+- CFG básico desde 48 punteros del vtable Suika, siguiendo ramas directas y sin cruzar calls, no halló referencias a `+0x884`; tampoco en métodos slot 10/15/20. Dispatch indirectos, helpers compartidos y manager siguen fuera de cobertura.
+- La acción PAT96 tiene diez frames en seq0; setter/update PE la ejecutan. En 60 ticks la fixture entra en secuencias 1/3 no presentes en el PAT efectivo extraído, por lo que esto confirma ejecutabilidad parcial, no levantamiento natural ni animación completa. No portar todavía. [ITERATION262.md](ITERATION262.md).
+
+## Iteración 2.161: referencia `+0x884` clasificada como Reimu, no Suika
+- El bloque `0x490795` escribe `Player+0x884/+0x886`, pero la función ancla `0x490490` corresponde a Reimu: manifest Ghidra `vtable 0x85bf4c`, slot 10. El slot 10 de Suika es `0x5ee620`; se descarta esa referencia como productor de Suika.
+- El escaneo lineal no basta para escribir conclusiones porque no sigue las tablas de saltos. Aún faltan los escritores dinámicos de Suika/manager y el significado de action96; siguiente: revisar `0x5ee620` y la ruta real del manager, luego ampliar la captura a más reacciones. Sin runtime/VPK nuevo. [ITERATION261.md](ITERATION261.md).
+
+## Herramienta evaluada: psp2-tooling (confirmación, 18 octubre 2026)
+- Sí sirve, pero para validar y perfilar una **Vita física** después de integrar una escena de combate: USB/host0, lanzar VPK, entrada, capturas HDMI, dumps y perfiles CPU/GPU. El host es Linux y no participa en la decompilación x86, compilación VPK ni Vita3K.
+- Próximo paso actual sin cambios: continuar el productor de `Player+0x884` y las rutas faltantes del combate; mantener la regresión Vita3K. Retomar `devkit/` cuando haya host Linux, hardware y escena estable. `retail-cp` exige revisar PCH-2000/FW 3.65/Ensō/taiHEN y módulos DevKit externos antes de plantearlo.
+- Confirmado con el [README upstream](https://github.com/Grarak/psp2-tooling) y registrado en [ROADMAP.md](ROADMAP.md) y [ANALYSIS_AND_TESTING_TOOLING.md](ANALYSIS_AND_TESTING_TOOLING.md).
+
+## Iteración 2.160: `+0x884` se consume al entrar en action97
+- Hook de escritura instalado desde antes del resolver: cero escrituras PE a `Player+0x884` durante la reacción/300 ticks. Ocho botones/abajo+botón sostenidos 24 ticks tampoco lo cambian ni salen de action97.
+- Si la fixture fuerza `+0x884=1` justo antes del aterrizaje, el PE hace `74→97→96` en el callback (`0x4846a7`, `0x48b8ef`). No identifica el productor natural ni demuestra que action96 sea levantamiento; el valor se consume en la entrada, no como timer observado. [ITERATION260.md](ITERATION260.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+
+## Iteración 2.159: handler gameplay 97 tiene salida condicional a action96
+- `0x6086a0` despacha action97 a `0x48b85f`; este compara `Player+0x884` y pide action96 en `0x48b8e4` si el valor es positivo. El significado de action96 y el productor de `+0x884` siguen desconocidos.
+- En la fixture, `+0x884=0` durante 300 ticks y diez entradas de un tick; no entra a la rama. Esto acota, no confirma, la hipótesis de transición gestionada fuera del Player. Próximo: identificar escrituras dinámicas a `+0x884` en una secuencia natural. [ITERATION259.md](ITERATION259.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+
+## Iteración 2.158: transición de aterrizaje action74→97 trazada
+- En tick10 input neutral conserva action74. El dispatcher `0x483f40` entra al handler 74 (`0x4849f6`); gate PE de suelo `0x487ea0` retorna verdadero y el bloque `0x4847d4→0x484807→0x484696` solicita action97 (`0x4846a5/return 0x4846a7`). Luego `0x6086a0` actualiza action97.
+- La caída no depende del input neutral ni del round manager; el piso sigue controlado por harness. Falta localizar el caller/estado que sale del PAT circular de action97. [ITERATION258.md](ITERATION258.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+
+## Iteración 2.157: grafo PAT de action97 no tiene secuencia terminal
+- El PAT efectivo en memoria forma el anillo `0→1→2→3→0`; enlaces previos `[3,0,1,2]`, modos de frame `[0,0,1,0]`. Solo seq.2 repite su frame.
+- `0x464bf0` informa terminal solo para nodo sin `prev` (`+0x18=0`); ninguno del anillo lo cumple. El avance local de action97 no basta para action98, incluso alterando el loop bit. Un barrido de literal `push 0x62` halló solo la solicitud del handler 97; setters con argumentos calculados no quedan descartados. Falta identificar el estado/callback externo del manager de combate que provoca la recuperación natural. [ITERATION257.md](ITERATION257.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+
+## Iteración 2.156: condición terminal de action97→98 acotada
+- El dispatcher x86 de action97 consulta `0x438c60`; si la animación/secuencia devuelve terminal, el handler pide action98 desde `0x4851f9`. En Suika, callbacks `0x464b70` y `0x464bf0` dependen del wrap de pose/bit loop y del enlace previo del nodo PAT (`+0x18`).
+- Se amplió el diagnóstico artificial de apagar el loop del seq.2 a 120 ticks: contador 23, nodos PAT 0/1/2/3 recorridos y action97 sin setter de acción. Esto no prueba la recuperación natural; indica que falta reconstruir el grafo efectivo y el contexto externo de combate. La corrida principal de 300 ticks no se alteró.
+- Sonda actualizada y reporte fresco; sin cambios al runtime Vita ni VPK. [ITERATION256.md](ITERATION256.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+
+## Iteración 2.155: loop de derribo medido durante 300 ticks
+- El temporizador y update PE, tras reacción 74, pasan a action97 y recorren PAT `0→1→3→0→1→2`; tick43 entra en seq.2 loop mode 1. `handleInputs` neutral no pide setters nuevos y completa 300 ticks en action97/seq.2, Y=500/vy=0. Action97 enruta a `0x485115`; la rama de aterrizaje pide `setSequence(3)` desde `0x4851e7` en tick17. La iteración 2.156 amplía el diagnóstico artificial de cambiar el loop bit a 120 ticks: action97 persiste. [ITERATION255.md](ITERATION255.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+- Suite focal x86 7/7 y py_compile/diff-check pasan. Sin cambio a runtime Vita/VPK.
+
+## Iteración 2.154: hitstun/reacción 74 con traits PAT completos
+- Se corrigió `_prepare_pat_actions`: ya copia los 40 bytes `combat_traits` antes de normalizar damage/stun/flags. Sin ese payload, `CharacterFrameData+0x26` quedaba 0 aunque el PAT declara 100.
+- Con action 418/seq.2/pose0 y defensor construido por PlayerSuika en action400, el resolver PE aplica 1200 (PAT900+trait100), HP fixture 2000→800 y selecciona reacción action74/seq0. Resolver completo, sin accesos inválidos.
+- `0x46a330` consume el hitstop PE de 10 a 0; luego el update solicita action97. La iteración 2.155 amplía a 300 ticks: `+0x13e` es contador, `+0x15c` demuestra seq.2 (loop mode 1) desde tick43 hasta tick300. Y llega al suelo controlado 500. Se demuestra la caída y persistencia del loop bajo el par timer/update; falta integrar manager/callback de round para observar levantamiento/fin de recuperación.
+- Pruebas Suika 3/3 fijan daño/reacción y timeline parcial. Efectos/round manager y suelo siguen controlados; HP2000 es fixture no letal. Corrige y supersede la iteración 2.153. [ITERATION254.md](ITERATION254.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+- Próximo: integrar stage/fight/input managers, averiguar cómo sale acción97 del PAT seq.2 loop con replay normal y validar levantamiento/KO.
+
+## Iteración 2.153: resolver PE aplica 900 de daño en flujo Suika 200→418
+- Registro histórico supersedido: faltaba `combat_traits` crudo en el harness; no representa el daño/reacción correctos. Ver [ITERATION254.md](ITERATION254.md).
+- Próximo: sustituir estado sintético del defensor por constructor completo + contexto de round y continuar reacción/stun en frames posteriores.
+
+## Iteración 2.152: geometría de ataque 418 confirma contacto PE
+- El flujo C+NRNR→418 y 16 updates originales alcanza seq.2/pose.0, daño PAT 900; el helper PE `0x47a5b0` confirma overlap 1/1. [ITERATION252.md](ITERATION252.md).
+
+## Iteración 2.151: dash Suika 200→418 avanza hasta frame ofensivo
+- En el mismo Player PE, el flujo C+NRNR llega a action 418; cleanup original más 16 updates virtuales de Suika avanzan seq.0→seq.1→seq.2 sin error. Tick 16 es seq.2/pose.0, daño PAT 900 y una caja ofensiva.
+- Prueba focalizada 1/1; refresco de input, suelo/escenario/callbacks controlados. Sin runtime Vita/VPK. [ITERATION251.md](ITERATION251.md), [reporte](../artifacts/x86-suika-constructed-handler.json).
+
+## Iteración 2.150: origen del gate C y cadena de dispatch Suika 418
+- `0x46d73e` deriva `Player+0x784` de `Player+0x764 == 1` (botón C). El input update/matcher originales sobre el ring del Player construido y el handler llegan desde action 200 a setter 418.
+- Se verificó el productor del guard; refresco físico, servicios de suelo/escenario y caller completo siguen controlados. No cambia runtime Vita/VPK. [ITERATION250.md](ITERATION250.md), [INPUT_STATE.md](INPUT_STATE.md).
+
+## Iteración 2.149: PlayerSuika construido y action 418 seleccionado por el handler
+- El PE construye PlayerSuika con `0x609d40`, expone vtable `0x85da84` y crea su manager. El setter original `0x464930` inicia action 200 con PAT local; `handleInputs 0x609dc0` se ejecuta hasta `0x60be83`, llama setter original 418 y llega a `0x46cac0`.
+- KeyInput, `Player+0x784=1`, suelo/stage y servicios de plataforma siguen controlados. El matcher/deque construido no está conectado a esta instancia; cleanup body se verifica por la sonda separada. Cinco pruebas focalizadas pasan; no cambia Vita/VPK. [ITERATION249.md](ITERATION249.md), [evidencia](../artifacts/x86-suika-constructed-handler.json).
+- Próximo: usar el PlayerInfo/deque del constructor para input update/matcher y después seguir acción/PAT con rival, colisión y replay.
+
+## Iteración 2.148: handler de Suika desde prólogo alcanza acción 418
+- Se corrigió la condición anterior: `handleInputs` carga `BX=0xc8`; 418 sale de acción actual 200 (dash), no 300. Las notas 2.145–2.147 se corrigieron para reflejarlo.
+- La ejecución PE encadena updates `0x46d5d0`, matcher `0x487020` y handler completo `0x609dc0` hasta la rama `0x60be83`. Con `[1,0]` producido y estado 200/facing derecha sembrado, registra solicitud setter 418 y alcanza `0x46cac0`. Servicios de estado/recurso/suelo y el cuerpo del setter son controlados; el cuerpo del limpiador tiene sonda separada. Pruebas focalizadas 6/6. Sin cambio Vita/VPK. [ITERATION248.md](ITERATION248.md), [evidencia](../artifacts/x86-suika-input-matcher.json).
+- Próximo: sustituir campos/servicios sintéticos con Player/PlayerInfo del constructor original, ejecutar setter/update PAT y enlazar oponente, colisión y replay. NRNR no dispara 418 directamente; el handler lee KeyInput actual.
+
+## Iteración 2.147: input PE y rama de Suika (corregida)
+- La secuencia NRNR mantiene validez como evidencia del matcher, pero el salto a bloque interno tenía mal la acción previa (usó 300). No demuestra la transición 418; ver corrección y ejecución desde prólogo en [ITERATION248.md](ITERATION248.md).
+
+## Iteración 2.146: rama 418 del handler Suika verificada en el PE
+- El código original `0x609dc0` ejecuta desde `0x60be34` hasta la rama `0x60be83`, solicita 418 por setter virtual y llama al limpiador original `0x46cac0`, que vacía buffered KeyInput.
+- Seis casos cubren dash frontal/action 300, suelo, eje vertical y dirección; también se comprobó que esta rama no consulta move-lock. La fixture empieza dentro del handler y controla suelo/setter; dispatch completo, polling real y update PAT/colisión quedan pendientes. Sin cambio Vita/VPK. [ITERATION246.md](ITERATION246.md), [reporte](../artifacts/x86-suika-418-handler-branch.json).
+- Próximo: hacer entrar al handler desde su prólogo con estado de jugador consistente, enlazar el ring/matcher con KeyInput y después continuar por setter, PAT y combate contrastado con replay.
+
+## Iteración 2.145: matcher PE detecta NRNR tras cuatro updates consecutivos
+- Deque ABI correcto: mapa 16 slots, 12 bloques de 8 words, size 90. Cuatro `0x46d5d0` más el matcher original `0x487020` procesan N,R,N,R como muestras `0,2,0,2`; NRNR (`Player+0x7c4 & 1`) aparece solo en el cuarto tick y size se conserva en 90.
+- Refresco físico de controles aislado; input update, append circular y matcher sí ejecutan desde el PE. Corrección de atribución: `0x4b0ac2` pertenece al handler de Reimu, por lo que sus ocho guards no cuentan como validación de Suika. La rama Suika 418 se localizó en `0x609dc0:0x60be83→0x60b721`; usa acción 300, estado de suelo, KeyInput horizontal/facing y vertical actual neutral; ese bloque no consulta move-lock. Pruebas focalizadas originales, 4/4. Sin cambio Vita/VPK. [ITERATION245.md](ITERATION245.md), [traza](../artifacts/x86-suika-input-matcher.json), [guard Reimu](../artifacts/x86-suika-418-producer.json).
+- Próximo: ejecutar la rama Suika bajo contexto reproducible, observar setter y limpiador y correlacionar con input/update PAT; luego validar dispositivo/replay y ampliar a todos los personajes y escenarios.
+
+## Iteración 2.144: input update x86 encadenado con guard 418
+- `0x46c8e0/0x46d5d0` ejecutados sobre KeymapManager sintético: horizontal=1 genera KeyInput actual `[1,0]`/sample `0x02`; horizontal=1+A genera buffered `[1,0]`, timer 9/sample `0x12`. Ambas salidas pasan el bloque original `0x4b0ac2` y llegan a la solicitud 418; `0x46cac0` limpia el buffered.
+- Diez casos dinámicos pasan. Refresco físico, matcher ring slot, grounded/move-lock y setter permanecen aislados; no es loop natural de Suika ni combate/replay. Sin cambio Vita/VPK. [ITERATION244.md](ITERATION244.md), [reporte](../artifacts/x86-suika-418-producer.json).
+- Próximo: correr `0x487020` sobre el ring original e integrar slots Suika y update PAT.
+
+## Iteración 2.143: productor condicional PE de acción 418 localizado
+- Ruta `0x4b0ac2` ejecutada bajo Unicorn: solicita 418 con horizontal actual o buffered hacia facing y eje vertical actual neutral; ocho casos confirman los guards. `+0x778` no es requisito. El limpiador PE `0x46cac0` borra bufferedKeyInput tras setAction.
+- Los guards de suelo, move-lock y setAction se aislaron; no se ejecuta el loop KeyManager ni se confirmó la implementación virtual concreta de Suika. Fixture de aterrizaje sigue con suelo controlado/Y fija; sin cambio runtime/VPK. [ITERATION243.md](ITERATION243.md), [caller](../artifacts/x86-suika-418-producer.json).
+- Próximo: ejecutar actualización de input que escribe los dos KeyInput, enlazarla con esta ruta y seguir el timeline.
+
+## Iteración 2.142: el gate PE de aterrizaje explica Suika 418 seq2→seq5
+- `0x487ea0` compara Y con el helper de suelo, exige velocidad vertical no positiva y bandera `Player+0x4c4` despejada. En tick27 retorna verdadero a `0x5f4a5d`; el caller llega a `0x603644` y el setter solicita seq5. La fixture observó `vy=-0.5`; tick26 aún tenía `vy=0.0`.
+- Probe y artefacto ahora guardan observaciones del gate; regresión focalizada pasa y Python completa 119/119. Y sigue fijada a cero y la acción se inyecta; es evidencia de transición condicional, no de dash/salto natural. Sin cambio Vita/VPK.
+- Siguiente: ejecutar cruce de suelo desde posición/física natural y hallar productor input de acción 418. [ITERATION242.md](ITERATION242.md), [reporte](../artifacts/x86-suika-418-sequence.json).
+
+## Iteración 2.141: setter/update PE de Suika 418 llega a la hitbox de secuencia 2
+- La fixture de `x86_suwako_808_factory_probe.py` usa secuencias efectivas del PAT; retiene el conteo de definiciones crudas para Alice 849.
+- Nuevo probe con PE y PAT fijados: setter de acción 418 inicia seq0; el update llega a seq1 en tick8 y a seq2/pose0 en tick16 (daño 900, una hitbox), permanece activo hasta tick26 y salta a seq5 en tick27. Falta comprender ese branch; la secuencia 6 observada después no se interpreta aún como índice PAT.
+- Suite Python 119/119, focalizada 11/11. No cambia motor Vita/VPK; acción 418 se inyecta directamente, sin input natural ni rival. Evidencia: [ITERATION241.md](ITERATION241.md), [reporte](../artifacts/x86-suika-418-sequence.json).
+
+## Iteración 2.140: extractor PAT ofrece vista efectiva para sondas de combate
+- `action_sequence_metadata(..., effective=True)` aplica la semántica del decoder C cuando una acción PAT se redefine; la vista cruda sigue disponible y es el default de los inventarios. El probe de parejas x86 solicita explícitamente la vista efectiva.
+- En `th123c.dat`, Suika 418 es 12 registros crudos/6 efectivos (ventana ofensiva index 2, frames 0–7); Udonge 6/6 (index 1, frames 0–2); Utsuho 4/4 (index 1, frames 0,1,6,7,8). Hashes: [resumen](../artifacts/pat-action-418-effective-summary.json).
+- Pruebas focalizadas 17/17; suite Python 118/118. No cambia el motor/VPK. La selección de índice por el PE y la causa de los no impactos siguen pendientes. Ver [ITERATION240.md](ITERATION240.md).
+
+## Iteración 2.139: reconstrucción actual y gate Vita3K repetido
+- Se añadió `-BuildDirectory` al script de build Vita nativo para controlar la ubicación de intermedios. VPK fresco: `artifacts/Touhou123Vita-continuation-auto.vpk`, 104,294 bytes, SHA-256 `6ae6e39959e63e486668126c5960848a5170a4de9a9d13146df0a584aaeb688f`.
+- También se compiló el VPK interactivo `artifacts/Touhou123Vita-continuation.vpk` (104,128 bytes, SHA-256 `ab013afd5547b3b8a648256cdd6883630f4daa787ea2389a91dc72f5afad3792`); ambos contienen idéntico `eboot.bin` (SHA-256 `edeabed9bb5bcdcb09a851a54a86ba2a59fa6ba0bef2ac843f4ddb51fd2b90f6`).
+- Vita3K local aislado/SDL pasó schema46/600 con evidencia fresca y gates Suika 623B/623C, objetos, crop PAT, cámaras y escenas BG33/BG36/BG37/BG38. Reporte: [vita3k-result.json](../artifacts/vita3k-result.json); corrida y cobertura: [ITERATION239.md](ITERATION239.md).
+- Python: 117/117. CTest host no ejecutado porque su cache apunta a WSL y `cmake` no está en PATH Windows. La compilación ARM sí recompiló las fuentes. Sin prueba en hardware ni afirmación de paridad total.
+
+## Iteración 2.138: sincronización Story condicional; replay revalidado
+- El `.rep` local y PE 2009 coinciden con los hashes registrados. Probes frescos recorrieron las 16,910 parejas Story y los 33,820 words del método `0x481040`; layout de 3 registros y vectores 20/3, 20/3, 20/4 confirmado.
+- Corrección de análisis: `0x4600fe` compara el word contra `[0x85eb58]`; mismatch retorna sin consumir, igualdad consume. No es espera activa. Pruebas replay 3/3 y dispatch 1/1 (9 contratos PE). La frecuencia de invocación por frame y playback en vivo siguen abiertos. Evidencia: [ITERATION238.md](ITERATION238.md). Sin cambio de runtime/VPK.
+
+## Iteración 2.137: barrido geométrico PE de Udonge 418
+- El probe x86 ahora acepta posiciones/facing y barrido reproducible. Con atacante X=320/facing +1 y defensor facing -1, Udonge 418:1/pose0 vs 400:0/pose0 conecta en X=320–450; X=318 y 460 no conectan. Al invertir facing, X=320 conecta y X=322 no: la caja PAT no se refleja como un intervalo simétrico. Transformadores y hit-vs-hurt del PE se ejecutan en la fixture.
+- Regresión focalizada 5/5. Es una pose estática con cámara/escenario y datos de combate controlados; no equivale a combate/replay ni permite ajustar directamente Vita. Evidencia: [ITERATION237.md](ITERATION237.md) y `artifacts/kernel/x86-udonge-418-position-sweep.json`. Sin VPK nuevo (runtime sin cambio).
+
+## Iteración 2.136: Udonge 418:1 y transform de ataque original; fixture Vita sin cruce simultáneo
+- El diagnóstico Vita marca intersección horizontal y vertical por separado, pero no simultánea, incluso barriendo 0–8 cuadros de dash. B natural sigue 18/20 y C 17/20. El oracle x86 ejecuta `0x4640b0` para las cajas de ataque, confirma contacto y aplicación de daño de Udonge 418:1; la hurtbox defensora sigue controlada y falta `0x464200`, por lo que no acredita alcance natural.
+- Python focalizado 4/4; Vita3K SDL schema46/600 pasó. El resolver aún termina en `0x0` tras el daño. VPK/evidencia y siguientes pasos: [ITERATION236.md](ITERATION236.md).
+
+## Iteración 2.135: métrica de contacto C limitada a ventanas PAT activas
+- La sonda ya no cuenta solapamientos en poses sin daño. Vita3K SDL schema46/600 pasó; Reimu 418 conecta 900 y los C naturales de Suika/Udonge/Utsuho siguen pendientes. Sus ventanas llegan a 20 unidades de separación central y hay contacto vertical en alguna pose, pero aún no intersección completa registrada.
+- VPK y datos: [ITERATION235.md](ITERATION235.md), [roster-bc-natural.tsv](../artifacts/roster-bc-natural.tsv). Siguiente: medir las brechas horizontales de las cajas en el mismo cuadro y cotejar facing/movimiento con x86 antes de tocar el resolver.
+
+## Iteración 2.134: Udonge B 409 conecta; diagnóstico guarda acciones/variantes
+- El sondeo muestra que Udonge alcanzaba 408/409/418 pero 409:0 carece de hitbox; runtime selecciona provisionalmente 409:1. Udonge conecta 400 en frame12/gap28; Tenshi y Cirno también conectan B por 409:1. B natural 18/20, C normal 17/20.
+- Runner exige la regresión Udonge y pasó Vita3K SDL schema46/600. Paquetes y límites: [ITERATION234.md](ITERATION234.md). La variante seleccionada aún debe cotejarse con el selector original x86.
+
+## Iteración 2.133: cobertura natural B/C del roster y comandos especiales
+- La sonda evalúa 3 separaciones por ruta y registra gap/origen del impacto. Cobertura observada B normal 15/20, C normal 17/20; Alice conecta B/C por PAT 849. Se inventarían aparte las tres ramas de Suika 623C (521/1000, 526/500, 531/800) y el runner las exige.
+- Vita3K SDL pasó schema46/600 con la regresión Remilia 2C. VPK y diagnóstico: [ITERATION233.md](ITERATION233.md), [roster-bc-natural.tsv](../artifacts/roster-bc-natural.tsv). Sin impacto B observado: Reimu, Remilia, Udonge, Tenshi, Cirno; C normal: Suika, Udonge, Utsuho.
+
+## Iteración 2.132: contrato de vida/reacción Suika 623B
+- PAT 821/acción 530 aplica el impacto una sola vez en el spawn, se elimina en el siguiente tick y conserva reacción terrestre 50/timer20. Vita3K SDL schema46/600 valida el contrato nuevo en la máscara route127, más las regresiones actuales.
+- VPK interactivo/autotest, hashes y alcance: [ITERATION232.md](ITERATION232.md). WSL devolvió `E_ACCESSDENIED`; no se recompiló `fight_tests` host. El ARM compila y la build autotest corre en Vita3K.
+
+## Iteración 2.131: Suika 623B nivel 9 crea y conecta PAT 821
+- La acción 530 crea el objeto `0x335`→PAT 821 al llegar a pose 7 (update 20); se portaron MT19937, el spawn y la caja PAT de 800 de daño. Vita3K valida una instancia, impacto de 800 y coordenadas x86-matched; suite Python 115/115 y C 10/10.
+- Hashes y cobertura: [ITERATION231.md](ITERATION231.md). El impacto de la prueba usa defensor fijo en el spawn; queda comprobar el rango contra movimiento natural y armonizar la semilla/avance RNG global del juego.
+
+## Iteración 2.130: alcance geométrico controlado para Suika 623B nivel 9
+- La sonda mantiene PAT 821 en el spawn PE `(344.62,261.13)` y barre al defensor: 56/121 posiciones contactan; el centro alcanza el resolver/impacto PE y aplica 800 de daño. La transformación de cajas es reconstruida y cotejada con salidas PE porque falta el fixture de cámara/escenario; no equivale a una traza de combate real.
+- Suite Python 115/115; Vita3K SDL schema46/600 frames pasó con regresiones, skills, objetos y contratos de escenarios. VPK/hash y limitaciones: [ITERATION230.md](ITERATION230.md). 530 aún no está implementada en runtime Vita.
+
+## Iteración 2.129: PAT 821 localizado en la ruta Suika 623B nivel 9
+- El factory PE original (`0x784020`) resuelve el `0x335` de la acción 530 como PAT 821/seq.0, nueve poses, daño PAT 800. La prueba ejecuta el RNG original y conserva una variante de contacto con posiciones alineadas de forma controlada.
+- El objeto natural del fixture aparece en `(344.6202,261.1317)` y termina tras dos updates; el HP -800 solo se acredita en el resolver con contacto forzado. No demuestra rango/impacto de combate natural.
+- Prueba enfocada del probe Suika: 2/2; suite Python completa: 115/115. No se modificó el motor Vita ni se creó VPK; falta trazar el comando con entrada/replay natural antes de portarlo. Evidencia: [ITERATION229.md](ITERATION229.md).
+
+## Iteración 2.128: Suika 623B integrado y validado
+- Dispatcher PE: nivel9→530, nivel5→525, base→520, ambos niveles activos→bloqueo; se comprueban efectos laterales de `useSkill`.
+- Vita3K SDL: `route_mask=15`, daño 1000/500 y activación 530; permanecen aprobadas las regresiones 623C/PAT 821 y escenarios.
+- VPK y alcance: [ITERATION228.md](ITERATION228.md). Falta el efecto de 530, progresión real de cartas y cubrir skills/roster y escenarios completos.
+
+## Iteración 2.127: reacción de impacto de Remilia para PAT 821
+- El primer cuadro post-impacto verifica HP -800, acción 50/seq.0/pose0 y stun20, cotejado con la selección de reacción y temporizador x86.
+- Ambos objetos conservan sus 27 actualizaciones comparadas. Vita3K SDL: schema46/600, route mask31 y gates de escenario; Python 114/114.
+- VPK, hashes y límites: [ITERATION227.md](ITERATION227.md). Falta comparar la reacción completa con replay, además de guardia, cartas, roster, escenarios y Vita física.
+
+## Iteración 2.123: ramas 623C por nivel
+- Se portó el selector x86 623C de Suika para niveles 5/9. La regresión Vita3K pasó las rutas 521 (1000), 526 (500), 531 (una activación, sin daño atribuido) y bloqueo ambos niveles; route mask 15, schema46/600.
+- VPK/hashes, alcance y pendientes: [ITERATION223.md](ITERATION223.md). Reporte actual: `artifacts/vita3k-result.json`.
+- Falta conectar el nivel al sistema de cartas/progresión y reconstruir los efectos de 531; el resto de skills y roster sigue incompleto.
+
+
+## Iteración 2.122: ambos impactos de Suika 623C
+- Se corrigió el latch de impacto de las skills para rearmar en poses PAT sin hitbox; la acción 521 ahora conecta sus ventanas de 400 y 600. Vita3K: schema46, 600 frames, gate Suika 1, un uso, daño acumulado 1000.
+- VPK hashes y evidencia x86: [ITERATION222.md](ITERATION222.md); reporte guest en `artifacts/vita3k-result.json`. Suite Python 114/114.
+- Las rutas de nivel para acciones 526/531 siguen sin integrar; la paridad de hitstop/stun y matchups tampoco está cubierta.
+
+
+## Iteración 2.121: Suika 623C → PAT 521
+- El VPK auto-test pasó Vita3K SDL (schema46, 600 frames); métricas guest: comando/acción/uso = 1/1/1 y daño PAT = 400. El VPK interactivo se reconstruyó con el mismo código.
+- Suite Python: 114/114. Hashes y detalle: [ITERATION221.md](ITERATION221.md), [vita3k-result.json](../artifacts/vita3k-result.json).
+- Cobertura parcial: niveles de habilidad asumidos cero; no se reprodujo la transición/daño posterior del probe x86. Faltan el flujo completo de esta skill y las skills del resto del roster.
+
+
+## Iteración 2.120: rebuild actual y gate completo de Vita3K
+- Reconstruidos VPK interactivo y autotest desde el árbol actual; ambos comparten `eboot.bin` SHA-256 `d1d730c7849097d8b78a09e75ccc708b2668a9b39cf1e716c9a39abd2879fdf5`.
+- Suite Python: 114/114 aprobadas. El autotest pasó Vita3K SDL, schema46/600 cuadros, regresiones, objetos, PAT, cámara y contratos BG33/BG36/BG37/BG38.
+- Hashes, reporte y alcance: [ITERATION220.md](ITERATION220.md), [vita3k-result.json](../artifacts/vita3k-result.json). La paridad completa del juego continúa pendiente.
+
+## Iteración 2.119: cursor y contador dentro de un mismo update Story
+- `0x47f810` procesa primero el replay por slot 16 (`0x47ee10`), luego llama `0x478640`; este despacha slot 15 (`0x47f7c0`), que llega a `0x4787f0` e incrementa `[0x85eb58]`.
+- El probe ahora valida el orden y pasa 53 checks con el PE 2009 fijado. Se prueba un incremento por ejecución del slot 5, no la frecuencia por frame/tick.
+- Evidencia y límites: [ITERATION219.md](ITERATION219.md), reporte `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.118: slot 5 Story y cadence del replay
+- El caso 3 de `0x43d480` despacha slot 1 (`0x47eaa0`), mientras slot 5 (`0x47f810`) invoca slot 16 (`0x47ee10`) una vez por ejecución. No está probado cuántas veces corre slot 5 por tick/render.
+- `0x4787f0` incrementa el contador `[0x85eb58]` tras llamar un slot 5 obtenido de `[0x85eb70]`; ese global es distinto del manager Story `[0x85eb64]`, así que queda como pista separada.
+- Probe y prueba focalizada pasan con el PE 2009 SHA-pinned (52 checks); análisis y límites: [ITERATION218.md](ITERATION218.md) y `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.117: VPK actual y psp2-tooling
+- Reconstruidos VPK interactivo y de autotest desde el árbol actual con VitaSDK 2026.08; el autotest pasó Vita3K SDL, schema46/600 cuadros y gates de regresión, sprites, objetos y escenarios. Hashes, reporte y límites: [ITERATION217.md](ITERATION217.md), `artifacts/vita3k-result.json`.
+- `psp2-tooling` queda registrado como apoyo para profiling/debug en Vita física; no sustituye Vita3K ni ayuda a decompilar el PE. La configuración DevKit/retail tiene dependencias de hardware y firmware que se aplazan hasta tener escena integrada y una consola compatible.
+- Esto no prueba paridad total del juego ni FPS en hardware.
+
+## Iteración 2.112: transición de CTitle a Story
+- RTTI confirma `0x426d50` como slot 1 de `CTitle`; la tabla de estados enruta estado 12 a `(modo=6, estado=2)`, mientras estados 8/9 asignan modos 4/5 y estado 1.
+- Esto prueba un camino estático de la pantalla título hacia el manager Story, pero no que sea la selección de replay Sanae ni la carga de `.rep`. No cambia runtime/VPK.
+- Prueba focalizada 1/1, contratos de sonda 36/36: [ITERATION212.md](ITERATION212.md), reporte `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.111: condiciones reales de los callers
+- `0x425703` llega al dispatcher de backend únicamente con selector 1 y usa el setup de una fuente si el selector es 0. `0x44af00` fija modo 7/estado 1 antes de inicializar una fuente; `0x4209c1` conserva el selector como estado dinámico.
+- Estas rutas de input/configuración no demuestran que el replay Story tenga `f0=3`; no cambia el runtime ni el VPK.
+- Sonda/reporte, prueba 1/1 y alcance: [ITERATION211.md](ITERATION211.md), `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.110: callsites de configuración de input
+- El scanner `E8 rel32` encontró callers directos del backend (`0x420a91`, `0x4258fe`) y del setup de fuente única (`0x4258ec`, `0x44b091`); se añadió su contexto al reporte JSON y a la regresión.
+- El orden de esas rutas respecto a replay Story sigue sin demostrarse. El helper de ventanas falló al inicializar y el ejecutable original no estaba abierto; no se obtuvo traza live. Runtime/VPK sin cambio.
+- Evidencia/pruebas: [ITERATION210.md](ITERATION210.md), pruebas focalizadas 3/3.
+
+## Iteración 2.109: slots de fuente para los ocho selectores
+- Inventariadas las ocho ramas de `0x43dee0`: selectores 1/2/8 usan una fuente; 3 usa dos punteros fijos; 4/5 enlazan dos ranuras del manager; 6/7 conservan directamente la configuración previa. La inicialización común deja una fuente.
+- El writer de input convierte la presencia de esos dos slots en `+0xf0` del objeto de decoder. El modo 6 no permite deducir el valor efectivo sin conocer la secuencia previa de setup; no se conectó playback al motor.
+- Evidencia/pruebas: [ITERATION209.md](ITERATION209.md), `tests/test_replay_manager_selection_probe.py`, `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.108: fuentes de input del selector 6
+- La tabla de `0x43dee0` confirma que selector 6 indexa `0x43e122`, ruta común sin escrituras directas a los slots de fuente `0x8602ac/0x8602cc`; la asignación explícita de dos punteros ocurre en la rama de selector 3 (`0x43e0a0`).
+- Por tanto, dos slots del manager Story no demuestran dos fuentes activas y `f0=3` sigue siendo una condición del harness. No cambió runtime ni VPK.
+- Prueba y alcance: [ITERATION208.md](ITERATION208.md), `tests/test_replay_manager_selection_probe.py`.
+
+## Iteración 2.107: replay completo en callback Story
+- Se ejecutaron las instrucciones originales `0x47ee10 → 0x42a410` sobre todos los words del replay Sanae. El callback consumió las 16,910 parejas de sus tres registros (33,820 words), cotejó ambas máscaras y los seis setters por pareja, y terminó con cursor en cero.
+- El harness fijó estado 2 y `f0=3`; no demuestra selección del menú, número natural de fuentes ni cadence por frame. No se integró playback al runtime Vita.
+- Evidencia/reporte: [ITERATION207.md](ITERATION207.md), `artifacts/kernel/replay-story-callback-original-2009.json`.
+
+## Iteración 2.106: dispatch Story validado en Unicorn
+- Se ejecutó el prefijo original de `0x47ee10`: estado 2 llama una vez al decoder `0x42a410` con `ECX=0x85ec98`; estado 1 lo omite. El getter de estado ejecuta desde el PE; solo se intercepta el decoder.
+- No consume el `.rep`, no demuestra que el menú entre por esa ruta ni mide cadence por frame.
+- Evidencia: [ITERATION206.md](ITERATION206.md), `artifacts/kernel/replay-story-callback-original-2009.json`.
+
+## Iteración 2.105: input compartido con el decoder Story
+- `0x4281a2 → 0x42d6b0` escribe `+0xf0` del objeto devuelto por `0x43cec0` (`[0x85ec98]`); `0x47ee10` obtiene el mismo objeto y lo pasa a `0x42a410` cuando `[0x85ec08]==2`. La identidad que antes faltaba queda confirmada estáticamente.
+- El bloque `0x426de6` solicita selector de manager 6 y estado 2; aún no se probó que sea la rama tomada para el replay Sanae. El número de fuentes efectivas y la cadence siguen sin medirse.
+- Evidencia y límites: [ITERATION205.md](ITERATION205.md), reporte `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.104: fases del ciclo global identificadas
+- El dispatcher `0x43d480` usa `[0x85ec0c]`: estado 2 llama al selector de manager `0x43cca0`; estados 3–5 llaman sus rutas de update. El selector usa `[0x85ec10]`, escrito por `0x43d8e0`, para elegir la variante Story u otras.
+- No se midieron estos valores durante el replay ni su cadencia por frame. La ruta de flags de input sigue sin demostrar identidad con el objeto del decoder.
+- Evidencia y pruebas: [ITERATION204.md](ITERATION204.md), reporte `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.103: selector Story e input separados
+- `0x43cca0` elige el inicializador Story `0x43b440` para modo 0 y `0x4378d0` para modo 6; ambos escriben `[0x85eb64]` con la instancia Story. El modo efectivo del replay Sanae no está medido.
+- `0x42d6b0` escribe flags de presencia de fuentes en el objeto global de input `[0x85ec98]`. No está demostrado que ese sea el mismo objeto que `0x42a410` usa al consumir replay; `f0=3` sigue limitado al harness.
+- No se conectó playback ni se infirió cadence. Evidencia y límites: [ITERATION203.md](ITERATION203.md), reporte `artifacts/kernel/replay-manager-selection-original-2009.json`.
+
+## Iteración 2.102: manager y fuentes del replay diferenciados
+- `0x85eb64` recibe el objeto con vtable Story en dos inicializadores; los dispatchers globales usan esa instancia. No se ha probado todavía qué inicializador activa el replay Sanae.
+- `0x42a410` lee el canal primario/secundario de acuerdo con bits 0/1 de `this+0xf0`; `f0=3` es condición del harness anterior, no configuración medida de cada sesión. No se infiere cadence ni se conecta playback.
+- Evidencia: [ITERATION202.md](ITERATION202.md). Siguiente: rastrear selector de inicializador y escritor de `f0`; medir cadence con frame-step.
+
+## Iteración 2.101: RTTI identifica el callback Story del replay
+- El PE original confirma que `CBattleManagerStory` reemplaza el slot virtual 16 con `0x47ee10`; base y Arcade usan `0x481040`. El método virtual Story `0x47f810` llega al slot 16 de la misma instancia.
+- Esto distingue el callback elegido en una instancia Story, pero no demuestra qué clase construye la sesión del replay ni cadence por frame. No cambió el runtime. Prueba focalizada: 12/12.
+- Detalle y reporte: [ITERATION201.md](ITERATION201.md), `artifacts/kernel/replay-manager-vtable-original-2009.json`.
+
+## Iteración 2.100: el cursor C consume parejas atómicas del replay real
+- Añadido `t123_replay_next_input_pair()`, que modela los dos words por invocación del decoder x86 cuando ambos slots están activos; un word final sin pareja no modifica cursor ni resultados.
+- El build manual Vita incluye ahora `src/replay.c`. El VPK de contrato leyó en Vita3K el replay Sanae de `ux0:data`, validó los tres registros y consumió las 16,910 parejas con salida de aplicación 0. Esto no prueba playback ni cadence por frame; el cursor no se conecta aún a combate.
+- El auto-VPK, recompilado tras incorporar el parser al build manual, pasó schema46/600 frames en Vita3K; SHA-256 `01cf0b4b492992c73ade61ddd0ae1f11fd0f794de19b9ac49b3c39797a76afb8`. El paquete interactivo [`Touhou123Vita-replay-core.vpk`](../artifacts/Touhou123Vita-replay-core.vpk) comparte exactamente el `eboot.bin` probado. Reporte fresco: [`vita3k-result.json`](../artifacts/vita3k-result.json).
+- Evidencia, hashes y límites: [ITERATION200.md](ITERATION200.md).
+
+## Iteración 2.99: replay ejecutado word por word contra el PE original
+- Unicorn ejecutó el método original `0x481040` sobre los 33,820 words de los tres registros del replay Sanae 2009; todas las lecturas, callbacks 0x3c/0x3d, incrementos de cursor y la guarda de fin pasaron. Hashes PE/replay fijados en la nota.
+- Esto confirma mecánica por invocación, no cadencia por frame, reproducción completa ni sincronía de ambos jugadores. No se conectó el cursor al loop Vita. Evidencia: [ITERATION199.md](ITERATION199.md).
+
+## Iteración 2.98: gate integral de Vita3K renovado
+- El 18 oct 2026 se ejecutó `Touhou123Vita-pat-crop-guest-auto.vpk` en la copia aislada de Vita3K SDL: schema46, 600 frames, `status=passed`, regresión, recorte PAT, cámara/viewport, BG33 y scroll BG36–BG38 aprobados. Hash auto VPK: `96e1782e6bdf7c5dd6a5e627d8b2b52fd1ac4e415136fc603b772815bdab6b71`.
+- El interactivo [`Touhou123Vita-pat-crop-guest.vpk`](../artifacts/Touhou123Vita-pat-crop-guest.vpk) es SHA-256 `c511fb78937fe3b12a2b686220f860420ab3729ad784c96e242730a05601b46d`; comparte exactamente el `eboot.bin` probado, SHA-256 `d1d730c7849097d8b78a09e75ccc708b2668a9b39cf1e716c9a39abd2879fdf5`. La corrida integral instaló el auto-VPK; el interactivo se comprobó por igualdad del eboot.
+- Reporte/capturas frescos: [`vita3k-result.json`](../artifacts/vita3k-result.json) y [`screenshots/fight.bmp`](../artifacts/screenshots/fight.bmp). El overlay de auto-test impide usar esa captura para paridad visual precisa. Ver [ITERATION198.md](ITERATION198.md).
+
+## Iteración 2.96: WRAP inicial del sampler encontrado
+- La inicialización D3D llama a `0x404ad0` para establecer `ADDRESSU=1/WRAP` y `ADDRESSV=2/WRAP` en samplers 0 y 1. El wrapper de filtro `0x404af0` modifica MAG/MINFILTER, no dirección.
+- El render directo del jugador `0x4389d0→0x4075d0` no establece U/V; hereda el estado actual. Otra ruta genérica `0x4571a4/0x4571b6` sí cambia sampler 0 U/V desde campos por objeto, así que el valor al instante del frame depende del orden de dibujo. No se atribuye todavía WRAP a los frames extremos concretos.
+- Reportes del PE: [`d3d9-sampler-generic-callers.tsv`](../artifacts/kernel/d3d9-sampler-generic-callers.tsv), [`d3d9-sampler-mode-manager.tsv`](../artifacts/kernel/d3d9-sampler-mode-manager.tsv), [`d3d9-sampler-active-paths.tsv`](../artifacts/kernel/d3d9-sampler-active-paths.tsv). Próximo: seguir orden de draw o capturar `GetSamplerState` justo antes del render de un frame PAT. Ver [ITERATION196.md](ITERATION196.md).
+
+## Iteración 2.95: ruta de dibujo de los recortes extremos confirmada
+- El descriptor PAT pasa por `0x466720→0x406c60→0x406d30`; la ruta común `0x4075d0` liga la textura y somete dos primitivas a Direct3D sin filtrar por UV fuera de rango ni por flags. Esto confirma el envío del quad, no su apariencia final.
+- Se inspeccionó la alpha de borde de los ocho CV2 resueltos: siete tienen bordes opacos y Sakuya `attackAa000.bmp` transparente. El PE usa D3D9; su helper no establece ADDRESSU/V, cuyo default documentado es WRAP, así que el tiling es la hipótesis actual. Falta confirmar cambios globales/efectos en una corrida del original; no se cambia todavía el renderer Vita.
+- Disassemblado fijado por SHA en [`pat-crop-render-chain.tsv`](../artifacts/kernel/pat-crop-render-chain.tsv) y [`pat-component-constructor.tsv`](../artifacts/kernel/pat-component-constructor.tsv). Próximo: hallar la configuración global de direccionamiento Direct3D y observar uno de estos frames en el original. Ver [ITERATION195.md](ITERATION195.md).
+
+## Iteración 2.94: clasificación de registros PAT con recortes extremos
+- La auditoría previa encontró 8/17,586 frames con `tx/ty` no cero, pero no todos son `alpha000.bmp`: siete usan esa imagen y uno es Sakuya `attackAa000.bmp` (action 40, seq.0/frame0). Los registros tienen `flags` 0, 1 y 2; por tanto, el byte de variante no explica por sí solo la geometría extrema.
+- El extractor [`extract_pat_pose_metadata.py`](../tools/extract_pat_pose_metadata.py) expone ahora `flags` y los 16 bytes opcionales como hexadecimal para conservar la variante PAT en el análisis. La presencia de estos valores no prueba todavía si son frames invisibles, una ruta de textura distinta o una convención de UV especial; no se han cambiado las reglas del runtime.
+- Ejemplos: Marisa action 47/frame0 (`alpha000.bmp`, `ty=-19704, tw=10876, th=19704`, flags 1); Alice action 304/frame0 (`alpha000.bmp`, `ty=-25016, tw=10876, th=25016`, flags 0); Sakuya action 40/frame0 (`attackAa000.bmp`, `ty=-720, tw=16044, th=720`, flags 1). Las poses siguientes suelen tener rectángulos 64×64/64×128 convencionales. Los `special_data` de los casos flags 2 se preservan para el siguiente cruce con el loader x86.
+- Iteración 2.95 demostró que el helper común sí somete el quad, pero aún no identifica el estado global de muestreo; seguirlo antes de atribuir el resultado visual. Ver [ITERATION195.md](ITERATION195.md).
+
+## Iteración 2.93: test de recorte desplazado en Vita3K
+- Se añadió `soft2d_texture_region_crop_contract()`: rasteriza un rectángulo `[1,3)×[1,3)` de una textura sintética 4×4, comprueba los cuatro colores fuente y confirma que no alcanza los píxeles externos. El auto-test exige `sprite_region_crop_contract=1`; Vita3K SDL pasó schema46/600 frames con ese campo y todos los gates acumulados en 1.
+- `action_sequence_metadata` conserva `tx/ty/tw/th/ox/oy` para cada frame en análisis host. La primera clasificación dijo que los 8 recortes no cero eran `alpha000.bmp`; Iteración 2.94 corrige el resultado: siete son `alpha000.bmp` y uno es `attackAa000.bmp` de Sakuya. Solo queda pendiente aclarar semántica y ruta x86, ver [ITERATION194.md](ITERATION194.md).
+- VPK interactivo: [`Touhou123Vita-pat-crop-guest.vpk`](../artifacts/Touhou123Vita-pat-crop-guest.vpk), SHA-256 `c511fb78937fe3b12a2b686220f860420ab3729ad784c96e242730a05601b46d`. Auto-VPK validado: [`Touhou123Vita-pat-crop-guest-auto.vpk`](../artifacts/Touhou123Vita-pat-crop-guest-auto.vpk), SHA-256 `96e1782e6bdf7c5dd6a5e627d8b2b52fd1ac4e415136fc603b772815bdab6b71`. `eboot.bin` compartido: `d1d730c7849097d8b78a09e75ccc708b2668a9b39cf1e716c9a39abd2879fdf5`.
+- Suite Python completa: 110/110; VitaSDK compiló los dos VPK; Vita3K test aislado schema46/600 cuadros aprobados. Reporte fresco en [`vita3k-result.json`](../artifacts/vita3k-result.json), incluida la nueva aserción de guest.
+- Siguiente: trazar cómo se consumen los registros `alpha000.bmp` y qué textura/formato representan; crear fixture de personaje con recorte no trivial si se encuentra un caso semánticamente normal, y seguir la comparación con PC/replay, combate completo y recursos/escenarios pendientes.
+
+## Iteración 2.92: corregidos los límites del recorte PAT
+- El oracle [`x86_sprite_component_probe.py`](../tools/x86_sprite_component_probe.py) ejecuta el constructor x86 `0x406c60` en tres fixtures con origen desplazado y dimensiones distintas. Confirma que `tw/th` son tamaño geométrico del quad y que el UV final es `(tx+tw, ty+th)` dividido entre el tamaño de textura. Reporte: [`sprite-component-contract.json`](../artifacts/kernel/sprite-component-contract.json).
+- Se corrigieron las llamadas de render de jugadores y objetos: Soft2D recibe ahora `tx,ty,tx+tw,ty+th`. Antes se pasaban `tw/th` como límites absolutos, lo que recortaba de más cualquier frame cuyo origen PAT no fuera cero.
+- Suite Python 110/110 y prueba focalizada 10/10; VitaSDK generó ambos VPK y Vita3K SDL aislado pasó schema46, 600 frames y todos los gates de regresión/cámara/BG33/BG36–BG38. Auto VPK probado: [`Touhou123Vita-pat-crop-auto.vpk`](../artifacts/Touhou123Vita-pat-crop-auto.vpk), SHA-256 `fd15c4fdbbbb522c33f40a491b32cf67a7ad12d841b0313ad6f41983fa8f3b26`; interactivo: [`Touhou123Vita-pat-crop.vpk`](../artifacts/Touhou123Vita-pat-crop.vpk), SHA-256 `2e6d9e9445040bffea8acce0f3a462eb0051305cc9d0137da130cac3b9d4e9dc`. `eboot.bin` común: `82963353ebf4c610204bfba41e8e8632755e52ab4941744b38363bb4ba8ac026`.
+- Captura/reportes frescos: [`fight.bmp`](../artifacts/screenshots/fight.bmp), [`vita3k-result.json`](../artifacts/vita3k-result.json). Aún falta un test de guest que fuerce recortes PAT con `tx/ty` no cero y una captura comparativa sincronizada del juego original. El oracle valida el constructor del quad, no el mapeo de escala de mundo ni paridad de píxeles.
+- VitaFS de esta instancia está bajo `artifacts/vitafs`: contiene los DAT montados para Vita3K y reportes/capturas de las corridas, fuera del VPK y del control de versiones. No se añadieron recursos comerciales al paquete.
+- Próximo: introducir una pose de jugador y otra de objeto con recorte desplazado al smoke Vita3K, comparar un cuadro contra el juego original usando una versión compatible del replay y seguir con skills/B/C, objetos y composición de escenarios faltantes.
+
+## Iteración 2.91: recorte de textura PAT aplicado al renderer
+- La sonda SHA-pinned [`x86_sprite_quad_probe.py`](../tools/x86_sprite_quad_probe.py) pasa contra `th123.exe` (`f0db9366…16731e`) y confirma layout del registro en disco, traslado loader a offsets runtime, signo de `ox/oy/tx/ty`, paso del rectángulo a `0x406c60` y normalización UV por dimensiones de textura.
+- El renderer Soft2D consume ahora el rectángulo PAT (`tx,ty,tw,th`) con espejo horizontal por facing y coloca el sprite con `ox/oy` firmado dentro de la proyección dinámica de cámara. Esto implementa el contrato del quad/recorte; el anclaje exacto y la escala contra coordenadas del juego siguen experimentales y requieren comparación de poses del PE/replay.
+- Pruebas: test focalizado de cámara/renderer 10/10; suite Python 110/110; Vita3K SDL aislado pasó 600 cuadros, schema46, `regression_gate=1`, contratos de cámara/viewport/BG33/BG36–BG38 aprobados. Reporte fresco: [`vita3k-result.json`](../artifacts/vita3k-result.json); captura de pelea: [`fight.bmp`](../artifacts/screenshots/fight.bmp). La captura muestra ambos sprites completos, pero el texto de autotest cubre el piso y no permite afirmar paridad visual exacta.
+- VPK interactivo para revisar: [`Touhou123Vita-pat-quad.vpk`](../artifacts/Touhou123Vita-pat-quad.vpk), SHA-256 `11cf2ba5d80774dae7ea42d641ebea5bb4d5b14d37a62cc515162f9a44959f4e`. VPK automático probado: [`Touhou123Vita-pat-quad-auto.vpk`](../artifacts/Touhou123Vita-pat-quad-auto.vpk), SHA-256 `d6a2992612afafa139b7c234ddf9a0fd25c7d32b5e96f1688dfb7eaa1101ea74`. Ambos contienen el mismo `eboot.bin` (SHA-256 `35cdbd4005b5a41293210fb320a65a88e55ace9f89dd45f27639a2e48c39ebbf`).
+- Siguiente: comparar poses PAT quieta, aérea y de ataque con coordenadas/capturas del juego de PC; recuperar origen/escala exactos; después llevar el mismo contrato a objetos y completar las rutas de combate y escenarios que faltan. Esta prueba no cierra la decompilación ni una ronda completa.
+
+## Iteración 2.90: offsets PAT y renderer compartido
+- El parser C/extractor Python preservan `tx/ty` como `int16`; `0x466670` los lee con signo y los copia al componente gráfico. El probe del PE demuestra que Reimu, objeto base y Suwako 808 comparten el callback de slot 11 `0x438d20`.
+- Se descartó la fórmula que colocaba el sprite directamente desde esos offsets: el PAT idle de Reimu tiene `tx=ty=0`, y la captura mostró el sprite cortado bajo el HUD. El quad/origen configurado por `0x406c60` aún debe reconstruirse; el renderer conserva el anclaje anterior basado en `ox/oy` mientras tanto.
+- VPK revisable [Touhou123Vita-pose-anchor-review.vpk](../artifacts/Touhou123Vita-pose-anchor-review.vpk), SHA-256 `643ddd9dcd7125bd524025aa75e83548b6a6c8fbbd47ccd3fc6be7fcff084a51`; VPK automático [Touhou123Vita-pose-anchor-review-auto.vpk](../artifacts/Touhou123Vita-pose-anchor-review-auto.vpk), SHA-256 `3317de974109c2f5c8850a32b642ac912acb3581e25db21daf2a13745b738058`. Vita3K SDL pasó 600 cuadros/schema46 y gates acumulados; Python 110/110 y prueba focalizada 10/10. Captura: [fight.bmp](../artifacts/screenshots/fight.bmp).
+- La fixture C de offsets negativos está añadida, pero no se ejecutó en host. Siguiente: reconstruir el contrato geométrico del quad y el origen local con evidencia x86, y después comparar varias poses. Ver [ITERATION190.md](ITERATION190.md).
+
+## Iteración 2.89: inicialización del sprite del jugador localizada
+- El slot 11 de Reimu (`0x438d20`) dibuja `Player+0x154` por `0x4389d0`; este aplica la cámara mediante `0x4293f0`.
+- `0x466670` crea/configura el componente gráfico y carga dos palabras del registro de imagen en `+0xf0/+0xf4`; esos valores son metadatos de pose/imagen, no dimensiones. Falta mapear el registro exacto a `T123Pose`.
+- Test focalizado de cámara 10/10; runtime y VPK no cambiaron. Evidencia: [ITERATION189.md](ITERATION189.md).
+
+## Iteración 2.88: cámara dinámica conectada a personajes y objetos
+- El vtable de Reimu confirma que el slot 11 (`0x438d20`) dibuja `Player+0x154` mediante `0x4389d0` y la transformación de cámara `0x4293f0`; ya está probada la ruta de jugador. Queda mapear los campos locales del componente y su anclaje PAT a píxeles. La proyección queda `(world - camera - viewport) * zoom + (320,420)`.
+- `Fight` mantiene y actualiza `T123StageCamera` cada tick; las posiciones X del prototipo pasan en unidades originales y la altura Y se invierte. Sprites, objetos y piso usan ahora la proyección dinámica; UI y fondo placeholder permanecen en su espacio actual.
+- Python 110/110; Vita3K SDL pasó 600 cuadros/schema46, regresiones, gate de cámara y gates acumulados de escenarios. Captura fresca: [fight.bmp](../artifacts/screenshots/fight.bmp). El build host C con GCC/MSYS2 se atascó sin CPU; el build VitaSDK y el gate ARM corrieron correctamente.
+- VPK auto-test `Touhou123Vita-live-camera-auto.vpk` SHA-256 `79343255129ded37359fccd75bc8d662b0df3fc0851ffdb0ff4c1ebafd1e8203`; interactivo `Touhou123Vita-live-camera.vpk` SHA-256 `cf4bd425caac95eeeff8d54c546be72a63a3bcdd64a6f0b3b690b60932ce295e`. Comparten `eboot.bin` SHA-256 `a1990b578618cf789ee7d1ca0b5c22734935d827bf2d964ca65cf2450ff6667b`. La cámara dinámica se limita a combate; la UI conserva la vista neutral.
+- Falta mapear los campos de posición/escala del componente del luchador y recuperar su anclaje vertical exacto y sustituir el fondo placeholder por la composición real del escenario antes de afirmar paridad visual. Evidencia y pasos: [ITERATION188.md](ITERATION188.md).
+
+## Iteración 2.87: actualización completa por tick de cámara
+- Se añadió `T123StageCamera` y `t123_stage_camera_step`, que refresca centro/zoom/target Y y aplica en secuencia el easing de zoom, X e Y medido en el PE.
+- El vector encadenado de constructor + segundo update concuerda con el oracle x86; el gate ARM/Vita3K pasó 600 frames/schema46 y la suite Python pasó 109/109.
+- VPK auto-test: `Touhou123Vita-camera-state-auto.vpk`, SHA-256 `590ae74f9bad57f761e4a00630168bc9490f9fe89a2088fa00eefca51602063c`. Interactivo: `Touhou123Vita-camera-state.vpk`, SHA-256 `78f75bbf5fe38b145aee00202c3cc0aa3fcb1793f57cb09e0dd3d67774535720`.
+- El estado aún no vive en `Fight` ni proyecta sprites/fondos: la escala y orientación entre las coordenadas simplificadas del prototipo y el espacio de escena original siguen por demostrar. Próximo: medir esta conversión con vectores del PE y luego conectar el mismo estado al tick/render de combate. Ver [ITERATION187.md](ITERATION187.md).
+
+## Iteración 2.86: easing vertical de la cámara
+- `FUN_00429040` actualiza Y con divisor 20 (jugadores con mínimo Y ≤ 270) o 10 (mínimo > 270), añade el paso constante ±1, hace snap al cruzar el objetivo y limita la vista a `[-420*(2*zoom-1), 0]`.
+- Se implementó `t123_stage_camera_y_step`; el oracle Unicorn/x86 y la suite Python completa pasan 109/109. Vita3K SDL pasa 600 cuadros, schema46, `regression_gate=1` y `stage_camera_pair_contract=1`.
+- El VPK interactivo comparte `eboot.bin` con el auto-VPK probado. Esta rutina aún es contrato aislado y no está conectada al seguimiento de cámara del combate. Evidencia: [ITERATION186.md](ITERATION186.md).
+
+## Iteración 2.79: proyección común de auxiliares BG36
+- Los cuatro slots del constructor usan ahora un helper geométrico común con sus pivotes y anclajes del renderer x86; el visor preserva sus posiciones/tamaños relativos en una referencia de cámara cero.
+- Vita3K SDL aprobó schema46/600 cuadros y el contrato numérico `stage_bg36_aux_projection_contract=1`; Python 100/100. Interactivo recompilado con el mismo `eboot.bin` del auto-VPK probado. Cámara dinámica e integración de fondos al combate siguen abiertas. [ITERATION179.md](ITERATION179.md).
+
+## Iteración 2.78: gate estable para proyecciones BG36
+- La navegación reiniciaba el contador de nubes al volver a BG36 después de tomar la captura. Se conserva ahora la evidencia acumulada durante la corrida, sin alterar el reinicio del scroll.
+- Vita3K SDL: schema46, 600 cuadros, `regression_gate=1`, cuatro proyecciones BG36; suite Python 100/100. El VPK interactivo se reconstruyó y su `eboot.bin` coincide con el binario probado. Cámara viva e integración de escenarios en combate siguen pendientes. [ITERATION178.md](ITERATION178.md).
+
+## Iteración 2.77: anclaje común y pivotes de nube BG36
+- El renderer envía ambos pases de nubes al mismo anclaje (+0x44/+0x48); el constructor define pivotes distintos. El core modela la conversión a origen de dibujo y la página los compone según ese pivote.
+- Vita3K SDL pasó 600 cuadros/schema46 y la suite 100/100. La escala/cámara de combate sigue pendiente. [ITERATION177.md](ITERATION177.md).
+
+## Iteración 2.76: auxiliares BG36 y export de renderers
+- La página BG36 muestra ahora los cuatro auxiliares del constructor; el análisis PE separa los transforms conocidos de torii de las posiciones de nubes aún por recuperar. Nuevo exportador SHA-pinned: 1,667 instrucciones BG36–BG38.
+- VPK recompilados; Vita3K 600 cuadros/schema46 pasó y la suite Python pasó 100/100. [ITERATION176.md](ITERATION176.md).
+
+## Iteración 2.75: mapeo de slots de renderer BG36–BG38
+- Contraste entre constructor y renderer corrigió la semántica: BG36 desplaza tori1/tori2; BG37 desplaza tori1/clowd_l y coloca clowd_s fijo en (492, −401); BG38 desplaza clowd_l/clowd_s.
+- VPK interactivo y automático recompilados. Vita3K SDL pasó 600 cuadros/schema46; Python 100/100. Las capturas siguen siendo diagramas de diagnóstico; aún falta integrar las capas y reconstruir cámara/composición. [ITERATION175.md](ITERATION175.md).
+
+## Iteración 2.74: callbacks de scroll BG37/BG38
+- Los rates, wraps, offsets iniciales y diferencia de contador se midieron correctamente; la etiqueta previa de ambos offsets como nubes fue refinada en 2.75 al cotejar constructor y renderer. [ITERATION174.md](ITERATION174.md).
+
+## Iteración 2.73: cobertura auxiliar exacta BG37/BG38
+- El constructor Ghidra/x86 de BG37 reserva y carga tres auxiliares (`tori1`, dos nubes); BG38 reserva y carga dos nubes. El auditor ya no espera torii que el PE tampoco solicita.
+- Auditoría regenerada: BG36 4/4, BG37 3/3, BG38 2/2. Pruebas focalizadas 4/4; Python total 96/96. Esto corrige inventario, no integra escenas ni modifica VPK. [ITERATION173.md](ITERATION173.md).
+
+## Iteración 2.72: replay completo sobre el método x86
+- Unicorn ejecutó las 33.820 palabras reales del replay Sanae a través de las instrucciones originales de `0x481040`: máscara escrita, callbacks `0x3c/0x3d`, avance de cursor y guard de fin de vector coinciden en todos los casos.
+- Los guards, getters y auxiliares están controlados; esto no mide llamadas/frame ni es playback en vivo. Reporte: [JSON](../artifacts/x86-replay-update-method-full-original-2009.json); detalle: [ITERATION172.md](ITERATION172.md). Runtime/VPK sin cambio.
+
+## Iteración 2.71: dispatch y cursor de replay
+- El PE 2009 verifica que `0x481040` lee una palabra por avance de `[0x85d748]+0x14`, escribe flags de input `0x3c/0x3d` en la rama guardada y avanza el cursor; `0x4600fe` hace peek/compare/consume. Ambos callbacks revisados llaman `0x42a410` en modo 2.
+- La frecuencia por frame y el callback natural de cada modo siguen desconocidos. Sonda y evidencia: [ITERATION171.md](ITERATION171.md), [JSON](../artifacts/x86-replay-dispatch-original-2009.json). Runtime/VPK sin cambio.
+
+## Iteración 2.66: parser y cursor replay en C
+- `src/replay.c` valida el formato 2009 y expone IDs, cursor de secuencia y decodificación de la máscara/flags sin copias ni supuestos de cadence; se integró a `t123_core` y su contrato C a CTest.
+- VitaSDK 15.2 compila módulo y prueba con warnings como errores, y enlaza el ELF de contrato; Python 91/91 pasa. No se ejecutó el ELF ARM. GCC host se atascó en `cc1` y reportó temporal MSYS2 denegado; CTest host queda pendiente.
+- Sin cambio/rebuild del VPK: aún no se conecta replay a la carga ni al combate. Detalle en [ITERATION166.md](ITERATION166.md).
+
+## Iteración 2.68: decoder original ejecutado sobre todo el replay
+- Se añadió el oráculo Unicorn `tools/x86_replay_input_probe.py` y se ejecutó la `0x42a410` original sobre las tres secuencias del replay compatible. Con `this+0xf0=3`, las 16.910 llamadas consumen dos words cada una; máscara baja, seis flags del primer word y agotamiento final coinciden con el modelo estático.
+- Esto verifica decoder/cursor bajo flags activos, pero no la cadence del loop ni el valor natural de los flags por ronda. El runtime y VPK siguen sin cambios; playback funcional sigue pendiente. Reporte local `artifacts/x86-replay-input-oracle.json`; detalle en [ITERATION168.md](ITERATION168.md).
+
+## Iteración 2.69: el modo de dos slots depende de punteros activos
+- `0x42d6b0` escribe `f0 = 2*(input_state[0x44] != 0) + (input_state[0x24] != 0)` sobre el estado global `0x860288`; tiene llamada directa desde `0x4281a2`. Los bits reflejan presencia de dos fuentes de input, no una constante del formato. Falta verificar sus valores y orden en una ronda replay real.
+- `0x47ee10` y `0x481040` son dos rutas con llamadas a `0x42a410` en modo 2. La relación de sus dispatchers con un mismo tick no está resuelta; no conectar el cursor suponiendo una llamada/frame. Ver [ITERATION169.md](ITERATION169.md).
+
+## Iteración 2.70: decoders separados por slot
+- `0x43dee0` selecciona backend según `[0x85ec10]`; ramas del PE dejan un slot o dos fuentes activas. `0x42a410` mapea los flags altos solo en slot 0; slot 1 solo toma `word & 0x03ff`.
+- Se corrigieron los helpers C/Python y el resumen JSON schema2. El oráculo compara cada pareja del replay completo y todos los callbacks; 16.910/16.910 pasan. Python 93/93; VitaSDK compiló/enlazó el contrato ARM, pero no fue ejecutado. Sin cambios/VPK. Ver [ITERATION170.md](ITERATION170.md).
+
+## Iteración 2.65: IDs de personaje e inputs del replay
+- `0x42d560` toma los dos primeros bytes de un registro de `0x50` como selección de los dos combatientes; el replay Sanae produce (15,16), (15,17), (15,0), que concuerda con la tabla roster actual.
+- La grabación agrega `[0x85eb58]` al vector `record+0x3c`; el modo replay consulta/consume ese vector y `0x42a410` separa la máscara baja `0x03ff` y seis flags mapeados a IDs de entrada. Parser e inspector exponen esta evidencia sin asignar nombres a los botones ni timings.
+- 8 pruebas específicas y la suite Python completa (91/91) pasan; el JSON original fue regenerado. La cadencia exacta, una ejecución step-frame y paridad completa siguen pendientes; sin cambios ni nueva corrida del VPK. Ver [ITERATION165.md](ITERATION165.md).
+
+## Iteración 2.64: ruta del menú al loader de replay
+- El manejador de selección en `0x44a0e0` construye la ruta del archivo y llama a `0x42e030`; si el loader acepta el `.rep`, solicita transición `0x28` y escribe `0x848a94=6`. Esto enlaza el loader estructural con la ruta de reproducción seleccionada desde el menú, pero no prueba todavía que el combate reproduzca los registros.
+- En el PE original, `0x42e030` lee la cabecera extendida en `objeto+0xe8`, toma el número de registros desde `+0xef`, inicializa la colección en `+0xf4` y decodifica cada elemento con `0x42cd60` en stride `0x50`; guarda `cantidad-1` en `+0x140`. Los significados de los campos del registro y de sus secuencias `uint16` siguen abiertos.
+- Evidencia y siguientes xrefs en [ITERATION164.md](ITERATION164.md). No cambió el runtime ni el VPK.
+
+## Iteración 2.63: replay decodificado estructuralmente
+- El loader 2009 `0x42e030` y decoder `0x42cd60` fijan un esquema con cabecera extendida y tres registros de stride `0x50` en memoria. El inspector consume el replay Sanae completo: 67,881 bytes, 3 registros y cero sobrantes; seis pruebas sintéticas nuevas.
+- Reporte resumido: [replay-layout-original-2009.json](../artifacts/kernel/replay-layout-original-2009.json). Se mantienen sin verificar la semántica de las secuencias y el playback real; no llamarlas frames/inputs todavía.
+- VPK y runtime sin cambios respecto a Iteración 2.62. Ver [ITERATION163.md](ITERATION163.md).
+
+## Iteración 2.62: VPK vigente y regresión espejo corregida
+- El trail 801 conserva spawn cuantizado y los hitboxes de objetos se espejan una sola vez usando el facing. `fight_contract` ahora verifica el daño 120 HP en orientaciones derecha e izquierda.
+- Siete contratos C compilados/ejecutados con GCC/MSYS2 pasaron; suite Python 83/83 pasó. WSL sigue inaccesible (`E_ACCESSDENIED`), por lo que esto no es una corrida CTest.
+- [VPK interactivo vigente](../artifacts/Touhou123Vita-latest.vpk): 92,330 bytes, SHA-256 `a84133ecc36ef2ba19505a4bd7e5fe8c577c283d44152538b75e9825768c6c7b`. Vita3K SDL pasó schema46/600 frames, regresiones y contratos de BG33/Remilia/Suwako. Ver [ITERATION162.md](ITERATION162.md).
+
+## Iteración 2.61: pruebas host y replay
+- El rebuild fresco en WSL destapó fallos de combate y precisó revisar las coordenadas del objeto antes de interpretar sus asserts. La suite actual se ejecutó con GCC/MSYS2 y Python nativos; ver Iteración 2.62.
+- Se confirmó estáticamente que `0x42B4D0` lee cuatro bytes del replay y que el caller `0x42BDD1` compara el DWORD contra el helper `0x43CA50`. Esto verifica el guard inicial, no el parser de frames ni la reproducción.
+- El offset SokuLib `0x42EAC0` apunta a otra función en el PE 2009 suministrado; no reutilizar offsets entre builds sin fijar el hash. Ver [ITERATION161.md](ITERATION161.md).
+
+## Iteración 2.60: gate fresco del VPK
+- El auto-VPK `Touhou123Vita-remilia-lifecycle-auto.vpk` pasó una corrida nueva de Vita3K SDL: schema46, 600 frames, `status=passed`, regresión general y contratos BG33; se guardaron capturas actuales.
+- El `eboot.bin` del VPK interactivo `Touhou123Vita-latest.vpk` tiene el mismo SHA-256 que el probado. La suite host no se ejecutó: `ctest` falta en PATH y `wsl.exe` devuelve `Wsl/EnumerateDistros/Service/E_ACCESSDENIED` en esta sesión. Ver [ITERATION160.md](ITERATION160.md).
+
+## Iteración 2.59: ciclo visual secundario Remilia 801
+- El runtime conserva seis trails seq.1 después de retirar el objeto raíz al tick 73. Rutas de objeto, edades y desplazamientos discretizados validados en la compilación de prueba.
+- VitaSDK compila limpio; `tests.test_remilia_412_spawn_probe` pasa 5/5; Vita3K SDL schema46/600 frames pasa con `regression_gate=1`.
+- VPK interactivo: `artifacts/Touhou123Vita-latest.vpk`, SHA-256 `6b3a137e6edd7e2f90a67e1f89619e705432574147f045ebd9af5194c1add888`. Su eboot coincide con la auto-prueba aprobada, SHA-256 `e08d9412508058c3e8e29e9dd63848207174a781ddf1fdcae9b5d00c2c4f935f`. Ver [ITERATION159.md](ITERATION159.md).
 
 Fecha de esta evaluación: 2026-10-17 (America/Mexico_City).
 
-## Build Vita3K vigente — 17 octubre 2026
+## Herramienta evaluada: psp2-tooling
 
-Se regeneró `artifacts/Touhou123Vita-current.vpk` desde el código actual con VitaSDK. Vita3K SDL pasó schema31/600 frames; la evidencia fresca `artifacts/vita3k-result.json` lleva el hash del paquete. Pasaron las comprobaciones de 20/20 PAT/personajes/tarjetas, BG34, dash, B/C y skills 102/103/104/107. Hash SHA-256: `577c1388ae8a6ddc263025f42fe481896440ebae1ff2f4e1ec522875018b60d9`. Este VPK reproduce el runtime actual y no incluye la instrumentación x86 de Remilia (herramienta de análisis); combate completo y demás faltantes del roadmap siguen pendientes.
+[Grarak/psp2-tooling](https://github.com/Grarak/psp2-tooling) puede automatizar validaciones en Vita física (instalación/lanzamiento USB, input, capturas, core dumps y profiling CPU/Razor GPU). No compila nuestro VPK ni interviene en Vita3K o el parser `.rep`; se reserva para M7, cuando haya hardware. Requiere host Linux; el soporte retail se documenta para PCH-2000, 3.65, Ensō/taiHEN y módulos DevKit extraídos por el usuario, con cambios persistentes al modo debug. Probar primero la ruta DevKit disponible y posponer `retail-cp` hasta comprobar compatibilidad y necesidad. Repo GPL-3.0, herramienta host separada.
+
+## Render PAT: alcance de sampler — Iteración 2.97
+
+El barrido completo fijado por hash cuenta 30 callers directos a `0x404ad0`. Inicialización establece WRAP; callbacks SpriteEx y los grupos de escena revisados aplican CLAMP solo en el pase y restauran U/V a WRAP. El draw de jugador no cambia el sampler localmente. Sigue pendiente observar orden dinámico y capturar visualmente los ocho PAT extremos; el intento de inspección UI se detuvo al fallar el runtime Computer Use antes de abrir el juego. Ver [ITERATION197.md](ITERATION197.md).
+
+## Build anterior — 17 octubre 2026
+
+El VPK interactivo vigente es [Touhou123Vita-latest.vpk](../artifacts/Touhou123Vita-latest.vpk), 92,330 bytes, SHA-256 `a84133ecc36ef2ba19505a4bd7e5fe8c577c283d44152538b75e9825768c6c7b`. Vita3K SDL confirmó el propio hash: schema46/600 frames, regresión general, BG33, Suwako 418 y ciclo Remilia. Ver [ITERATION162.md](ITERATION162.md).
+
+El runtime emite 25 trails 801/seq.1 además del objeto raíz; después de retirarse el padre al tick 73, quedan seis secundarios activos con edades y desplazamientos cotejados con la fixture x86. La prueba integral sigue controlada: replay Sanae compatible estáticamente con el ejecutable 2009 (`0x100c8`) pero sin reproducción real; efectos visuales de spell aún simulados; faltan round completo, otras rutas especiales, composición BG33 en combate y mecánicas de todos los escenarios. Los DAT originales siguen externos al VPK. Ver [ITERATION157.md](ITERATION157.md), [ITERATION158.md](ITERATION158.md) e [ITERATION159.md](ITERATION159.md).
+
+La build del runtime Alice de la Iteración 2.26, `artifacts/Touhou123Vita-current.vpk`, sigue en `8368849683ba22301bd69e25d6cc273d4fc056ee9b23d44d04ce744122881340`. La corrida diagnóstica más reciente usa `artifacts/Touhou123Vita-bc-probe-next.vpk` (SHA-256 `0339fb5e6e16c955b31fc22d1295ca1eb3516d84d308291e0cbc5b4c00893e02`): Vita3K SDL pasó schema31/600 frames, conserva PAT/sprites/tarjetas 20/20, BG34 y skills 102/103/104/107. A natural alcanza 20/20; la sonda B registra 15/20 (`0x0EBBBE`) y C 15/20 (`0x0BF9B7`). La orientación relativa correcta del jugador de prueba y la ventana aérea ampliada no cambiaron estos impactos. Esta matriz solo verifica ataques directos u objetos reconocidos por la sonda; no cuenta especiales por motion command ni daño por flags sin cajas PAT. Los resultados B/C siguen siendo diagnósticos, no un gate de paridad. Este VPK contiene solo la demo runtime, sin la instrumentación x86 de análisis.
+
+## Hit-confirm x86 de Suika 521/526 — Iteración 2.30
+
+El resolver de dos jugadores del PE confirma overlap y aplica la respuesta especial de Suika: acción 521/seq.1/frame0 reduce 533 HP desde un PAT de 400; acción 526/seq.0/frame7 reduce 666 HP desde un PAT de 500. Ambas pasan a reacción 74 y retornan sin error. Control Remilia conserva 200 de daño. Los multiplicadores condicionales de los flags PAT de Suika quedaron inicializados a 1.0 en el fixture. El efecto todavía es sintético y la corrida no usa input/replay natural. Suite enfocada 6/6; suite completa pendiente. Sin cambios en runtime/VPK. Ver [ITERATION130.md](ITERATION130.md) y [probe de hit-confirm](../tools/x86_player_pair_hit_probe.py).
+
+## Spawn e impacto x86 de Suika 623C/531 — Iteración 2.31
+
+El constructor completo `PlayerSuika` retorna; acción 531 solicita 821, y el update padre completa 40 ticks. La factory y dispatcher originales cargan 821/seq.0 y PAT de daño 800; el hijo está activo al primer update y se retira tras 27 ticks. Contra Remilia 602/seq.0/frame0, la geometría y fase `0x47ce20` confirman contacto; el PE escribe HP 1000→200 y fija el temporizador de reacción `+0x194=20` (`+0x196` hitstop=0). Sin `Player+0x72c` (`spellBgTextures`), el update de Remilia termina por CRT `0xC000000D`; con deque y handles centinela sintéticos, avanza las ocho poses PAT de 602 durante 50 ticks y solicita el fondo de hechizo 6/timer 2. En tick 50 selecciona acción 0; tick 51 queda sin PAT y termina en EIP nulo. Es evidencia de lógica CPU hasta la transición, sin texturas/render, replay natural o round completo. Reporte `artifacts/x86-suika-action-setter-current.json`; runtime Vita/VPK sin cambios. Ver [ITERATION131.md](ITERATION131.md).
+
+## Dispatch x86 de Suika 623C — Iteración 2.29
+
+La sonda ejecuta el bloque original del handler a partir de `0x60a45c` con el bit 623C inyectado. Confirma selección 531/526/521 al variar niveles y rechazo cuando los tres move-locks devuelven `0xffff`. Una segunda sonda ejecuta setter/initializer/lookup PAT y hasta 40 updates originales: acción 521 alcanza PAT seq.1/pose0 con daño 400 y una caja en tick12, y seq.3/pose0 con daño 600 en tick30. Los casos 526 y 531 paran antes del impacto en la fixture parcial. El constructor especializado tropieza con el registro SEH de Win32 (`FS:[0]`), que Unicorn no modela; el probe de setter registra esos campos parciales como evidencia no completa. La nueva Iteración 2.30 ya valida 521/526 contra el resolver x86 con constructor base controlado. Siguen pendientes input/matcher natural y la ruta 531. Ver [ITERATION129.md](ITERATION129.md), [dispatch probe](../tools/x86_suika_623c_dispatch_probe.py) y [setter/update probe](../tools/x86_suika_action_setter_probe.py).
+
+## Análisis actual — Iteración 2.28
+
+Se resumieron estáticamente los 20 handlers del ejecutable de referencia: 713 callsites de `useSkill` con primer argumento inmediato 400–599, 682 parejas handler/acción y pruebas de bits de input en los 20 CFGs. La firma y el probe x86 confirman que ese primer argumento se entrega a `setAction`, por lo que es el action ID PAT. El análisis no modifica el runtime ni genera VPK. Extracción y pruebas relacionadas de dispatch pasan 9/9. Próximo: ejecutar los gates de Suika 623C y seguir pose/objeto, luego producir el comando con el input original. Ver [ITERATION128.md](ITERATION128.md); el TSV local se genera con [summarize_character_skill_dispatch.py](../tools/summarize_character_skill_dispatch.py).
+
+## Iteración 2.27: orientación y ventana de las sondas B/C
+
+El análisis de `src/vita_main.c` encontró que la prueba de roster movía siempre al jugador 0 con `IN_RIGHT`, incluso cuando cargar un personaje en el slot 0 dejaba su rival real a la izquierda. Se actualizó la aproximación para seguir `face`, se reflejaron las direcciones por ruta, y se amplió de 5 a 11 los offsets de airtime para ataques aéreos. Ahora el rival se mantiene en una posición neutral de combate a distancia fija.
+
+La build fresca aprobó Vita3K SDL schema31/600 frames. B/C quedó igual respecto de los impactos observados (`0x0EBBBE`/`0x0BF9B7`), así que la orientación y el muestreo temporal no explican las rutas restantes. Las 20 carpetas de PAT, sprites y tarjetas continúan disponibles; BG34 y las regresiones de habilidades pasaron. SHA-256: `0339fb5e6e16c955b31fc22d1295ca1eb3516d84d308291e0cbc5b4c00893e02`.
+
+Alcance: estos bits no son la cobertura completa de B/C del juego. El probe intenta acciones con daño/cajas PAT directas u objetos cubiertos; handlers originales tienen además gates de input, nivel de skill, estado y rutas por flags. Por ejemplo, el handler Suika `0x609dc0` separa acciones dash de las ramas de comandos `623B/623C` (`Player+0x7c8`, bits `0x200/0x400`), con gates de nivel. No se debe tratar una ausencia en esta sonda como prueba de que el personaje carece de ataque B/C. La selección exacta 408/418 y las rutas especiales siguen pendientes de ejecutar con layout/input original y contrastar contra replay o juego PC.
+
+## Iteración 2.26: secuencia de objeto Alice 66B y un impacto por actualización
+
+El PE original para Alice 849 confirma la cadena no-loop seq.19→20 y luego seq.21 (secuencia de ataque loop). La seq.20 incluye una pose con caja/daño 150 y seq.21 tiene cajas de 450. El runtime ahora conserva la tabla PAT completa para los objetos, avanza entre secuencias y mantiene vivo el objeto lo suficiente para alcanzar el golpe; al detectar contacto detiene el barrido de las demás cajas para no aplicar dos veces el daño de una misma pose.
+
+La sonda natural de Vita3K registró Alice 66B (408) y 66C (418): B mejoró de 14/20 a 15/20 (`0x0EBBBE`) y C de 15/20 a 16/20 (`0x0BF9BF`) en aquella corrida. Las 45 pruebas Python pasaron; VitaSDK compiló `src/fight.c` y `tests/fight_tests.c` con `-Wall -Wextra -Werror`. El contrato C no se ejecutó como binario host porque CMake/WSL no están disponibles. Hash VPK de esa etapa: `8368849683ba22301bd69e25d6cc273d4fc056ee9b23d44d04ce744122881340`. La Iteración 2.27 corrigió orientación de la sonda y amplió su muestreo aéreo, pero produjo B/C `0x0EBBBE/0x0BF9B7`; no cambió el runtime de combate. Ver [ITERATION126.md](ITERATION126.md) y [ITERATION127.md](ITERATION127.md).
+
+## Iteración 2.25: el resolver de dos Players completa daño y reacción
+
+`tools/x86_player_pair_hit_probe.py` ejecuta el resolver original `0x47c770` con dos Players y geometría PAT Remilia 320/frame3 contra 321/frame0. El PE confirma `CollisionType=1`, aplica 200 de daño (1000→800), solicita el efecto PAT `0xC9` y completa la reacción original del defensor: acción 50, seq.0 y tres poses, sin error de ejecución. La transición requiere enlazar el vtable `PlayerRemilia` (`0x85D284`) y resolver por acción el PAT de reacción; el administrador de efectos permanece simulado y no hay entrada/replay ni render. Pruebas enfocadas: 6/6 para el probe de dos Players y regresiones Remilia 412. La suite host completa no se pudo iniciar en este entorno porque `cmake` no está en PATH. Ver [ITERATION125.md](ITERATION125.md).
+
+## Iteración 2.24: hit-confirm repetible entre dos Players
+
+El probe `tools/x86_player_pair_hit_probe.py` reproduce geometría PAT de Remilia 320/frame3 contra 321/frame0, `CollisionType=1`, incremento de combo, petición de efecto `0xC9` y pérdida real de 200 HP (1000→800 en `Player+0x184`). La condición necesaria era enlazar los bloques de ataque/defensa leídos por `0x463f50`; sin ellos, el daño calculado era cero. La respuesta posterior todavía termina en `EIP=0` durante la transición/limpieza; la fixture de efecto es sintética y no conduce input/replay. El contador contextual `+0x7c+team*4` no cambia. Suites: Remilia 412 5/5 y combate de dos Players 1/1. Sin cambios al VPK/runtime. Ver [ITERATION123.md](ITERATION123.md) y [ITERATION124.md](ITERATION124.md).
 
 ## Iteración 2.08: callsite Remilia 412 → objeto 801
 
@@ -696,7 +1322,7 @@ El oracle encadena el handler original del padre, ambos custom data, initializer
 
 ## Iteración 1.68: regresión integral Vita3K
 
-El checkout actual compiló un VPK auto-test y pasó una corrida fresca Vita3K aislada de 600 frames (schema28), SHA-256 11d0c4df4f35a27edd275ef0bb96ed4f8751df26ba9a68c3576700ad385873c3. Reportó roster PAT/combate/cartas 20/20, DAT 31, 148 texturas, BG34 capas/tiles/objetos, rutas dash, Suwako 418 diez spawns y skills Reimu 540/565/505 con los daños esperados por los probes. Es una regresión de la versión integrada; no incluye el cambio de oracle 808, que aún no está portado. Reporte rtifacts/vita3k-result.json; capturas rtifacts/screenshots/. Ver [ITERATION68.md](ITERATION68.md).
+El checkout actual compiló un VPK auto-test y pasó una corrida fresca Vita3K aislada de 600 frames (schema28), SHA-256 11d0c4df4f35a27edd275ef0bb96ed4f8751df26ba9a68c3576700ad385873c3. Reportó roster PAT/combate/cartas 20/20, DAT 31, 148 texturas, BG34 capas/tiles/objetos, rutas dash, Suwako 418 diez spawns y skills Reimu 540/565/505 con los daños esperados por los probes. Es una regresión de la versión integrada; no incluye el cambio de oracle 808, que aún no está portado. Reporte artifacts/vita3k-result.json; capturas artifacts/screenshots/. Ver [ITERATION68.md](ITERATION68.md).
 
 ## Iteración 1.69: cadence corregido del objeto Suwako 808
 
@@ -704,7 +1330,7 @@ La revisión del handler seq.1 mostró que solo integra posición al alcanzar su
 
 ## Iteración 1.70: secuencia radial del objeto 808
 
-El selector de secuencia viene de customData[2] (contrato de initializeAction 0799000 documentado en ITERATION34), no del rg4 independiente de la fábrica. Los custom data del split terminan en 1; la ejecución Unicorn del initializer original confirma +0x13e=1 y el vector radial. La traza 24 callbacks se regeneró. El reloj externo, factory virtual, colisión/ciclo de vida siguen controlados/no probados end-to-end. Suite enfocada 7/7; el VPK sigue sin cambio. Ver [ITERATION70.md](ITERATION70.md).
+El selector de secuencia viene de customData[2] (contrato de initializeAction 0799000 documentado en ITERATION34), no del arg4 independiente de la fábrica. Los custom data del split terminan en 1; la ejecución Unicorn del initializer original confirma +0x13e=1 y el vector radial. La traza 24 callbacks se regeneró. El reloj externo, factory virtual, colisión/ciclo de vida siguen controlados/no probados end-to-end. Suite enfocada 7/7; el VPK sigue sin cambio. Ver [ITERATION70.md](ITERATION70.md).
 
 ## Iteración 1.71: alpha gobierna la integración del objeto 808
 
@@ -724,3 +1350,45 @@ El factory `784020` obtiene un objeto de `783de0/783ba0`, ejecuta el constructor
 Se ejecutó la cadena x86 original `setAction→setSequence→setPose→initializeAction` con el mapa de acción/seq y dos poses sintéticos. TH123 selecciona action 808, secuencia 1 y su nodo de frame 0, y calcula velocidad radial `(-4.10424, 11.27631)`. Los inicializadores conservan el color: con un centinela RGBA `d4c3b2a1`, incluido alpha `0xa1`, permanece idéntico; desde almacenamiento limpio queda alpha 0. Esto prueba que el valor inicial depende del almacenamiento/pool y no del initializer. Factory, allocator, renderer, daño/colisión y vida aún no están ejecutados. Oracle reproducible: `tools/x86_suwako_808_action_probe.py`, reporte local `artifacts/x86-suwako-808-action-probe.json`, regresiones `tests/test_suwako_808_action_probe.py`. Ver [ITERATION72.md](ITERATION72.md).
 
 Corrección de Iteración 1.72: la ejecución con ctor real `0x783a70` pasó y reveló una escritura transitiva que el barrido superficial no capturó. La inicialización del sprite `438bb0` establece color `0xffffffff` (alpha 255) antes de `setAction`; el initializer no lo cambia. El harness ya ejecuta ese constructor y su allocator cdecl de nodos (dos bloques de 12 bytes controlados), y se regeneró el JSON. No confundir esta confirmación del ctor con el factory completo: aún faltan manager/handles y el loop de actualización/colisión/vida. Ver [ITERATION72.md](ITERATION72.md).
+
+## Iteración 2.53: respuesta medida de Remilia 801 (corregida en 2.55)
+
+El hit x86 resta 120 HP y escribe en el proyectil `+0x194=3` desde su prioridad 4, copia `PAT hitstop=0` a su `+0x196` y marca `+0x190=9`. El defensor ya tenía `+0x194=20`; no lo escribe esta respuesta. Ver la traza exacta y la aclaración de orientación en [ITERATION153.md](ITERATION153.md).
+
+## Iteración 2.54: campo del defensor observado en update derivado
+
+El campo `+0x194=20` del defensor se observó antes y después de 50 llamadas directas al update; no era un temporizador confirmado por el impacto. La respuesta de 801 escribe `+0x194=3` en el proyectil. Ver [ITERATION154.md](ITERATION154.md) y la corrección [ITERATION153.md](ITERATION153.md).
+
+## Iteración 2.55: Remilia 801 continúa tras conectar
+
+La respuesta de `0x47b660` fija campos del proyectil (prioridad de reacción 3, hitstop PAT 0 y estado `+0x190=9`), no el `+0x194=20` que ya tenía el defensor. El objeto sigue activo (`+0x34c=1`) al salir de la respuesta. En Vita el 801 conserva su instancia, avanza PAT y no repite daño; el gate ahora comprueba un impacto de 120 HP y la animación en el cuadro siguiente con recursos reales. Probes x86 6/6; VitaSDK compila el fixture; Vita3K SDL pasa 600 frames/schema46, regresión y BG33. Build de Vita usa `-Os` por defecto porque `-O3` falló en empaquetado SELF; FPS aún no comparados. VPK SHA-256 `158166ff94bdd7eec3ceb10d7646578aef009a8a2d80c687ba6cf4f9eec1c031`. Manager x86 posterior al hit y ciclo completo aún pendientes. Ver [ITERATION155.md](ITERATION155.md).
+
+## Iteración 2.85: objetivo vertical derivado del zoom actual
+
+Se portó el target Y de `FUN_00428e20` como función explícita de altura y zoom actual, incluyendo ramas `minY>270` y límite inferior `-420`. El VPK pasó Vita3K 600 cuadros/schema46 con gates en 1; suite 108/108. No equivale al easing vertical ni a integración de cámara en la pelea. VPK y fórmula: [ITERATION185.md](ITERATION185.md).
+
+## Corrección de cámara vertical — Iteración 2.84
+
+La fórmula vertical `max(420,minY)` reportada en Iteración 2.81 y repetida en el resumen 2.83 provenía de un estado artificial de zoom, no del constructor. Se ejecutó `FUN_00429560` completo: target Y y cámara Y dependen del zoom inicial, la doble evaluación de target y el update. El helper stateless ya no expone `center_y`. Oracle constructor con tres fixtures, suite 107/107 y VPK auto-test 600 cuadros/schema46 aprobados. Detalle/corrección: [ITERATION184.md](ITERATION184.md).
+
+## Iteración 2.83: easing horizontal de cámara
+
+`FUN_00429040` se contrastó con movimiento horizontal `delta/30 ± 5`, snap al objetivo y límites `[320/zoom,1280-320/zoom]` usando el zoom nuevo del cuadro. El helper X se agregó al core y al gate; Vita3K pasó 600 cuadros/schema46 y regresión integral, suite 106/106. Sigue pendiente eje Y, constructor completo e integración en el render de pelea. VPK y evidencia en [ITERATION183.md](ITERATION183.md).
+
+## Iteración 2.82: easing asimétrico de zoom
+
+`FUN_00429040` confirma pasos de zoom `/5 - 0.002` al alejar y `/80 + 0.002` al acercar, con snap al objetivo y piso 0.5. El helper está en el core y Vita3K SDL pasó 600 cuadros con gate general y de cámara en 1; suite 105/105. El estado de la cámara aún no está conectado a la pelea; interpolación X/Y y overrides siguen pendientes. Ver [ITERATION182.md](ITERATION182.md).
+
+## Iteración 2.81: centro automático de cámara derivado del PE
+
+El oracle captura los campos de salida de `FUN_00428e20` y confirma centro X `clamp((x0+x1)/2, 320/zoom, 960)`, Y `max(420,min(y0,y1))` en modo automático. Se portaron centro y zoom al helper y el autotest pasó Vita3K a 600 cuadros/schema46 con gate general y de cámara en 1. La suite Python pasó 104/104. Los overrides manuales y la transición temporal `FUN_00429040` se midieron parcialmente pero no están portados; el helper todavía no está integrado en el combate. VPKs y hashes: [ITERATION181.md](ITERATION181.md).
+
+## Iteración 2.80: zoom automático derivado de la cámara original
+
+Un oracle Unicorn ejecuta `FUN_00428e20` del PE fijado por hash y confirma, con cinco pares controlados, la regla de zoom `max(0.5, 640 / sqrt(max(640, abs(dx)+80)^2 + (abs(dy)*1.5)^2))`. Se implementó `t123_stage_camera_pair_target`; las pruebas enfocadas pasaron 4/4. VPK auto-test schema46 completó 600 cuadros en Vita3K SDL con `regression_gate=1` y `stage_camera_pair_contract=1`. El interactivo comparte exactamente el mismo eboot con el probado. No está resuelto ni conectado el centro de cámara, el easing/modo manual ni el encuadre de combate. Detalle y hashes en [ITERATION180.md](ITERATION180.md).
+
+## Iteración 2.67: replay verificado contra el ejecutable original
+- `inspect_replay_layout.py` consume los 67.881 bytes del replay suministrado usando su ejecutable compatible; se documentan hash/perfil, tres registros y tamaños de vectores. El ejecutable `original/th123.exe` del checkout no es compatible con ese replay y no debe usarse para esa prueba.
+- Es evidencia del loader/estructura, no playback por frame. La cadence/semántica del vector y su conexión al combate quedan sin probar; no se modifica runtime ni VPK.
+- Se documenta `psp2-tooling` como candidato de la fase M7 para Vita física, sujeto a Linux, hardware, firmware y módulos necesarios; no aporta al loop Vita3K actual.
+- Ver [ITERATION167.md](ITERATION167.md).

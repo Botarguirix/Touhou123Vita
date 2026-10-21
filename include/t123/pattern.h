@@ -6,7 +6,8 @@
 #define T123_POSE_EFFECT_BYTES 30
 typedef struct {int32_t left,up,right,down;} T123Box;
 typedef struct {
- uint16_t image,tx,ty,tw,th,duration,damage,chip,hit_stop,enemy_stun,block_stun;
+ uint16_t image,duration,damage,chip,hit_stop,enemy_stun,block_stun;
+ int16_t tx,ty,tw,th;
  int16_t ox,oy;
  uint32_t flags,attack_flags;
  unsigned collision_count,hurt_count,attack_count;

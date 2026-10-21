@@ -56,6 +56,17 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(report["child_box_sync"]["hit_boxes"],
                          [[368, -395, 438, -325]])
         self.assertEqual(len(report["child_updates"]), 55)
+        # Executed PE world coordinates, not the old demo's half scale.
+        self.assertEqual(report["child_updates"][0]["position"],
+                         [391.72369384765625, 364.104248046875])
+        for row in report["child_updates"]:
+            steps = min(row["tick"], 72)
+            self.assertAlmostEqual(row["position"][0],
+                                   403.0 - steps * 739004 / 65536,
+                                   delta=0.002)
+            self.assertAlmostEqual(row["position"][1],
+                                   360.0 + steps * 268976 / 65536,
+                                   delta=0.002)
         self.assertIsNone(report["child_update_error"])
         self.assertEqual([row["contact"] for row in report["collision_matrix"]],
                          [True, True, True, False, False, False, False])
@@ -85,8 +96,8 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         report = run_case(self.dat_dir, 320.0, 180.0, 1, 1,
                           real_factory=True, resolve_damage=True)
         pair = report["pair_dispatch"]
-        self.assertIn("0x0", pair["error"])
-        self.assertTrue(pair["reached_projectile_filter"])
+        self.assertIsNone(pair["error"])
+        self.assertFalse(pair["reached_projectile_filter"])
         self.assertTrue(pair["reached_character_resolver"])
         self.assertEqual(pair["defender_pat_action"], 602)
         self.assertEqual((pair["defender_pat_sequence"], pair["defender_pat_frame"]), (0, 0))
@@ -135,10 +146,55 @@ class Remilia412SpawnProbeTest(unittest.TestCase):
         self.assertEqual(response["attacker_frame_damage_field"], 120)
         self.assertEqual(response["attacker_frame_flags"], "0x1000000")
         self.assertEqual(response["attacker_attack_flags"], "0x41040e")
-        self.assertEqual(response["attacker_cooldown_190"], 9)
-        self.assertTrue(response["failure_after_damage"])
-        self.assertEqual(response["external_callback_pointer"], "0x0")
-        self.assertIn("0x479cb0", response["trace"])
+        self.assertEqual(response["projectile_field_190_after"], 9)
+        self.assertEqual(response["defender_field_194_after"], 20)
+        self.assertEqual(response["defender_field_196_after"], 0)
+        field_trace = response["hit_response_field_trace"]
+        write_before = next(row for row in field_trace if row["eip"] == "0x47b688")
+        write_after = next(row for row in field_trace if row["eip"] == "0x47b6a9")
+        self.assertEqual(write_before["esi"], write_after["esi"])
+        self.assertEqual(write_after["esi_reaction_194"],
+                         write_before["esi_priority_1bc"] - 1)
+        self.assertEqual(write_after["esi_reaction_194"], 3)
+        self.assertEqual(write_after["esi_hitstop_196"],
+                         response["attacker_frame_hitstop_field"])
+        self.assertEqual(response["projectile_reaction_194"], 3)
+        self.assertEqual(response["projectile_hitstop_196"],
+                         response["attacker_frame_hitstop_field"])
+        self.assertEqual(write_before["ebx_reaction_194"], 20)
+        self.assertEqual(write_before["ebx_priority_1bc"], 20)
+        self.assertFalse(response["failure_after_damage"])
+        self.assertIsNone(response["external_callback_pointer"])
+        self.assertIn("0x47b680", [row["eip"] for row in response["hit_response_field_trace"]])
+        self.assertEqual(len(report["effect_manager"]["requests"]), 1)
+        self.assertEqual(report["rep_movsd_contexts"], [])
+        self.assertEqual(report["large_memory_copy_contexts"], [])
+        self.assertEqual(report["large_buffer_assignments"], [])
+        self.assertEqual(report["large_range_copies"], [])
+        manager = report["manager_tick"]
+        self.assertEqual(len(manager["ticks"]), 73)
+        self.assertTrue(all(tick["completed"] for tick in manager["ticks"]))
+        self.assertEqual((manager["ticks"][0]["action"],
+                          manager["ticks"][0]["pose"]), (801, 1))
+        self.assertEqual((manager["last"]["field_34c"],
+                          manager["last"]["action"],
+                          manager["last"]["pose"]), (0, 801, 12))
+        self.assertTrue(manager["object_retired"])
+        self.assertFalse(manager["original_child_still_linked"])
+        self.assertEqual(manager["live_node_count"], 6)
+        self.assertEqual(manager["live_node_actions"], ["801"] * 6)
+        live_objects = manager["live_node_details"]
+        self.assertEqual([obj["update_counter_144"] for obj in live_objects],
+                         [16, 13, 10, 7, 4, 1])
+        self.assertTrue(all(obj["sequence"] == 1 and obj["pose_count"] == 8
+                            and obj["selected_frame_duration"] == 4
+                            and obj["mode_190"] == 0 and obj["field_34c"] == 1
+                            for obj in live_objects))
+        for previous, current in zip(live_objects, live_objects[1:]):
+            self.assertAlmostEqual(current["x"] - previous["x"], -33.8289, places=3)
+            self.assertAlmostEqual(current["y"] - previous["y"], 12.3127, places=3)
+        self.assertEqual(len(report["factory_returns"]), 25)
+        self.assertIsNone(report["child_update_error"])
 
     def test_original_player_update_advances_pat_action_5aaa(self):
         report = run_case(self.dat_dir, 320.0, 180.0, 1, 1,

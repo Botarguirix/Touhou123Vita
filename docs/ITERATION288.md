@@ -1,0 +1,9 @@
+# Iteración 2.188: retícula base BG36 integrada y validada en Vita3K
+
+La reconstrucción implementa las 30 anclas de tiles del constructor PE `0x46fe40` para BG36: `x=700−256·col`, `y=946−256·fila`, geometría 256×256 y filas de recurso invertidas como en los nombres del DAT. El renderer del combate carga/dibuja los 25 tiles disponibles; los cinco ausentes permanecen nulos. La máscara de slots presentes es `0x1c7bffff`. Los cuatro auxiliares se dibujan sobre la base y avanzan un tick de scroll en la ventana de prueba.
+
+El VPK autotest final (`Touhou123Vita-current-auto.vpk`) mide 108,392 bytes, SHA-256 `DB2E73029E052F39B40F5DCA84B620AEC2CF0CB20043A328B69B7AD12F74E95D`. Vita3K SDL corrió el paquete exacto durante 600 frames: `status=passed`, `regression_gate=1`, base 25/25, máscara 477888511, auxiliares 4/4, draws 4, updates 1, máscara auxiliar 15, y `battle_bg36_capture_seen=1`. El hash del reporte coincide con el paquete. El VPK interactivo recién reconstruido mide 108,226 bytes, SHA-256 `239B313C0FFCB31447F419DCD4263C1FB96E6B44A2C6EF9D32E55DA106A7D5BE`.
+
+La suite Python completa pasa 139/139; contrato BG36 3/3 y `git diff --check` pasan. Captura: [fight-bg36.bmp](../artifacts/screenshots/fight-bg36.bmp). La captura valida que el renderer produce imagen, pero muestra composición incompleta: persisten áreas de BG33 bajo BG36, y escala/orden/paridad con PC siguen pendientes. El gate automatizado usa BG36 solo brevemente; el selector interactivo todavía mantiene BG33. No se aumenta el porcentaje global (27%), ya que aún no es un escenario completo ni hay comparación visual con el original.
+
+Siguiente: determinar por PE y referencia PC el orden de capas, límites/transparencia y fase del renderer BG36; integrar el stage completo con selector interactivo. Luego repetir paridad de cámara y continuar con los otros escenarios.

@@ -50,7 +50,7 @@ int t123_pattern_decode(const unsigned char *data,size_t size,T123Pattern *p){
   if(!m->poses||!durations)goto fail;
   for(uint32_t j=0;j<frames;j++){
    T123Pose *f=&m->poses[j];const unsigned char *v=take(&r,19);if(!v)goto fail;
-   f->image=get16(v);f->tx=get16(v+4);f->ty=get16(v+6);f->tw=get16(v+8);f->th=get16(v+10);f->ox=(int16_t)get16(v+12);f->oy=(int16_t)get16(v+14);f->duration=get16(v+16);durations[j]=f->duration;
+   f->image=get16(v);f->tx=(int16_t)get16(v+4);f->ty=(int16_t)get16(v+6);f->tw=(int16_t)get16(v+8);f->th=(int16_t)get16(v+10);f->ox=(int16_t)get16(v+12);f->oy=(int16_t)get16(v+14);f->duration=get16(v+16);durations[j]=f->duration;
    if(f->image>=images||v[18]>2)goto fail;
    if(v[18]==2 && !take(&r,16))goto fail;
    v=take(&r,40);if(!v)goto fail;

@@ -1,0 +1,7 @@
+# Iteración 2.181: auditor de BG33 usa los 24 tiles que carga el PE
+
+La auditoría global aplicaba la convención 5×6 (30 nombres) a todos los escenarios de cuadrícula. El constructor x86 `0x473af0` de BG33 llama a `0x46f9c0`, reserva `0x18` (24) sprites base y recorre `uVar7 < 0x18`; forma los nombres en orden de cuatro filas por seis columnas. Después carga `0001.bmp` y `0002.bmp` como dos auxiliares. El renderer itera 30 slots, pero el constructor solo carga 24 bases; no se debe inferir que las seis restantes requieren archivos.
+
+`tools/audit_stage_resources.py` ahora espera 24 tiles base para BG33 y conserva 30 para las demás cuadrículas. La nueva aserción impide que la fila 5 aparezca como ausencia de recurso en ese stage. Se regeneraron `docs/STAGE_RESOURCE_AUDIT.tsv` y `artifacts/stage-resource-audit.json`: BG33 figura con 24/24 bases y 2/2 auxiliares; BG34, 30/30 y 64/64. BG36 tiene cinco nombres de cuadrícula ausentes en los DAT locales; Iteración 2.182 confirma que el loader PE los tolera como punteros nulos y omite su dibujo, aunque falta comparar la escena original para saber si esos huecos son intencionales. BG35 mantiene 0/30 en los manifiestos locales.
+
+Validación: auditor de recursos, oráculo PE/vtable BG33 y contrato del viewer Vita pasan 13/13. `git diff --check` pasa. Solo cambian el análisis/inventario; sin cambio de runtime ni VPK. La cobertura visual y mecánica completa de BG33 y del resto de escenarios sigue pendiente.

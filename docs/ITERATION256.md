@@ -1,0 +1,11 @@
+# Iteración 2.156: acción 98 requiere fin de secuencia PAT
+
+Se amplió a 120 ticks el diagnóstico que, después de la corrida auténtica de 300 ticks, altera solo el bit loop del nodo seq.2 de action97 (1→0). La corrida principal permanece intacta: reacción 74→97, caída y 300 ticks estables en el seq.2 cíclico. En el diagnóstico artificial, el contador de secuencia avanza hasta 23 y visita varias veces los nodos PAT 0/1/2/3, pero el personaje sigue en action97 y no solicita action98. Esto confirma que cambiar ese bit por sí solo no genera recuperación; la alteración no representa gameplay natural.
+
+Además, diez entradas simultáneas (neutral, direcciones, A/B/C/D y abajo+C) se envían por el productor `0x46d5d0` y el `handleInputs` original desde el mismo estado posterior al impacto. En esa prueba de un tick cada entrada queda reflejada en `KeyInput`, pero ninguna solicita cambio de acción/secuencia. Esto no descarta comandos con varios ticks ni callbacks del round.
+
+El flujo x86 explica una condición adicional. En `0x4851ee`, el handler de action97 consulta `0x438c60`; si devuelve true, solicita action98 mediante el setter virtual en `0x4851f9`. `0x438c60` avanza el timer/subframe y consulta los callbacks PAT de Suika. El callback `0x464b70` reporta fin del frame/loop cuando la pose vuelve a cero y el nodo no tiene loop; el avance de secuencia `0x464bf0` devuelve terminal cuando el nodo PAT no tiene enlace previo (`+0x18 == 0`). La fixture artificial recorrió nodos sin alcanzar un estado terminal, así que no demuestra el levantamiento ni su ausencia en el juego completo. La siguiente sonda debe reconstruir el grafo efectivo de action97 y conectar el callback/estado de combate que determina cuándo se alcanza esa condición.
+
+Verificación: `python tools/x86_suika_constructed_handler_probe.py` regeneró el reporte y completó la sonda sin accesos inválidos; los 120 ticks diagnósticos terminaron en action97, secuencia 23 y cero solicitudes de setter de acción. Las diez entradas y la cadena de 120 ticks quedan ahora fijadas por la prueba focal. No se modificó el runtime Vita ni se reconstruyó el VPK.
+
+Evidencia: [reporte x86](../artifacts/x86-suika-constructed-handler.json), [sonda](../tools/x86_suika_constructed_handler_probe.py), [prueba](../tests/test_x86_suika_constructed_handler_probe.py), [iteración anterior](ITERATION255.md).

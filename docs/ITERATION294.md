@@ -1,0 +1,7 @@
+# Iteración 2.194: scroll de nubes BG36 comprobado durante combate
+
+El renderer PE vincula `+0x68` y `+0x6c` a los slots auxiliares 2/3 (`clowd_l` y `clowd_s`), dibujados antes de la cuadrícula; los torii son slots 0/1 y se dibujan después. La implementación y los contratos locales ya reflejaban esa asignación. Esta iteración cierra una brecha del gate: `tools/vita3k-test.ps1` ahora calcula desde `battle_bg36_updates` las posiciones esperadas usando iniciales −400/−300, velocidades 1.5/1.0 y wraps PE −1200/−800 → 800, y exige que el reporte de combate coincida con tolerancia 0.01.
+
+Validación: tests BG36/BG37/BG38 7/7; VPK interactivo 108,598 bytes, SHA-256 `fef364b7eca5b878e872764f14a6c9a767056c077df6daaf029218448ccf16f4`, `check_vpk.py` 7 entradas sin errores/advertencias; VPK auto 108,764 bytes, SHA-256 `e51a14a26d816133641acefcee6ae74bf6103f38813e511e7c7adc1c6a67534c`, `check_vpk.py` 8 entradas sin errores/advertencias. Vita3K SDL schema46 pasó 600 frames, gate general 1; en la pelea tuvo 1 update y reportó `clowd_l_x=-401.5`, `clowd_s_x=-301.0`, exactamente los valores esperados; 25 tiles base, máscara `0x3ffff79c`, 4 auxiliares y stage selector interactivo.
+
+Esto demuestra que la lógica de scroll del port coincide con la rutina PE observada y se ejecuta en la pelea. No prueba aún paridad de composición: hace falta comparar el mismo frame/replay en PC para fijar cámara, zoom, origen y escala. El porcentaje global se conserva en 27% porque cerrar una comprobación de subcomponente no completa un escenario.

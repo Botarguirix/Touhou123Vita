@@ -137,7 +137,7 @@ int main(int argc,char **argv){
    for(uint32_t k=0;k<p.move_count;k++){
     const T123Move *m=&p.moves[k];
     for(unsigned q=0;q<m->sequence.count;q++){
-     const T123Pose *v=&m->poses[q];printf("%s\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%s\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t0x%08x\t",name,m->action,m->index,m->sequence.loop,m->move_lock,m->action_lock,q,v->image,p.images[v->image],v->tx,v->ty,v->tw,v->th,v->duration,v->damage,v->chip,v->enemy_stun,v->block_stun,v->attack_flags);
+     const T123Pose *v=&m->poses[q];printf("%s\t%d\t%u\t%u\t%u\t%u\t%u\t%u\t%s\t%d\t%d\t%d\t%d\t%u\t%u\t%u\t%u\t%u\t0x%08x\t",name,m->action,m->index,m->sequence.loop,m->move_lock,m->action_lock,q,v->image,p.images[v->image],v->tx,v->ty,v->tw,v->th,v->duration,v->damage,v->chip,v->enemy_stun,v->block_stun,v->attack_flags);
      if(!v->attack_count)putchar('-');
      for(unsigned z=0;z<v->attack_count;z++){const T123Box *box=&v->attack[z];if(z)putchar(';');printf("%d,%d,%d,%d",box->left,box->up,box->right,box->down);}
      putchar('\n');

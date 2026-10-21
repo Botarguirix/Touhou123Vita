@@ -149,14 +149,14 @@ def pose_metadata(pat: bytes, action_id: int, sequence_id: int) -> tuple[list[st
         for frame in range(frame_count):
             raw = reader.take(19)
             image = struct.unpack_from("<H", raw)[0]
-            tx, ty, width, height = struct.unpack_from("<4H", raw, 4)
+            tx, ty = struct.unpack_from("<2h", raw, 4)
+            width, height = struct.unpack_from("<2h", raw, 8)
             ox, oy = struct.unpack_from("<2h", raw, 12)
             duration = struct.unpack_from("<H", raw, 16)[0]
             flags = raw[18]
             if image >= len(images) or flags > 2:
                 raise ValueError(f"invalid pose image/flags in action {action}/{sequence}/{frame}")
-            if flags == 2:
-                reader.take(16)
+            special_data = reader.take(16) if flags == 2 else b""
             reader.take(49)  # traits, explicit flags and attack flags
             reader.skip_boxes(False)
             reader.skip_boxes(False)
@@ -166,13 +166,15 @@ def pose_metadata(pat: bytes, action_id: int, sequence_id: int) -> tuple[list[st
                 found.append({
                     "frame": frame, "image": images[image], "tx": tx, "ty": ty,
                     "width": width, "height": height, "ox": ox, "oy": oy,
-                    "duration": duration,
+                    "duration": duration, "flags": flags,
+                    "special_data": special_data.hex(),
                 })
     return images, found
 
 
-def action_sequence_metadata(pat: bytes, action_id: int | None) -> list[dict[str, object]]:
-    """Return sequence/frame metadata for one PAT action, or all actions if None."""
+def action_sequence_metadata(pat: bytes, action_id: int | None, *,
+                             effective: bool = False) -> list[dict[str, object]]:
+    """Return PAT records, optionally applying the runtime's action replacement rule."""
     reader = Reader(pat)
     if reader.u8() != 5:
         raise ValueError("unsupported PAT version")
@@ -199,6 +201,14 @@ def action_sequence_metadata(pat: bytes, action_id: int | None) -> list[dict[str
             if record < 0:
                 raise ValueError(f"unknown PAT record {record}")
             action, sequence = record, 0
+            # The runtime decoder discards earlier records for a redefined
+            # action. Raw inventory remains the default; execution probes can
+            # request the effective view to mirror t123_pattern_decode.
+            if effective:
+                if action_id is None:
+                    result = [row for row in result if row.get("action") != action]
+                elif action_id == action:
+                    result.clear()
         reader.take(4)  # move lock and action lock
         loop_mode = reader.u8()
         frame_count = struct.unpack("<I", reader.take(4))[0]
@@ -208,12 +218,14 @@ def action_sequence_metadata(pat: bytes, action_id: int | None) -> list[dict[str
         for frame in range(frame_count):
             raw = reader.take(19)
             image = struct.unpack_from("<H", raw)[0]
+            tx, ty = struct.unpack_from("<2h", raw, 4)
+            width, height = struct.unpack_from("<2h", raw, 8)
+            ox, oy = struct.unpack_from("<2h", raw, 12)
             duration = struct.unpack_from("<H", raw, 16)[0]
             flags = raw[18]
             if image >= len(images) or flags > 2:
                 raise ValueError(f"invalid pose image/flags in action {action}/{sequence}/{frame}")
-            if flags == 2:
-                reader.take(16)
+            special_data = reader.take(16) if flags == 2 else b""
             traits = reader.take(40)
             damage = struct.unpack_from("<H", traits)[0]
             chip = struct.unpack_from("<H", traits, 4)[0]
@@ -240,6 +252,12 @@ def action_sequence_metadata(pat: bytes, action_id: int | None) -> list[dict[str
             attack_boxes = read_boxes(True)
             reader.take(30)
             frames.append({"frame": frame, "image": images[image], "duration": duration,
+                           "tx": tx, "ty": ty, "width": width, "height": height,
+                           "ox": ox, "oy": oy, "flags": flags,
+                           "special_data": special_data.hex(),
+                           # Preserve the entire original block; x86 response
+                           # code also consumes combat fields not named yet.
+                           "combat_traits": list(traits),
                            "damage": damage, "chip": chip, "hit_stop": hit_stop,
                            "enemy_stun": enemy_stun,
                            "block_stun": block_stun, "frame_flags": frame_flags,

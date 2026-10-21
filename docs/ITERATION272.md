@@ -1,0 +1,9 @@
+# Iteración 2.172: el selector de input 2 corresponde al lado derecho en la inicialización examinada
+
+El layout local de `PlayerInfo` sitúa la estructura izquierda en `0x899d10` y la derecha en `0x899d30`. La rutina PE `0x43dec0` escribe por separado los campos `+4` y `+6`: para el lado izquierdo fija `isRight=0` en `0x899d14` y selector `1` en `0x899d16`; para el lado derecho fija `isRight=1` en `0x899d34` y selector `2` en `0x899d36`. Esto identifica el valor 2 que copia el constructor a `Player+0x7cc` como selector asociado al jugador del lado derecho en esta ruta de inicialización, no como modo de Spell Break.
+
+La búsqueda de referencias de `CALL rel32` encuentra llamadas a `0x43dec0` desde `0x42626c` y `0x44c2b1`. En el primer caller, la llamada ocurre cuando el selector global consultado por `0x43dea0` vale cero; el segundo caller lo usa tras preparar estructuras de selección. Estos callsites acotan la evidencia, pero no bastan para nombrar universalmente el enum ni para afirmar que todos los modos construyan ambos lados con la misma rutina. El campo `+4` confirma el lado; `+6` alimenta además el despacho virtual de input `0x46d7d0`.
+
+Se añadió una regresión SHA-pinned que fija las cuatro escrituras de lado/selector y sus offsets de `PlayerInfo`. Las cinco pruebas de `tests.test_scan_player_field_884` pasan, incluida la ejecución Unicorn del expiry de Reimu hasta el factory de acción 1201. No cambia el runtime Vita ni el VPK.
+
+Esto reduce la ambigüedad de los nueve handlers que exigen `Player+0x7cc==2`: sus guards corresponden al selector del lado derecho en la ruta estudiada. Aún falta ejecutar una partida/replay original que enlace una carta de sistema de la mano con el contador `+0x884`, demostrar en pantalla el efecto de acción 1201 y resolver por separado el productor de Suika/action96. Próximo paso: rastrear el writer de `+0x884` fuera de los updates de personaje y buscar una captura/traza natural que alcance el branch de Reimu.

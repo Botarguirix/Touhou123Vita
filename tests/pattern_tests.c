@@ -3,11 +3,11 @@
 #include <string.h>
 #define CHECK(x) do{if(!(x)){fprintf(stderr,"%d: %s\n",__LINE__,#x);return 1;}}while(0)
 int main(void){
- unsigned char data[249]={0};data[0]=5;data[1]=1;memset(data+3,0,128);memcpy(data+3,"blank   .bmp",12);data[131]=1;data[143]=1;data[144]=1;data[156]=1;data[158]=1;data[164]=2;
+ unsigned char data[249]={0};data[0]=5;data[1]=1;memset(data+3,0,128);memcpy(data+3,"blank   .bmp",12);data[131]=1;data[143]=1;data[144]=1;data[152]=0xfe;data[153]=0xff;data[154]=3;data[156]=1;data[158]=1;data[164]=2;
  for(unsigned i=0;i<T123_POSE_EFFECT_BYTES;i++)data[219+i]=(unsigned char)(i+1);
  T123Pattern p;CHECK(t123_pattern_decode(data,sizeof data,&p)==0);
  CHECK(strcmp(p.images[0],"blank   .bmp")==0);
- const T123Move *m=t123_pattern_move(&p,0,0);CHECK(m&&m->sequence.count==1&&m->sequence.durations[0]==2&&m->poses[0].image==0);
+ const T123Move *m=t123_pattern_move(&p,0,0);CHECK(m&&m->sequence.count==1&&m->sequence.durations[0]==2&&m->poses[0].image==0);CHECK(m->poses[0].tx==-2&&m->poses[0].ty==3);
  for(unsigned i=0;i<T123_POSE_EFFECT_BYTES;i++)CHECK(m->poses[0].effect_data[i]==i+1);
  CHECK(t123_pattern_move(&p,1,0)==NULL);CHECK(t123_pattern_variant_count(&p,0)==1);CHECK(t123_pattern_best_attack(&p,0,NULL)==NULL);t123_pattern_free(&p);
  {

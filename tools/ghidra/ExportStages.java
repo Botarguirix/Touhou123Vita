@@ -16,7 +16,9 @@ public class ExportStages extends GhidraScript {
         0x424280L,0x426900L,0x40c580L,0x40cb60L,0x406c60L,0x406d30L,0x406ee0L,0x406fa0L,0x407040L,0x4070e0L,0x429440L,
         0x46f7b0L,0x46f9c0L,0x471460L,0x471500L,
         0x46fe40L,0x470e40L,0x471c50L,0x472230L,0x472640L,0x473270L,
-        0x473af0L,0x474f70L,0x475eb0L,0x476990L,0x477310L,0x477550L
+        0x4723b0L,0x4723f0L,0x472640L,0x472730L,
+        0x406ea0L,0x406ee0L,0x406fa0L,0x407040L,0x4070e0L,0x429440L,
+        0x473620L,0x473af0L,0x474f70L,0x475eb0L,0x476990L,0x477310L,0x477550L
     };
     public void run() throws Exception {
         String[] a=getScriptArgs();
@@ -31,6 +33,34 @@ public class ExportStages extends GhidraScript {
         List<Long> addresses=new ArrayList<>();for(long address:TARGETS)addresses.add(address);
         List<String> vtable=new ArrayList<>();vtable.add("symbol\ttable\tslot\ttarget\tfunction\tdecompiled");
         List<String> refsOut=new ArrayList<>();refsOut.add("instruction\toperand\ttarget\tsymbol\tfunction_pointer_count");
+        Function bg12=getFunctionAt(toAddr(0x472640L));
+        if(bg12!=null){
+            InstructionIterator insIt=currentProgram.getListing().getInstructions(bg12.getBody(),true);
+            while(insIt.hasNext()){
+                Instruction ins=insIt.next();
+                for(Reference ref:currentProgram.getReferenceManager().getReferencesFrom(ins.getAddress())){
+                    Address target=ref.getToAddress();Symbol targetSymbol=currentProgram.getSymbolTable().getPrimarySymbol(target);
+                    int functionPointers=0;
+                    if(ref.getReferenceType().isData()&&currentProgram.getMemory().contains(target)){
+                        for(int slot=0;slot<48;slot++){
+                            Address entry=target.add(slot*4L);if(!currentProgram.getMemory().contains(entry))break;
+                            long pointer=currentProgram.getMemory().getInt(entry)&0xffffffffL;
+                            if(getFunctionAt(toAddr(pointer))!=null)functionPointers++;
+                        }
+                    }
+                    refsOut.add(String.format("BG12 %s\t%d\t%s\t%s\t%d",ins.getAddress(),ref.getOperandIndex(),target,targetSymbol==null?"":targetSymbol.getName(),functionPointers));
+                    if(functionPointers>=5&&ins.getAddress().equals(toAddr(0x472688L))&&targetSymbol!=null&&targetSymbol.getName().equalsIgnoreCase("vftable")){
+                        int misses=0;
+                        for(int slot=0;slot<48;slot++){
+                            Address entry=target.add(slot*4L);if(!currentProgram.getMemory().contains(entry))break;
+                            long pointer=currentProgram.getMemory().getInt(entry)&0xffffffffL;Function method=getFunctionAt(toAddr(pointer));
+                            vtable.add(String.format("BG12 constructor-ref:%s\t%s\t%d\t%08x\t%s\t%s",target,target,slot,pointer,method==null?"UNDEFINED":method.getName(),false));
+                            if(method!=null){misses=0;if(!addresses.contains(pointer))addresses.add(pointer);}else if(++misses>=1)break;
+                        }
+                    }
+                }
+            }
+        }
         Function bg34=getFunctionAt(toAddr(0x474f70L));
         if(bg34!=null){
             InstructionIterator insIt=currentProgram.getListing().getInstructions(bg34.getBody(),true);

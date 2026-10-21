@@ -52,6 +52,8 @@ El dump Capstone fijado en `artifacts/kernel/<sha>/input-state/player-input-upda
 | `+0x75c`, `+0x760`, `+0x764`, `+0x768` | valor igual a 1 | A/B/C/D `0x10/0x20/0x40/0x80` |
 | `+0x76c`, `+0x770` | valor igual a 1 | change-card/spellcard `0x100/0x200` |
 
+El mismo productor mantiene flags buffered usados por handlers: `0x46d70f–0x46d744` escribe `+0x77c/+0x780/+0x784` a partir de comparaciones booleanas sobre `+0x75c/+0x760/+0x764`. En particular, `Player+0x784 = (Player+0x764 == 1)`, es decir, el control C actual. En la ruta de Suika action 200→418, `handleInputs 0x609dc0` consulta ese valor antes del dispatch; omitir C explica un retorno temprano aunque el historial NRNR se haya formado correctamente. La Iteración 2.150 confirmó el productor y el gate dinámicamente en un Player construido por el PE y el mismo deque original; la fuente física de controles continúa como fixture. Ver [ITERATION250.md](ITERATION250.md) y [reporte](../artifacts/x86-suika-constructed-handler.json).
+
 `input_sample()` en `src/fight.c` ahora traduce los controles de la demo a ese formato. El probe ARM/Vita verifica `0x019` para izquierda+abajo+A y `0x3e6` para derecha+arriba+B+C+D+change-card+spellcard. Estas aserciones validan la traducción de la abstracción de controles; todavía no capturan los valores configurados del juego PC ni la neutralización exacta de ejes en runtime. La semántica del ring y el matcher se valida por separado contra el x86.
 
 ### Ejecución dinámica del helper original

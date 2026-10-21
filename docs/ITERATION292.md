@@ -1,0 +1,7 @@
+# Iteración 2.192: selector BG33/BG36 utilizable en combate
+
+La pantalla de preparación alterna entre BG33 y BG36 con arriba/abajo. Al confirmar, el renderer seleccionado se carga para la pelea: BG36 conserva su ciclo de scroll/cámara activo, y BG33 conserva el renderer animado. La elección tiene estado separado del visor, así que inspeccionar otros recursos no cambia el stage de la partida.
+
+El autotest recorre el selector desde la secuencia de menú/preparación antes de entrar al combate. Requiere que la elección BG36 llegue a la escena, captura BG36 en `f=300`, y luego cambia a BG33 para continuar los gates ya existentes. Vita3K SDL pasó schema46/600 con `regression_gate=1`, `battle_stage_selected_interactively=1`, BG36 base 25/25, auxiliares 4/4, BG33 24/24. El reporte fresco coincide con el auto VPK (108,536 bytes, SHA-256 `f8bb7f2b939cf89cd4f2951bf5dd92a8524ecf06f2fc73ccfda1ea6f2975ef69`). El VPK interactivo (108,588 bytes, SHA-256 `aace5fe1987444a1eb85548a950e15d7dac17b3b8d55e69c547995793b0bd77f`) se reconstruyó desde el mismo código y ambos paquetes pasan `check_vpk.py` sin errores ni advertencias.
+
+Captura: [fight-bg36.bmp](../artifacts/screenshots/fight-bg36.bmp). Esta prueba demuestra selección y dibujo durante combate, no un BG36 completo. En la Iteración 2.193 se corrigió la orientación vertical de la cuadrícula según el constructor PE; aún falta comparar un replay/frame sincronizado contra PC para confirmar cámara, escala, scroll y composición. El global permanece en 27%.

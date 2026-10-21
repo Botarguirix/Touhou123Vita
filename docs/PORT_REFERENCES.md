@@ -32,3 +32,7 @@ python tools/x86_motion_oracle.py original/th123.exe artifacts/x86-motion-vector
 ```
 
 El artefacto con secuencias y resultados se genera localmente y permanece ignorado por Git junto con el ejecutable.
+
+## Nota de hardware — psp2-tooling
+
+[Grarak/psp2-tooling](https://github.com/Grarak/psp2-tooling) es candidato para M7 (Vita física), no sustituye Vita3K ni es herramienta de análisis del PE. Ofrece flujo USB para instalar/lanzar, input, consola, core dumps y profiling CPU/GPU. Es Linux-only. La ruta `retail-cp` tiene requisitos de kernel/plugins y módulos DECI4p 3.65 que no se distribuyen; el upstream declara prueba en retail PCH-2000/fw 3.65. Evaluarla cuando haya una Vita y se conozca su modelo/firmware; mantenerla opcional y sin modificar la consola antes de esa comprobación.

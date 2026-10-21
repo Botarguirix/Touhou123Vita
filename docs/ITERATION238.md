@@ -1,0 +1,11 @@
+# Iteración 2.138: sincronización Story es condicional; replay real revalidado
+
+Recuperé el replay en el VitaFS local (`ux0:data/Touhou123Vita/replay/story/090815_2219_sanae_story.rep`) y verifiqué los hashes antes de ejecutar los probes: replay SHA-256 `6905658c1f5fb09089eecd5d5b7323f581b4b2030293f27c0323dafb9895de3e`, versión `0x100c8`; ejecutable original de `F:\Download\Touhou\TH12.3 ~ Unthinkable Natural Law\th123.exe`, SHA-256 `24e6149f729047fb3f5ceb24c8cdc055de2d1547babaa6724e0d6eba4530ded3`.
+
+Los probes ejecutaron nuevamente el callback y decoder Story en las 16,910 parejas (4,360, 3,466 y 9,084 por registro) y el método `0x481040` en los 33,820 words. Pasan `tests.test_replay_story_callback_probe` (2/2) y `tests.test_replay_update_method_probe` (1/1). El resumen estructural confirma tres registros con vectores de canal 20/3, 20/3 y 20/4, y streams de 8,720, 6,932 y 18,168 words. Ningún campo está interpretado como timestamp/frame, y las pruebas siguen usando hooks/estado configurado; no son playback vivo.
+
+Al ampliar `x86_replay_dispatch_probe.py` a todo el método Story que contiene la rama `0x4600fe`, encontré que la descripción anterior como “espera” era imprecisa. El método obtiene el word actual, lo compara con `[0x85eb58]`; la rama desigual salta al epílogo `0x45fe70` sin consumir, y la igualdad llega a `0x42a3a0` para consumir. Es sincronización condicional por invocación, no un busy wait. El probe verifica ahora comparación, retorno en mismatch, peek y consumo; `tests.test_replay_dispatch_probe` pasa (1/1), con 9 invariantes PE.
+
+El reporte vigente es [replay-dispatch-original-2009.json](../artifacts/kernel/replay-dispatch-original-2009.json); compatibilidad/layout del archivo: [replay-090815-live-check.json](../artifacts/replay-090815-live-check.json). La frecuencia con que el caller ejecuta este método sigue sin demostrarse: no hay traza frame-step de TH123 en esta sesión, solo procesos Vita3K. No convertir un word o un callback en un frame por suposición ni conectar aún el playback al loop Vita.
+
+Siguiente: resolver el callback externo de la rutina Story que contiene `0x4600fe` (posible llamada indirecta desde el manager/objeto de sincronización) y observar contador/cursor por tick en TH123 2009. Después comparar con el decoder Vita. El runtime y el VPK no cambiaron.

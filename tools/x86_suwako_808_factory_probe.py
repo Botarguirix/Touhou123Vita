@@ -29,6 +29,8 @@ from unicorn.x86_const import (
 
 REFERENCE_SHA256 = "f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e"
 LIST, OWNER, OWNER_DATA, PAT_MAP = 0x01000000, 0x01010000, 0x01020000, 0x01030000
+PAT_BOX_MAP = 0x01400000
+PAT_MULTI_MAP = 0x01800000
 NIL, ACTION_NODE = 0x01031000, 0x01032000
 CUSTOM = 0x01037000
 STACK, STOP, HEAP = 0x02000000, 0x03000000, 0x01100000
@@ -46,7 +48,8 @@ def read_f32(uc: Uc, address: int) -> float:
 class Suwako808FactoryProbe:
     def __init__(self, exe: Path, dat_dir: Path | None = None,
                  intercept_box_transforms: bool = False,
-                 character: str = "suwako", action_id: int = 808):
+                 character: str = "suwako", action_id: int = 808,
+                 stage_floor: float = 500.0):
         raw = exe.read_bytes()
         self.sha256 = hashlib.sha256(raw).hexdigest()
         if self.sha256 != REFERENCE_SHA256:
@@ -57,10 +60,17 @@ class Suwako808FactoryProbe:
         self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
         self.uc.mem_map(self.base, (len(image) + 0xFFF) & ~0xFFF)
         self.uc.mem_write(self.base, image)
+        pat_map_size = 0x80000
         for address, size in ((LIST, 0x10000), (OWNER, 0x10000),
-                              (OWNER_DATA, 0x10000), (PAT_MAP, 0x80000),
+                              (OWNER_DATA, 0x10000), (PAT_MAP, pat_map_size),
                               (STACK, 0x10000), (STOP, 0x1000), (HEAP, 0x100000)):
             self.uc.mem_map(address, size)
+        if character == "alice" and action_id == 849:
+            # Alice's authored object 849 has indexed frames through seq.19;
+            # the box vectors for those later PAT sequences live beyond the
+            # normal 808 fixture window, but still below the emulated heap.
+            self.uc.mem_map(PAT_MAP + 0x80000, 0x50000)
+            self.uc.mem_map(PAT_BOX_MAP, 0x200000)
         # The manager's factory interface is a secondary subobject at LIST-4.
         self.uc.mem_map(LIST - 0x1000, 0x1000)
         self.uc.mem_map(0, 0x1000)  # FS:[0] used by the original SEH prologues
@@ -102,6 +112,8 @@ class Suwako808FactoryProbe:
                 "HeapReAlloc": (0x1B0, b"\xc2\x10\x00", 0x857180),
                 "HeapSize": (0x1C0, b"\xb8\xff\xff\xff\xff\xc2\x0c\x00", 0x8571CC),
                 "Sleep": (0x1D0, b"\xc2\x04\x00", 0x8571C8),
+                "GetModuleFileNameA": (0x1E0, b"\xc2\x0c\x00", 0x857034),
+                "LoadLibraryA": (0x1F0, b"\xb8\x00\x00\x10\x03\xc2\x04\x00", 0x8570B8),
             }
             for name, (offset, code, iat) in api_stubs.items():
                 address = STOP + offset
@@ -144,11 +156,13 @@ class Suwako808FactoryProbe:
         self.object_ptr = 0
         self.intercept_box_transforms = intercept_box_transforms
         self._trace_active = False
+        self._trace_limit = 300
         self._code_trace: list[int] = []
         self._invalid_memory: list[dict[str, int]] = []
         self.dat_dir = dat_dir or ROOT / "original"
         self.character = character
         self.action_id = action_id
+        self.stage_floor = stage_floor
         self.pat_fixture: dict[str, object] = {}
         self.uc.hook_add(UC_HOOK_CODE, self._hook)
         self.uc.hook_add(UC_HOOK_MEM_INVALID, self._invalid_mem_hook)
@@ -197,7 +211,7 @@ class Suwako808FactoryProbe:
                             "DecodePointer", "SetLastError", "TlsSetValue",
                             "TerminateProcess", "FlsGetValue", "FlsSetValue",
                             "FlsAlloc", "FlsFree", "HeapAlloc", "HeapFree",
-                            "HeapReAlloc", "HeapSize"):
+                            "HeapReAlloc", "HeapSize", "GetModuleFileNameA", "LoadLibraryA"):
                 api_event["arguments"] = [hex(read_u32(uc, esp + 4 * i))
                                            for i in range(1, 4)]
             self.events.append(api_event)
@@ -205,6 +219,19 @@ class Suwako808FactoryProbe:
                 index = read_u32(uc, esp + 4)
                 self._last_error = 87 if index == 0xFFFFFFFF else 0
                 uc.reg_write(UC_X86_REG_EAX, self._tls_slots.get(index, 0))
+                self._return(esp, cleanup=4)
+                return
+            if address == STOP + 0x1E0:  # GetModuleFileNameA(module, buffer, size)
+                output, capacity = read_u32(uc, esp + 8), read_u32(uc, esp + 12)
+                filename = b"th123.exe"
+                copied = min(len(filename), max(0, capacity - 1))
+                if capacity:
+                    uc.mem_write(output, filename[:copied] + b"\0")
+                uc.reg_write(UC_X86_REG_EAX, copied)
+                self._return(esp, cleanup=12)
+                return
+            if address == STOP + 0x1F0:  # LoadLibraryA(name) -> controlled KERNEL32 handle
+                uc.reg_write(UC_X86_REG_EAX, 0x03100000)
                 self._return(esp, cleanup=4)
                 return
             if address == STOP + 0x40:  # GetProcAddress(module, name)
@@ -326,7 +353,7 @@ class Suwako808FactoryProbe:
                 return
         if self._trace_active:
             self._code_trace.append(address)
-            del self._code_trace[:-300]
+            del self._code_trace[:-self._trace_limit]
             if address < 0x1000:
                 self.events.append({"address": "invalid-low-code-fetch", "eip": hex(address)})
                 uc.emu_stop()
@@ -339,7 +366,11 @@ class Suwako808FactoryProbe:
             source, destination = read_u32(uc, esp + 4), read_u32(uc, esp + 8)
             self.box_transform_entries.append({"helper": hex(address),
                                                "source": hex(source),
-                                               "destination": hex(destination)})
+                                               "destination": hex(destination),
+                                               "object": hex(uc.reg_read(UC_X86_REG_ECX)),
+                                               "position": [read_f32(uc, uc.reg_read(UC_X86_REG_ECX) + 0xEC),
+                                                            read_f32(uc, uc.reg_read(UC_X86_REG_ECX) + 0xF0)],
+                                               "input_box": list(struct.unpack("<4i", uc.mem_read(source, 16)))})
             if not self.intercept_box_transforms:
                 return
         esp = uc.reg_read(UC_X86_REG_ESP)
@@ -371,14 +402,14 @@ class Suwako808FactoryProbe:
             uc.mem_write(stub, b"\xd9\x05" + struct.pack("<I", output) + b"\xc3")
             uc.mem_write(output, struct.pack("<f", value))
             uc.reg_write(UC_X86_REG_EIP, stub)
-        elif address == 0x004099F0:
+        elif address == 0x004099F0 and not getattr(self, "execute_original_rng", False):
             uc.reg_write(UC_X86_REG_EAX, 0)
             self._return(esp)  # cdecl; action initializer removes arguments
         elif address == 0x004397F0:
             # Controlled stage-floor service, returned through x87 ST(0).
             stub, output = STOP + 0x300, STOP + 0x400
             uc.mem_write(stub, b"\xd9\x05" + struct.pack("<I", output) + b"\xc3")
-            uc.mem_write(output, struct.pack("<f", 500.0))
+            uc.mem_write(output, struct.pack("<f", self.stage_floor))
             uc.reg_write(UC_X86_REG_EIP, stub)
         elif address == 0x0048CE90:
             # No collision in this controlled open-air fixture.
@@ -396,6 +427,10 @@ class Suwako808FactoryProbe:
             self._return(esp, cleanup=8)
 
     def _prepare_pat(self) -> None:
+        self._prepare_pat_actions((self.action_id,))
+
+    def _prepare_pat_actions(self, action_ids: tuple[int, ...]) -> None:
+        """Build one native PAT tree containing the requested action entries."""
         uc = self.uc
         pat_resource = None
         for archive in ("th123c.dat", "th123b.dat", "th123a.dat"):
@@ -409,73 +444,132 @@ class Suwako808FactoryProbe:
         if pat_resource is None:
             raise FileNotFoundError(f"{self.character} PAT not found in {self.dat_dir}")
         pat, pat_sha256 = pat_resource
-        sequences = action_sequence_metadata(pat, self.action_id)
-        sequences.sort(key=lambda row: int(row["sequence"]))
-        if not sequences or [row["sequence"] for row in sequences] != list(range(len(sequences))):
-            raise ValueError(f"PAT action {self.action_id} sequences are missing or non-contiguous")
-        if any(len(row["frames"]) > 0x1000 // 0xA8 for row in sequences):
-            raise ValueError(f"action {self.action_id} frame data exceeds the probe's safe PAT fixture region")
+        self._active_pat_map_base = PAT_MAP
+        # Keep Alice 849's PAT node/frame data in PAT_MAP: its box fixture and
+        # original selector rely on that layout. Other long or multi-action
+        # fixtures use the larger auxiliary storage region.
+        use_multi_storage = (len(action_ids) > 1 or any(
+            len(action_sequence_metadata(pat, action_id, effective=True)) > 8
+            for action_id in action_ids)) and not (
+                self.character == "alice" and action_ids == (849,))
+        if use_multi_storage:
+            uc.mem_map(PAT_MULTI_MAP, 0x400000)
+        self._active_pat_ranges = [(PAT_MAP, PAT_MAP + 0x80000)]
+        if use_multi_storage:
+            self._active_pat_ranges.append((PAT_MULTI_MAP, PAT_MULTI_MAP + 0x400000))
+        action_fixtures: list[dict[str, object]] = []
+        for action_id in action_ids:
+            raw_sequences = action_sequence_metadata(pat, action_id)
+            sequences = action_sequence_metadata(pat, action_id, effective=True)
+            if not sequences:
+                raise ValueError(f"PAT action {action_id} is missing")
+            if self.character == "alice" and action_id == 849:
+                self.pat_fixture["duplicate_sequence_definitions"] = len(
+                    raw_sequences) - len(sequences)
+                self.pat_fixture["runtime_sequence_policy"] = (
+                    "last action definition; effective sequence table")
+            sequences.sort(key=lambda row: int(row["sequence"]))
+            if [row["sequence"] for row in sequences] != list(range(len(sequences))):
+                raise ValueError(f"PAT action {action_id} sequences are missing or non-contiguous")
+            if any(len(row["frames"]) > 0x1000 // 0xA8 for row in sequences):
+                raise ValueError(f"action {action_id} frame data exceeds the probe's safe PAT fixture region")
+            action_fixtures.append({"action": action_id, "sequences": sequences})
         self.pat_fixture.update({"resource": f"data/character/{self.character}/{self.character}.pat",
-                                 "action": self.action_id, "pat_sha256": pat_sha256,
-                                 "sequences": sequences})
+                                 "action": self.action_id, "actions": action_fixtures,
+                                 "pat_sha256": pat_sha256,
+                                 "sequences": next(item["sequences"] for item in action_fixtures
+                                                   if item["action"] == self.action_id)})
+        self._sequence_node_by_action: dict[int, dict[int, int]] = {}
         uc.mem_write(PAT_MAP + 4, struct.pack("<I", NIL))
-        uc.mem_write(PAT_MAP + 8, struct.pack("<I", 1))
-        uc.mem_write(NIL, struct.pack("<III", ACTION_NODE, ACTION_NODE, ACTION_NODE))
+        uc.mem_write(PAT_MAP + 8, struct.pack("<I", len(action_fixtures)))
+        action_nodes = [ACTION_NODE + index * 0x100 for index in range(len(action_fixtures))]
+        # MSVC _Tree links are left/parent/right; the x86 comparator follows
+        # smaller keys through left and larger keys through right.
+        ordered_ids = [int(item["action"]) for item in action_fixtures]
+        def build_tree(lo: int, hi: int, parent: int) -> int:
+            if lo >= hi:
+                return NIL
+            mid = (lo + hi) // 2
+            node = action_nodes[mid]
+            left = build_tree(lo, mid, node)
+            right = build_tree(mid + 1, hi, node)
+            uc.mem_write(node, struct.pack("<III", left, parent, right))
+            return node
+        root_node = build_tree(0, len(action_nodes), NIL)
+        leftmost = action_nodes[0] if action_nodes else NIL
+        rightmost = action_nodes[-1] if action_nodes else NIL
+        uc.mem_write(NIL, struct.pack("<III", leftmost, root_node, rightmost))
         uc.mem_write(NIL + 0x15, b"\x01")
-        uc.mem_write(ACTION_NODE, struct.pack("<III", NIL, NIL, NIL))
-        uc.mem_write(ACTION_NODE + 0x0C, struct.pack("<I", self.action_id))
-        # The factory's observed physical node for PAT seq.1 is the third node;
-        # preserve that mapping while keeping descriptors in PAT index order.
-        physical_nodes = [PAT_MAP + 0x8000 + i * 0x1000 for i in range(len(sequences))]
-        pat_sequence_by_node = [0] + list(range(len(sequences) - 1, 0, -1))
-        sequence_node_by_pat = {pat_index: physical_nodes[node_index]
-                                for node_index, pat_index in enumerate(pat_sequence_by_node)}
-        self._sequence_node_by_pat = sequence_node_by_pat
-        uc.mem_write(ACTION_NODE + 0x10, struct.pack("<I", physical_nodes[0]))
-        for index, (seq, pat_index) in enumerate(zip(physical_nodes, pat_sequence_by_node)):
-            metadata = sequences[pat_index]
-            frames = metadata["frames"]
-            frame = PAT_MAP + 0x10000 + pat_index * 0x1000
-            uc.mem_write(seq + 4, struct.pack("<II", frame, frame + len(frames) * 0xA8))
-            uc.mem_write(seq + 0x14, bytes((int(metadata["loop_mode"]),)))
-            next_node = physical_nodes[(index + 1) % len(physical_nodes)]
-            previous_node = physical_nodes[(index - 1) % len(physical_nodes)]
-            uc.mem_write(seq + 0x18, struct.pack("<I", next_node))
-            uc.mem_write(seq + 0x1C, struct.pack("<I", previous_node))
-            for frame_index, frame_data in enumerate(frames):
-                pose = frame + frame_index * 0xA8
-                uc.mem_write(pose + 8, struct.pack("<H", int(frame_data["duration"])))
-                # PAT's 40-byte combat-traits block maps to CharacterFrameData
-                # starting at +0x1c (confirmed by the x86 response consumer).
-                for field_offset, key in ((0x1C, "damage"), (0x20, "chip"),
-                                          (0x2A, "hit_stop"),
-                                          (0x2C, "enemy_stun"),
-                                          (0x30, "block_stun")):
-                    uc.mem_write(pose + field_offset,
-                                 struct.pack("<H", int(frame_data.get(key, 0))))
-                # PAT's trailing nine-byte block is reserved byte,
-                # CharacterFrameData.frameFlags, then attackFlags.
-                for field_offset, key in ((0x4C, "frame_flags"), (0x50, "attack_flags")):
-                    uc.mem_write(pose + field_offset,
-                                 struct.pack("<I", int(frame_data.get(key, 0))))
-                # CharacterFrameData embeds three Soku vectors: hurt boxes
-                # at +0x58, attack boxes at +0x68, and extra-box pointers at
-                # +0x78. Their begin/end/capacity pointers start +4/+8/+0xc.
-                for vector_offset, key, stride, type_offset in (
-                        (0x58, "hurt_boxes", 16, 0), (0x68, "attack_boxes", 16, 0x100)):
-                    boxes = frame_data[key]
-                    box_start = PAT_MAP + 0x20000 + (pat_index * 0x8000) + (frame_index * 0x800) + type_offset
-                    box_end = box_start + len(boxes) * stride
-                    uc.mem_write(pose + vector_offset, struct.pack("<4I", 0, box_start, box_end, box_end))
-                    if boxes:
-                        uc.mem_write(box_start, b"".join(struct.pack("<4i", *box) for box in boxes))
-                extra_count = len(frame_data["attack_boxes"])
-                extra = PAT_MAP + 0x30000 + (pat_index * 0x8000) + (frame_index * 0x800)
-                extra_end = extra + extra_count * 4
-                uc.mem_write(pose + 0x78, struct.pack("<4I", 0, extra, extra_end, extra_end))
-                if extra_count:
-                    # Null means no frame-specific rotated replacement box.
-                    uc.mem_write(extra, bytes(extra_count * 4))
+        for action_index, (action_node, action_fixture) in enumerate(zip(action_nodes, action_fixtures)):
+            sequences = action_fixture["sequences"]
+            action_id = action_fixture["action"]
+            data_base = (PAT_MULTI_MAP + action_index * 0x80000 if use_multi_storage
+                         else PAT_MAP + (0x80000 if self.character == "alice" and action_id == 849
+                                        else 0))
+            uc.mem_write(action_node + 0x0C, struct.pack("<I", action_id))
+            uc.mem_write(action_node + 0x15, b"\x00")
+            sequence_base = data_base + (0x1000 if use_multi_storage else 0x8000)
+            physical_nodes = [sequence_base + i * 0x1000
+                              for i in range(len(sequences))]
+            pat_sequence_by_node = [0] + list(range(len(sequences) - 1, 0, -1))
+            sequence_node_by_pat = {pat_index: physical_nodes[node_index]
+                                    for node_index, pat_index in enumerate(pat_sequence_by_node)}
+            self._sequence_node_by_action[action_id] = sequence_node_by_pat
+            if action_id == self.action_id:
+                self._sequence_node_by_pat = sequence_node_by_pat
+            uc.mem_write(action_node + 0x10, struct.pack("<I", physical_nodes[0]))
+            for index, (seq, pat_index) in enumerate(zip(physical_nodes, pat_sequence_by_node)):
+                metadata = sequences[pat_index]
+                frames = metadata["frames"]
+                frame = (PAT_MAP + 0x10000 + pat_index * 0x1000
+                         if self.character == "alice" and action_id == 849
+                         else data_base + 0x10000 + pat_index * 0x1000)
+                uc.mem_write(seq + 4, struct.pack("<II", frame, frame + len(frames) * 0xA8))
+                uc.mem_write(seq + 0x14, bytes((int(metadata["loop_mode"]),)))
+                next_node = physical_nodes[(index + 1) % len(physical_nodes)]
+                previous_node = physical_nodes[(index - 1) % len(physical_nodes)]
+                uc.mem_write(seq + 0x18, struct.pack("<I", next_node))
+                uc.mem_write(seq + 0x1C, struct.pack("<I", previous_node))
+                for frame_index, frame_data in enumerate(frames):
+                    pose = frame + frame_index * 0xA8
+                    uc.mem_write(pose + 8, struct.pack("<H", int(frame_data["duration"])))
+                    # Preserve the entire PAT combat-trait payload before
+                    # normalizing named fields below. Handlers also inspect
+                    # bytes such as CharacterFrameData+0x26 which are not
+                    # represented by the summary fields alone.
+                    traits = frame_data.get("combat_traits", bytes(40))
+                    if len(traits) != 40:
+                        raise ValueError(f"PAT combat trait block must be 40 bytes, got {len(traits)}")
+                    uc.mem_write(pose + 0x1C, bytes(traits))
+                    # PAT combat traits map to CharacterFrameData starting at +0x1c.
+                    for field_offset, key in ((0x1C, "damage"), (0x20, "chip"),
+                                              (0x2A, "hit_stop"), (0x2C, "enemy_stun"),
+                                              (0x30, "block_stun")):
+                        uc.mem_write(pose + field_offset,
+                                     struct.pack("<H", int(frame_data.get(key, 0))))
+                    for field_offset, key in ((0x4C, "frame_flags"), (0x50, "attack_flags")):
+                        uc.mem_write(pose + field_offset,
+                                     struct.pack("<I", int(frame_data.get(key, 0))))
+                    for vector_offset, key, stride, type_offset in (
+                            (0x58, "hurt_boxes", 16, 0), (0x68, "attack_boxes", 16, 0x100)):
+                        boxes = frame_data[key]
+                        box_base = (PAT_BOX_MAP if self.character == "alice" and action_id == 849
+                                    else data_base + 0x20000)
+                        box_start = (box_base + pat_index * 0x8000
+                                     + frame_index * 0x800 + type_offset)
+                        box_end = box_start + len(boxes) * stride
+                        uc.mem_write(pose + vector_offset,
+                                     struct.pack("<4I", 0, box_start, box_end, box_end))
+                        if boxes:
+                            uc.mem_write(box_start, b"".join(struct.pack("<4i", *box) for box in boxes))
+                    extra_count = len(frame_data["attack_boxes"])
+                    extra_base = (PAT_BOX_MAP if self.character == "alice" and action_id == 849
+                                  else data_base + 0x30000)
+                    extra = extra_base + pat_index * 0x8000 + frame_index * 0x800
+                    extra_end = extra + extra_count * 4
+                    uc.mem_write(pose + 0x78, struct.pack("<4I", 0, extra, extra_end, extra_end))
+                    if extra_count:
+                        uc.mem_write(extra, bytes(extra_count * 4))
 
     def _sync_box_data(self, obj: int) -> dict[str, object]:
         """Run the original GameObject frame-to-box synchronization routine."""
@@ -572,7 +666,8 @@ class Suwako808FactoryProbe:
         uc.mem_write(OWNER + 0x170, struct.pack("<I", OWNER))
         uc.mem_write(OWNER + 0x6F8, struct.pack("<I", LIST))
         uc.mem_write(LIST + 0x64, struct.pack("<I", OWNER))
-        uc.mem_write(CUSTOM, struct.pack("<3f", -20.0, 12.0, 1.0))
+        natural_sequence = 19 if self.character == "alice" and self.action_id == 849 else 1
+        uc.mem_write(CUSTOM, struct.pack("<3f", -20.0, 12.0, float(natural_sequence)))
 
         # createObject(this=list, parent=null, owner, action, x, y, dir, layer,
         # customData, customDataSize); stdcall cleanup is performed by callee.
@@ -614,12 +709,13 @@ class Suwako808FactoryProbe:
             if uc.reg_read(UC_X86_REG_EIP) != STOP:
                 raise RuntimeError("original setPose did not return for seq.0 probe")
             box_sync["sequence_0"] = self._sync_box_data(obj)
-            # Restore the factory's natural seq.1 pose before ticking the
-            # action dispatcher below.
-            sequence_one = self._sequence_node_by_pat[1]
-            uc.mem_write(obj + 0x13E, struct.pack("<H", 1))
-            uc.mem_write(obj + 0x15C, struct.pack("<I", sequence_one))
-            uc.mem_write(obj + 0x148, struct.pack("<H", len(self.pat_fixture["sequences"][1]["frames"])))
+            # Restore the factory's natural pose before ticking the action
+            # dispatcher. Alice 66B selects seq.19 through customData[2].
+            sequence_to_run = self._sequence_node_by_pat[natural_sequence]
+            uc.mem_write(obj + 0x13E, struct.pack("<H", natural_sequence))
+            uc.mem_write(obj + 0x15C, struct.pack("<I", sequence_to_run))
+            uc.mem_write(obj + 0x148, struct.pack(
+                "<H", len(self.pat_fixture["sequences"][natural_sequence]["frames"])))
             pose_sp = STACK + 0xA800 - 4
             uc.mem_write(pose_sp, struct.pack("<II", STOP, 0))
             uc.reg_write(UC_X86_REG_ESP, pose_sp)
@@ -628,7 +724,7 @@ class Suwako808FactoryProbe:
             uc.emu_start(0x00464B50, STOP, count=100000)
             if uc.reg_read(UC_X86_REG_EIP) != STOP:
                 raise RuntimeError("original setPose did not return while restoring seq.1")
-            box_sync["sequence_1_restored"] = self._sync_box_data(obj)
+            box_sync[f"sequence_{natural_sequence}_restored"] = self._sync_box_data(obj)
             self.box_sync = box_sync
             factory_return_state = {
                 "address": hex(obj),

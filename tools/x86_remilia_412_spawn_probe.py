@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "local/python-deps"))
 
-from unicorn import UC_HOOK_CODE
+from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE
 from unicorn.x86_const import (
     UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EIP,
     UC_X86_REG_ESP, UC_X86_REG_ESI, UC_X86_REG_EBP, UC_X86_REG_EDI, UC_X86_REG_EDX,
@@ -29,7 +29,9 @@ from tools.x86_remilia_412_action_setter_probe import (
     MAP_NODE, SEQUENCE_NODE, FRAME_DATA, SET_POSE_CAPTURE,
 )
 from tools.extract_pat_pose_metadata import action_sequence_metadata, read_pat
-from tools.x86_suwako_808_factory_probe import LIST, OWNER, PAT_MAP, STACK, STOP, Suwako808FactoryProbe
+from tools.x86_suwako_808_factory_probe import (
+    LIST, OWNER, PAT_MAP, STACK, STOP, Suwako808FactoryProbe,
+)
 
 MAIN_ACTION_COMPARE = 0x00587BAB
 CREATE_OBJECT_WRAPPER = 0x0046EB30
@@ -37,6 +39,7 @@ CALLBACK_DISPATCH = 0x00401D50
 HANDLER_EPILOGUE = 0x0058CDCC
 COMMON_UPDATE_EXIT = 0x00599FB0
 PLAYER = LIST + 0x8000
+PAIR_MANAGER = OWNER + 0xD000
 CALLBACKS = OWNER + 0x100
 
 
@@ -68,6 +71,7 @@ def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[s
         uc.mem_write(FRAME_DATA + index * 0xA8 + 8, struct.pack("<H", int(frame["duration"])))
     uc.mem_write(SEQUENCE_NODE + 0x1C, struct.pack("<I", SEQUENCE_NODE))
 
+    probe._pat_lookup_results = {PAT_MAP + 0x7000: MAP_RESULT}
     reached: list[str] = []
     def setup_hook(machine, address: int, _size: int, _user: object) -> None:
         if address in (ACTION_SETTER, ACTION_WRITE, RESET_SEQUENCE,
@@ -76,7 +80,10 @@ def initialize_action_412(probe: Suwako808FactoryProbe, dat_dir: Path) -> dict[s
         esp = machine.reg_read(UC_X86_REG_ESP)
         if address == PAT_LOOKUP:
             ret = u32(machine, esp)
-            machine.reg_write(UC_X86_REG_EAX, MAP_RESULT)
+            lookup_map = machine.reg_read(UC_X86_REG_ECX)
+            lookup_result = getattr(probe, "_pat_lookup_results", {}).get(
+                lookup_map, MAP_RESULT)
+            machine.reg_write(UC_X86_REG_EAX, lookup_result)
             machine.reg_write(UC_X86_REG_ESP, esp + 12)
             machine.reg_write(UC_X86_REG_EIP, ret)
 
@@ -126,16 +133,23 @@ def initialize_object_manager(probe: Suwako808FactoryProbe) -> dict[str, object]
 
 
 def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: int,
-                               frames: list[dict[str, object]], loop_mode: int) -> dict[str, object]:
+                               frames: list[dict[str, object]], loop_mode: int,
+                               pat_base: int = PAT_MAP) -> dict[str, object]:
     """Run the game's action setter/initializer against a controlled PAT map."""
     uc = probe.uc
-    map_result, map_object, map_node = MAP_RESULT, MAP_OBJECT, MAP_NODE
-    sequence_node, frame_data = SEQUENCE_NODE, FRAME_DATA
+    # Separate address windows let two independently initialized Player
+    # objects keep their original PAT descriptors alive in one Unicorn VM.
+    offset = pat_base - PAT_MAP
+    map_result, map_object, map_node = MAP_RESULT + offset, MAP_OBJECT + offset, MAP_NODE + offset
+    sequence_node, frame_data = SEQUENCE_NODE + offset, FRAME_DATA + offset
     frame_end = frame_data + len(frames) * 0xA8
     for address, size in ((map_result, 0x100), (map_object, 0x100),
                           (map_node, 0x100), (sequence_node, 0x100),
                           (frame_data, max(0x100, len(frames) * 0xA8))):
         uc.mem_write(address, bytes(size))
+    lookup_results = getattr(probe, "_pat_lookup_results", None)
+    if lookup_results is not None:
+        lookup_results[pat_base + 0x7000] = map_result
     original_vtable = u32(uc, obj)
     vtable = OWNER + 0x1000
     uc.mem_write(vtable, bytes(0x100))
@@ -143,7 +157,7 @@ def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: i
                          (7, 0x00464B50), (15, INITIALIZE_ACTION)):
         uc.mem_write(vtable + slot * 4, struct.pack("<I", target))
     uc.mem_write(obj, struct.pack("<I", vtable))
-    uc.mem_write(obj + 0x160, struct.pack("<I", PAT_MAP + 0x7000))
+    uc.mem_write(obj + 0x160, struct.pack("<I", pat_base + 0x7000))
     uc.mem_write(map_result, struct.pack("<II", map_object, map_node))
     uc.mem_write(map_object + 4, struct.pack("<I", map_node + 0x100))
     uc.mem_write(map_node + 0x0C, struct.pack("<I", action))
@@ -154,6 +168,11 @@ def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: i
     for index, frame in enumerate(frames):
         pose = frame_data + index * 0xA8
         uc.mem_write(pose + 8, struct.pack("<H", int(frame["duration"])))
+        traits = frame.get("combat_traits")
+        if traits is not None:
+            if len(traits) != 40:
+                raise ValueError(f"PAT combat trait block must be 40 bytes, got {len(traits)}")
+            uc.mem_write(pose + 0x1C, bytes(traits))
         for offset, key in ((0x1C, "damage"), (0x20, "chip"),
                             (0x2A, "hit_stop"), (0x2C, "enemy_stun"),
                             (0x30, "block_stun")):
@@ -161,13 +180,13 @@ def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: i
         for offset, key in ((0x4C, "frame_flags"), (0x50, "attack_flags")):
             uc.mem_write(pose + offset, struct.pack("<I", int(frame.get(key, 0))))
         collision = frame["collision_boxes"]
-        collision_ptr = PAT_MAP + 0x18000 + index * 0x100
+        collision_ptr = pat_base + 0x18000 + index * 0x100
         if collision:
             uc.mem_write(pose + 0x54, struct.pack("<I", collision_ptr))
             uc.mem_write(collision_ptr, struct.pack("<4i", *collision[0]))
         for offset, key, stride, data_base in (
-                (0x58, "hurt_boxes", 16, PAT_MAP + 0x19000),
-                (0x68, "attack_boxes", 16, PAT_MAP + 0x1A000)):
+                (0x58, "hurt_boxes", 16, pat_base + 0x19000),
+                (0x68, "attack_boxes", 16, pat_base + 0x1A000)):
             boxes = frame[key]
             begin = data_base + index * 0x400
             end = begin + len(boxes) * stride
@@ -175,7 +194,7 @@ def initialize_original_action(probe: Suwako808FactoryProbe, obj: int, action: i
             if boxes:
                 uc.mem_write(begin, b"".join(struct.pack("<4i", *box) for box in boxes))
         extra_count = len(frame["attack_boxes"])
-        extra = PAT_MAP + 0x1B000 + index * 0x100
+        extra = pat_base + 0x1B000 + index * 0x100
         uc.mem_write(pose + 0x78,
                      struct.pack("<4I", 0, extra, extra + extra_count * 4,
                                  extra + extra_count * 4))
@@ -271,6 +290,90 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
     probe = Suwako808FactoryProbe(ROOT / "original/th123.exe", dat_dir,
                                   character="remilia", action_id=801)
     uc = probe.uc
+    # Supply only EffectManager_Effect::CreateEffect, which the authentic hit
+    # response calls after writing combat fields. This mirrors the signature-
+    # correct synthetic service in x86_player_pair_hit_probe.py.
+    effect_manager, effect_vtable = OWNER + 0xC000, OWNER + 0xC400
+    synthetic_effect, effect_create_stub = OWNER + 0xC800, STOP + 0x600
+    uc.mem_write(effect_manager, struct.pack("<I", effect_vtable))
+    uc.mem_write(effect_vtable + 0x0C, struct.pack("<I", effect_create_stub))
+    uc.mem_write(synthetic_effect, bytes(0x400))
+    uc.mem_write(synthetic_effect, struct.pack("<I", 0x00858AB4))
+    uc.mem_write(0x008985F0, struct.pack("<I", effect_manager))
+    effect_requests: list[dict[str, object]] = []
+    manager_vector_writes: list[dict[str, str]] = []
+    def capture_manager_vector_write(machine, _access: int, address: int,
+                                    size: int, value: int, _user: object) -> None:
+        if LIST + 8 <= address < LIST + 0x18 and len(manager_vector_writes) < 64:
+            manager_vector_writes.append({
+                "eip": hex(machine.reg_read(UC_X86_REG_EIP)),
+                "address": hex(address), "size": str(size), "value": hex(value),
+            })
+    uc.hook_add(UC_HOOK_MEM_WRITE, capture_manager_vector_write)
+    rep_movsd_contexts: list[dict[str, object]] = []
+    memory_copy_contexts: list[dict[str, object]] = []
+    large_buffer_assignments: list[dict[str, object]] = []
+    def capture_large_buffer_assignment(machine, address: int, _size: int,
+                                        _user: object) -> None:
+        if address != 0x0081FCC1 or len(large_buffer_assignments) >= 8:
+            return
+        esp = machine.reg_read(UC_X86_REG_ESP)
+        return_address = u32(machine, esp)
+        args = [u32(machine, esp + 4 * index) for index in range(1, 5)]
+        if args[3] >= 0x10000:
+            large_buffer_assignments.append({
+                "function": hex(address), "return_address": hex(return_address),
+                "arguments": [hex(value) for value in args],
+            })
+    uc.hook_add(UC_HOOK_CODE, capture_large_buffer_assignment)
+    large_range_copies: list[dict[str, object]] = []
+    def capture_large_range_copy(machine, address: int, _size: int,
+                                 _user: object) -> None:
+        if address != 0x00657880 or len(large_range_copies) >= 8:
+            return
+        esp = machine.reg_read(UC_X86_REG_ESP)
+        return_address = u32(machine, esp)
+        args = [u32(machine, esp + 4 * index) for index in range(1, 4)]
+        span = args[1] - args[0]
+        if span >= 0x10000:
+            large_range_copies.append({
+                "function": hex(address), "return_address": hex(return_address),
+                "this": hex(machine.reg_read(UC_X86_REG_ECX)),
+                "arguments": [hex(value) for value in args],
+                "this_words": [hex(u32(machine, machine.reg_read(UC_X86_REG_ECX) + offset))
+                               for offset in (0, 4, 8, 12)],
+                "source_span": hex(span),
+            })
+    uc.hook_add(UC_HOOK_CODE, capture_large_range_copy)
+    def capture_large_memory_copy(machine, address: int, _size: int, _user: object) -> None:
+        if address != 0x008236B0 or len(memory_copy_contexts) >= 8:
+            return
+        esp = machine.reg_read(UC_X86_REG_ESP)
+        return_address = u32(machine, esp)
+        destination, source, length = (u32(machine, esp + 4),
+                                       u32(machine, esp + 8),
+                                       u32(machine, esp + 12))
+        if length >= 0x10000:
+            memory_copy_contexts.append({
+                "function": hex(address), "return_address": hex(return_address),
+                "destination": hex(destination), "source": hex(source),
+                "length": hex(length),
+            })
+    uc.hook_add(UC_HOOK_CODE, capture_large_memory_copy)
+    def capture_rep_movsd(machine, address: int, _size: int, _user: object) -> None:
+        # REP MOVSD triggers the code hook once per copied dword. Preserve a
+        # bounded sample instead of building a million-entry trace.
+        if address != 0x0082370A or len(rep_movsd_contexts) >= 2:
+            return
+        rep_movsd_contexts.append({
+            "eip": hex(address),
+            "esi": hex(machine.reg_read(UC_X86_REG_ESI)),
+            "edi": hex(machine.reg_read(UC_X86_REG_EDI)),
+            "ecx": hex(machine.reg_read(UC_X86_REG_ECX)),
+            "edx": hex(machine.reg_read(UC_X86_REG_EDX)),
+            "prelude": [hex(pc) for pc in probe._code_trace[-8:]],
+        })
+    uc.hook_add(UC_HOOK_CODE, capture_rep_movsd)
     manager_state = initialize_object_manager(probe) if real_factory else None
     initialized_action = initialize_action_412(probe, dat_dir)
     if real_factory:
@@ -322,6 +425,14 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
 
     def hook(machine, address: int, _size: int, _user: object) -> None:
         esp = machine.reg_read(UC_X86_REG_ESP)
+        if address == effect_create_stub:
+            args = [u32(machine, esp + 4 * index) for index in range(1, 7)]
+            effect_requests.append({"manager": hex(machine.reg_read(UC_X86_REG_ECX)),
+                                    "arguments": [hex(value) for value in args]})
+            machine.reg_write(UC_X86_REG_EAX, synthetic_effect)
+            machine.reg_write(UC_X86_REG_ESP, esp + 4 + 6 * 4)
+            machine.reg_write(UC_X86_REG_EIP, u32(machine, esp))
+            return
         execution_tail.append(hex(address))
         if len(execution_tail) > 80:
             del execution_tail[:-80]
@@ -542,8 +653,12 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             uc.mem_write(defender + 0x350, struct.pack("<b", 1))
             uc.mem_write(PLAYER + 0x170, struct.pack("<I", defender))
             uc.mem_write(defender + 0x170, struct.pack("<I", PLAYER))
-            uc.mem_write(LIST + 0x0C, struct.pack("<I", PLAYER))
-            uc.mem_write(LIST + 0x18, struct.pack("<I", defender))
+            # Pair-dispatch scratch state has a different layout from the
+            # object manager at LIST. Keep it isolated so the player's pointer
+            # cannot overwrite the manager's embedded vector end pointer.
+            uc.mem_write(PAIR_MANAGER, bytes(0x100))
+            uc.mem_write(PAIR_MANAGER + 0x0C, struct.pack("<I", PLAYER))
+            uc.mem_write(PAIR_MANAGER + 0x18, struct.pack("<I", defender))
 
             def make_singleton_list(root: int, node: int, obj: int) -> None:
                 uc.mem_write(root, struct.pack("<3I", node, node, 0))
@@ -556,19 +671,35 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             make_singleton_list(target_root, target_node, defender)
             make_singleton_list(empty_a, empty_a, 0)
             make_singleton_list(empty_b, empty_b, 0)
-            uc.mem_write(LIST + 0x60, struct.pack("<I", attacker_root))
-            uc.mem_write(LIST + 0x54, struct.pack("<I", target_root))
-            uc.mem_write(LIST + 0x48, struct.pack("<I", empty_a))
-            uc.mem_write(LIST + 0x6C, struct.pack("<I", empty_b))
+            uc.mem_write(PAIR_MANAGER + 0x60, struct.pack("<I", attacker_root))
+            uc.mem_write(PAIR_MANAGER + 0x54, struct.pack("<I", target_root))
+            uc.mem_write(PAIR_MANAGER + 0x48, struct.pack("<I", empty_a))
+            uc.mem_write(PAIR_MANAGER + 0x6C, struct.pack("<I", empty_b))
             uc.mem_write(child + 0x190, struct.pack("<I", 0))
             uc.mem_write(child + 0x194, struct.pack("<b", 1))
             uc.mem_write(defender + 0x1A1, struct.pack("<B", 0))
             uc.mem_write(defender + 0x184, struct.pack("<H", 1000))
             pair_hp_before = struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
             pair_sp = STACK + 0xB000 - 4
+            hit_response_field_trace: list[dict[str, object]] = []
+            def capture_hit_response_fields(machine, address: int, _size: int,
+                                            _user: object) -> None:
+                if address not in (0x0047B680, 0x0047B688, 0x0047B68E, 0x0047B6A9):
+                    return
+                target = machine.reg_read(UC_X86_REG_ESI)
+                source = machine.reg_read(UC_X86_REG_EBX)
+                hit_response_field_trace.append({
+                    "eip": hex(address), "esi": hex(target), "ebx": hex(source),
+                    "esi_reaction_194": machine.mem_read(target + 0x194, 1)[0],
+                    "esi_priority_1bc": machine.mem_read(target + 0x1BC, 1)[0],
+                    "esi_hitstop_196": struct.unpack("<H", machine.mem_read(target + 0x196, 2))[0],
+                    "ebx_reaction_194": machine.mem_read(source + 0x194, 1)[0],
+                    "ebx_priority_1bc": machine.mem_read(source + 0x1BC, 1)[0],
+                })
+            uc.hook_add(UC_HOOK_CODE, capture_hit_response_fields)
             uc.mem_write(pair_sp, struct.pack("<I", STOP))
             uc.reg_write(UC_X86_REG_ESP, pair_sp)
-            uc.reg_write(UC_X86_REG_ECX, LIST)
+            uc.reg_write(UC_X86_REG_ECX, PAIR_MANAGER)
             uc.reg_write(UC_X86_REG_EIP, 0x0047CE20)
             probe._code_trace.clear()
             probe._trace_active = True
@@ -584,6 +715,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             pair_dispatch = {
                 "function": "0x47ce20", "error": pair_error,
                 "trace": [hex(pc) for pc in probe._code_trace[-80:]],
+                "hit_response_field_trace": hit_response_field_trace,
                 "reached_projectile_filter": "0x47ca70" in [hex(pc) for pc in probe._code_trace],
                 "reached_character_resolver": "0x47c990" in [hex(pc) for pc in probe._code_trace],
                 "defender_hp_before": pair_hp_before,
@@ -614,7 +746,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 uc.mem_write(defender + 0x184, struct.pack("<H", pair_hp_before))
                 uc.mem_write(pair_sp, struct.pack("<I", STOP))
                 uc.reg_write(UC_X86_REG_ESP, pair_sp)
-                uc.reg_write(UC_X86_REG_ECX, LIST)
+                uc.reg_write(UC_X86_REG_ECX, PAIR_MANAGER)
                 uc.reg_write(UC_X86_REG_EIP, 0x0047CE20)
                 probe._code_trace.clear()
                 probe._trace_active = True
@@ -658,7 +790,11 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                             u32(uc, child + 0x1C0) + 0x50, 4))[0]),
                         "attacker_hitbox_count": uc.mem_read(child + 0x1CB, 1)[0],
                         "defender_hurtbox_count": uc.mem_read(defender + 0x1CC, 1)[0],
-                        "attacker_cooldown_190": u32(uc, child + 0x190),
+                        "defender_field_194_after": uc.mem_read(defender + 0x194, 1)[0],
+                        "defender_field_196_after": struct.unpack("<H", uc.mem_read(defender + 0x196, 2))[0],
+                        "attacker_priority_1bc": uc.mem_read(child + 0x1BC, 1)[0],
+                        "defender_priority_1bc": uc.mem_read(defender + 0x1BC, 1)[0],
+                        "projectile_field_190_after": u32(uc, child + 0x190),
                         "error": gate_error,
                         "failure_after_damage": bool(gate_error and gate_hp_after < pair_hp_before),
                         "external_callback_pointer": "0x0" if gate_error and "0x0" in gate_error else None,
@@ -674,13 +810,22 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                     "damage_applied": pair_dispatch["defender_hp_after"] < pair_hp_before,
                     "attacker_frame_damage_field": struct.unpack("<H", uc.mem_read(
                         u32(uc, child + 0x1C0) + 0x1C, 2))[0],
+                    "attacker_frame_hitstop_field": struct.unpack("<H", uc.mem_read(
+                        u32(uc, child + 0x1C0) + 0x2A, 2))[0],
                     "attacker_frame_flags": hex(struct.unpack("<I", uc.mem_read(
                         u32(uc, child + 0x1C0) + 0x4C, 4))[0]),
                     "attacker_attack_flags": hex(struct.unpack("<I", uc.mem_read(
                         u32(uc, child + 0x1C0) + 0x50, 4))[0]),
                     "attacker_hitbox_count": uc.mem_read(child + 0x1CB, 1)[0],
                     "defender_hurtbox_count": uc.mem_read(defender + 0x1CC, 1)[0],
-                    "attacker_cooldown_190": u32(uc, child + 0x190),
+                    "defender_field_194_after": uc.mem_read(defender + 0x194, 1)[0],
+                    "defender_field_196_after": struct.unpack("<H", uc.mem_read(defender + 0x196, 2))[0],
+                    "attacker_priority_1bc": uc.mem_read(child + 0x1BC, 1)[0],
+                    "projectile_reaction_194": uc.mem_read(child + 0x194, 1)[0],
+                    "projectile_hitstop_196": struct.unpack("<H", uc.mem_read(child + 0x196, 2))[0],
+                    "defender_priority_1bc": uc.mem_read(defender + 0x1BC, 1)[0],
+                    "hit_response_field_trace": pair_dispatch["hit_response_field_trace"],
+                    "projectile_field_190_after": u32(uc, child + 0x190),
                     "error": pair_error,
                     "failure_after_damage": bool(pair_error and
                         pair_dispatch["defender_hp_after"] < pair_hp_before),
@@ -702,7 +847,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
             response_sp = STACK + 0xB000 - 12
             uc.mem_write(response_sp, struct.pack("<3I", STOP, child, defender))
             uc.reg_write(UC_X86_REG_ESP, response_sp)
-            uc.reg_write(UC_X86_REG_ECX, LIST)
+            uc.reg_write(UC_X86_REG_ECX, PAIR_MANAGER)
             uc.reg_write(UC_X86_REG_EIP, 0x0047B660)
             probe._code_trace.clear()
             probe._trace_active = True
@@ -732,8 +877,11 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 "damage_applied": struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0]
                 == hp_before - int(probe.pat_fixture["sequences"][0]["frames"][0]["damage"]),
                 "attacker_hit_priority_1bc": uc.mem_read(child + 0x1BC, 1)[0],
-                "defender_reaction_194": uc.mem_read(defender + 0x194, 1)[0],
-                "attacker_cooldown_190": u32(uc, child + 0x190),
+                "projectile_reaction_194": uc.mem_read(child + 0x194, 1)[0],
+                "projectile_hitstop_196": struct.unpack("<H", uc.mem_read(child + 0x196, 2))[0],
+                "defender_field_194_after": uc.mem_read(defender + 0x194, 1)[0],
+                "defender_field_196_after": struct.unpack("<H", uc.mem_read(defender + 0x196, 2))[0],
+                "projectile_field_190_after": u32(uc, child + 0x190),
                 "error": response_error,
                 "failure_after_damage": bool(response_error and
                     struct.unpack("<H", uc.mem_read(defender + 0x184, 2))[0] < hp_before),
@@ -750,6 +898,38 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         manager_update_stub = STOP + 0x500
         uc.mem_write(manager_update_stub, b"\x8b\x01\xff\x50\x10\xc3")
         manager_ticks: list[dict[str, object]] = []
+
+        def snapshot_live_nodes() -> list[dict[str, object]]:
+            root = u32(uc, LIST + 0x58)
+            current = u32(uc, root)
+            rows: list[dict[str, object]] = []
+            seen: set[int] = set()
+            while current != root and current not in seen and len(rows) < 512:
+                seen.add(current)
+                obj = u32(uc, current + 8)
+                if obj > 0x1000:
+                    selected_frame = u32(uc, obj + 0x158)
+                    rows.append({
+                        "node": hex(current), "object": hex(obj),
+                        "action": str(struct.unpack("<H", uc.mem_read(obj + 0x13C, 2))[0]),
+                        "sequence": struct.unpack("<H", uc.mem_read(obj + 0x13E, 2))[0],
+                        "pose": struct.unpack("<H", uc.mem_read(obj + 0x140, 2))[0],
+                        "pose_count": struct.unpack("<H", uc.mem_read(obj + 0x148, 2))[0],
+                        "selected_frame_duration": (
+                            struct.unpack("<H", uc.mem_read(selected_frame + 8, 2))[0]
+                            if selected_frame > 0x1000 else None),
+                        "update_counter_144": u32(uc, obj + 0x144),
+                        "mode_190": u32(uc, obj + 0x190),
+                        "x": struct.unpack("<f", uc.mem_read(obj + 0xEC, 4))[0],
+                        "y": struct.unpack("<f", uc.mem_read(obj + 0xF0, 4))[0],
+                        "field_34c": u32(uc, obj + 0x34C),
+                    })
+                else:
+                    rows.append({"node": hex(current), "object": hex(obj),
+                                 "action": "invalid"})
+                current = u32(uc, current)
+            return rows
+
         for tick in range(120):
             if u32(uc, child + 0x34C) == 0:
                 break
@@ -765,9 +945,13 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                 completed = uc.reg_read(UC_X86_REG_EIP) == STOP
                 state = {"tick": tick + 1, "completed": completed,
                          "field_34c": u32(uc, child + 0x34C),
+                         "collision_type_190": u32(uc, child + 0x190),
+                         "priority_194": uc.mem_read(child + 0x194, 1)[0],
+                         "hitstop_196": struct.unpack("<H", uc.mem_read(child + 0x196, 2))[0],
                          "action": struct.unpack("<H", uc.mem_read(child + 0x13C, 2))[0],
                          "pose": struct.unpack("<H", uc.mem_read(child + 0x140, 2))[0],
-                         "trace": [hex(pc) for pc in probe._code_trace[-12:]]}
+                         "trace": [hex(pc) for pc in probe._code_trace[-50:]]}
+                state["live_nodes"] = snapshot_live_nodes()
                 manager_ticks.append(state)
                 child_updates.append({"tick": tick + 1,
                                       "action": state["action"],
@@ -775,6 +959,9 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                                       "pose": state["pose"],
                                       "subframe": struct.unpack("<H", uc.mem_read(child + 0x142, 2))[0],
                                       "field_34c": state["field_34c"],
+                                      "collision_type_190": state["collision_type_190"],
+                                      "priority_194": state["priority_194"],
+                                      "hitstop_196": state["hitstop_196"],
                                       "position": [struct.unpack("<f", uc.mem_read(child + 0xEC, 4))[0],
                                                    struct.unpack("<f", uc.mem_read(child + 0xF0, 4))[0]]})
                 if not completed:
@@ -787,22 +974,13 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                                       "child_field_34c": u32(uc, child + 0x34C),
                                       "esi": hex(uc.reg_read(UC_X86_REG_ESI)),
                                       "edx": hex(uc.reg_read(UC_X86_REG_EDX)),
-                                      "trace": [hex(pc) for pc in probe._code_trace[-12:]]})
+                                      "trace": [hex(pc) for pc in probe._code_trace[-50:]]})
                 child_update_error = f"manager update: {manager_ticks[-1]['error']}"
                 break
             finally:
                 probe._trace_active = False
         root_node = u32(uc, LIST + 0x58)
-        node = u32(uc, root_node)
-        live_nodes: list[dict[str, str]] = []
-        seen_nodes: set[int] = set()
-        while node != root_node and node not in seen_nodes and len(live_nodes) < 512:
-            seen_nodes.add(node)
-            obj = u32(uc, node + 8)
-            live_nodes.append({"node": hex(node), "object": hex(obj),
-                               "action": str(struct.unpack("<H", uc.mem_read(obj + 0x13C, 2))[0])
-                               if obj > 0x1000 else "invalid"})
-            node = u32(uc, node)
+        live_nodes = snapshot_live_nodes()
         manager_tick = {"ticks": manager_ticks,
                         "interface": hex(LIST - 4),
                         "update_slot": "vtable[4] -> 0x633ce0",
@@ -812,6 +990,7 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                         "original_child_still_linked": any(
                             row["object"] == child_factory["pointer"] for row in live_nodes),
                         "live_node_actions": [row["action"] for row in live_nodes],
+                        "live_node_details": live_nodes,
                         "list_root_pointer": hex(u32(uc, LIST + 0x58)),
                         "root_node": {"next": hex(u32(uc, u32(uc, LIST + 0x58))),
                                       "previous": hex(u32(uc, u32(uc, LIST + 0x58) + 4)),
@@ -836,6 +1015,14 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         "factory_calls": factory_calls,
         "factory_returns": factory_returns,
         "create_object_helper_calls": create_object_helper_calls,
+        "effect_manager": {"global": "0x8985f0", "create_effect_slot": "vtable+0x0c",
+                           "synthetic_return": hex(synthetic_effect),
+                           "requests": effect_requests},
+        "manager_vector_writes": manager_vector_writes,
+        "rep_movsd_contexts": rep_movsd_contexts,
+        "large_memory_copy_contexts": memory_copy_contexts,
+        "large_buffer_assignments": large_buffer_assignments,
+        "large_range_copies": large_range_copies,
         "collision_matrix": collision_matrix,
         "pair_dispatch": pair_dispatch,
         "damage_response": damage_response,

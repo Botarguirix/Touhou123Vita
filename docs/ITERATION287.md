@@ -1,0 +1,9 @@
+# Iteración 2.187: auxiliares BG36 visibles en el combate
+
+El autotest selecciona temporalmente BG36 durante una ventana de la pelea y carga sus cuatro auxiliares del DAT: `tori1`, `tori2`, `clowd_l` y `clowd_s`. Los dibuja con los pivotes, posiciones base y proyección por cámara ya reconstruidos; el update mueve los torii a −1.5/−1.0 unidades por tick y conserva los wrap originales. La ruta usa escala unitaria: no reutiliza el ajuste provisional del visor como si fuera una constante del PE. El modo interactivo todavía usa BG33 como fondo y no ofrece selector de escenario.
+
+El gate automatizado fuerza una captura durante el combate y exige los cuatro recursos, cuatro quads aceptados por Soft2D y un tick de actualización. El autotest de 107,875 bytes (SHA-256 `3f7c9fd18ee0cdfad841a78a490be87fa1646ff71f301710189511126ed97373`) pasó Vita3K SDL, schema46/600: `regression_gate=1`, `battle_bg36_loaded=4`, `battle_bg36_draw_mask=15`, `battle_bg36_updates=1`, torii en −401.5/−301.0. El VPK interactivo recién generado mide 107,709 bytes (SHA-256 `2564103721a330fce175fbe6c7ab4e87f33ccc7cde0cfd948332faf09a33b4c5`); ambos se construyeron desde el mismo árbol.
+
+Captura de la ventana de prueba: [fight-bg36.bmp](../artifacts/screenshots/fight-bg36.bmp). La composición no está terminada: la imagen muestra auxiliares sobredimensionados y el renderer de la matriz base BG36 aún no se ha reconstruido. Tampoco se ha cotejado contra un frame del juego PC. La capa BG33 sigue como fondo normal del modo interactivo. Suite Python completa: 139/139 y prueba focal de contrato BG36: 3/3 después del cambio. [Reporte Vita3K](../artifacts/vita3k-result.json).
+
+Siguiente: recuperar escala/composición real de los cuatro auxiliares y sus capas, integrar la matriz base y cotejar con una captura de referencia antes de considerar BG36 un escenario funcional.

@@ -33,6 +33,15 @@ class PhysicsOracleTest(unittest.TestCase):
         self.assertEqual(self.oracle.step(100.0, 4.5, 1,
                                          opponent_motion_lock=1), 100.0)
 
+    def test_flat_locked_stage_uses_original_world_bounds(self):
+        # Only the two stage collision queries are synthetic. This executes
+        # the PE's integration and its 40/1240 clamp, not a Python clamp.
+        for x, vx, expected in ((42.0, -4.5, 40.0),
+                                (1238.0, 4.5, 1240.0),
+                                (700.0, 4.5, 704.5)):
+            with self.subTest(x=x):
+                self.assertEqual(self.oracle.step(x, vx, 1, stage_locked=True), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

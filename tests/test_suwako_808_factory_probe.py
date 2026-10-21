@@ -95,6 +95,28 @@ class Suwako808FactoryProbeTest(unittest.TestCase):
         self.assertEqual(result["object_after_updates"]["alpha"], 0)
         self.assertEqual(result["object_after_updates"]["field_34c_u32"], 0)
 
+    def test_alice_849_sequence_19_advances_to_attack_sequence_21(self):
+        result = Suwako808FactoryProbe(
+            self.exe, character="alice", action_id=849,
+            intercept_box_transforms=True).run(ticks=40)
+        self.assertTrue(result["factory_completed"])
+        self.assertIsNone(result["update_error"])
+        obj = result["factory_return_object"]
+        self.assertEqual((obj["action"], obj["sequence"], obj["pose_count"]), (849, 19, 1))
+        self.assertEqual(result["pat_fixture"]["duplicate_sequence_definitions"], 26)
+        self.assertEqual(result["pat_fixture"]["runtime_sequence_policy"],
+                         "last action definition; effective sequence table")
+        seq19 = result["pat_fixture"]["sequences"][19]["frames"][0]
+        self.assertEqual((seq19["damage"], seq19["attack_boxes"]), (200, []))
+        self.assertEqual(result["updates"][2]["sequence"], 20)
+        self.assertEqual(result["updates"][28]["sequence"], 21)
+        seq20 = result["pat_fixture"]["sequences"][20]["frames"][1]
+        seq21 = result["pat_fixture"]["sequences"][21]["frames"][0]
+        self.assertEqual((seq20["damage"], len(seq20["attack_boxes"])), (150, 2))
+        self.assertEqual((seq21["damage"], len(seq21["attack_boxes"])), (450, 2))
+        self.assertEqual(result["object_after_updates"]["sequence"], 21)
+        self.assertEqual(result["invalid_memory_accesses"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
