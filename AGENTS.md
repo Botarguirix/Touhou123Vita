@@ -35,6 +35,8 @@ foreach ($d in 'original','local','artifacts') { New-Item -ItemType Junction -Pa
 Set-Location $wt
 ```
 
+**Nunca borres esas junctions con `Remove-Item -Recurse`**: borraría el contenido real del checkout principal (el `.exe`, los DAT, las herramientas). Si hay que quitarlas, usa `(Get-Item <ruta>).Delete()`.
+
 Al terminar: commit **solo** de tus archivos en la rama `codex/<n>` con el mensaje `codex <n>: <resumen>`. **No hagas push, merge ni rebase**, y no borres el worktree: Claude lo revisa e integra.
 
 ## Reglas fijas
