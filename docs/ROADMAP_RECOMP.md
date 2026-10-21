@@ -2,7 +2,7 @@
 
 Fecha: 20 de octubre de 2026. **Aprobada el 21 de octubre de 2026**; sustituye la estrategia del [roadmap anterior](ROADMAP.md), que queda como historial.
 
-**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). Siguiente: F1.2, lifter mínimo.
+**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). **F1.2 (lifter mínimo + modelo x87 explícito) completada**: el kernel de animación traducido pasa 2 048/2 048 casos, el x87 coincide con la FPU real en 2,7 M comprobaciones y 55/57 funciones x87 reales coinciden con el original ([F1_LIFTER.md](F1_LIFTER.md)). Siguiente: F1.3, cobertura de traducción del ejecutable completo.
 
 F0 (21 oct 2026). Detalles en [PE_INVENTORY.md](PE_INVENTORY.md): la ruta sigue adelante, con dos ajustes en F1 (descubrimiento propio de funciones y switch, y verificación del modo x87 que deja D3D9).
 
