@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class StageCatalogTests(unittest.TestCase):
     def test_catalog_covers_every_stage_id_dispatched_by_the_pe(self):
-        source = (ROOT / "src/vita_main.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy/src/vita_main.c").read_text(encoding="utf-8")
         match = re.search(r"static const char \*stage_names\[\]=\{([^}]+)\};", source)
         self.assertIsNotNone(match)
         names = re.findall(r'"(bg[0-9]{2})"', match.group(1))
@@ -19,7 +19,7 @@ class StageCatalogTests(unittest.TestCase):
         self.assertEqual(names[names.index("bg34") + 1], "bg35")
 
     def test_blank_stage_viewer_reports_missing_decoded_tiles(self):
-        source = (ROOT / "src/vita_main.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy/src/vita_main.c").read_text(encoding="utf-8")
         self.assertIn("No base tiles decoded from the local DATs", source)
 
 

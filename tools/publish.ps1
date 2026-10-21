@@ -23,7 +23,7 @@ $password=$null; $credential=$null; $headers=$null
 if(!(Test-Path "$root/.git")){git -C $root init -b main}
 if($LASTEXITCODE -ne 0){throw 'git init failed'}
 if(!(git -C $root remote)){git -C $root remote add origin $repo.clone_url}
-$paths=@('.gitignore','.gitattributes','CMakeLists.txt','README.md','docs','include','src','tests','tools','.github')
+$paths=@('.gitignore','.gitattributes','CMakeLists.txt','README.md','docs','legacy','recomp','tests','tools','.github')
 foreach($path in $paths){if(Test-Path (Join-Path $root $path)){git -C $root add -- $path}}
 if($LASTEXITCODE -ne 0){throw 'Staging failed'}
 $staged=@(git -C $root diff --cached --name-only)

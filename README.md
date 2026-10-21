@@ -1,6 +1,6 @@
 # Touhou123Vita
 
-> **Propuesta de cambio de ruta (pendiente de aprobación):** [recompilación estática del PE original para Vita](docs/ROADMAP_RECOMP.md).
+> **Ruta vigente desde el 21 de octubre de 2026:** [recompilación estática del PE original para Vita](docs/ROADMAP_RECOMP.md). F0 completada: el motor hecho a mano quedó congelado en [`legacy/`](legacy/README.md) (etiqueta `legacy-reimpl-2.199`) y el [inventario del PE](docs/PE_INVENTORY.md) confirma la ruta. Lo que sigue debajo describe el prototipo legacy.
 
 - [Iteración 2.199: cajas PAT en unidades de mundo](docs/ITERATION299.md)
 - [Iteración 2.198: inicio de jugadores y cámara recuperado del PE](docs/ITERATION298.md)

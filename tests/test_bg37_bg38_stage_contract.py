@@ -48,7 +48,7 @@ class Bg37Bg38StageContractTests(unittest.TestCase):
             self.assertIn(bytes.fromhex("dc 25 b8 81 85 00"), update)
             self.assertIn(bytes.fromhex("dc 25 c8 77 86 00"), update)
 
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         bg37 = source.split("void t123_bg37_scroll_update", 1)[1].split("void t123_bg38_scroll_init", 1)[0]
         bg38 = source.split("void t123_bg38_scroll_update", 1)[1].split("void t123_stage_animation_update", 1)[0]
         for statement in ("scroll->counter += 1u", "scroll->tori1_x -= 1.5f",
@@ -82,13 +82,13 @@ class Bg37Bg38StageContractTests(unittest.TestCase):
         for instruction in ("d9 46 68", "d9 46 6c", "d9 05 f4 af 85 00", "d9 05 f0 af 85 00"):
             self.assertIn(bytes.fromhex(instruction), bg38)
 
-        source = (ROOT / "src" / "vita_main.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "vita_main.c").read_text(encoding="utf-8")
         self.assertIn("stage_bg37_tori1_x", source)
         self.assertIn("stage_bg37_clowd_l_x", source)
         self.assertIn("unsigned asset_index=i", source)
 
     def test_vita_gallery_updates_and_reports_both_stage_clouds(self):
-        source = (ROOT / "src" / "vita_main.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "vita_main.c").read_text(encoding="utf-8")
         self.assertIn("t123_bg37_scroll_update(&stage_bg37_scroll)", source)
         self.assertIn("t123_bg38_scroll_update(&stage_bg38_scroll)", source)
         self.assertIn('!strcmp(stage_names[stage_index],"bg37")||!strcmp(stage_names[stage_index],"bg38")', source)

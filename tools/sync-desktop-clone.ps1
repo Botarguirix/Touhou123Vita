@@ -8,7 +8,7 @@ $status=git -c "safe.directory=$($dest.Replace('\','/'))" -C $dest status --porc
 if($status){throw 'Destination contains changes; refusing to overwrite'}
 $files=git -c "safe.directory=$($source.Replace('\','/'))" -C $source ls-files --cached --others --exclude-standard
 foreach($file in $files){
- if($file -notmatch '^(src/|include/|tests/|tools/|docs/|\.github/|README\.md$|CMakeLists\.txt$|\.gitignore$|\.gitattributes$)'){throw "Unapproved source path: $file"}
+ if($file -notmatch '^(legacy/|recomp/|tests/|tools/|docs/|\.github/|README\.md$|CMakeLists\.txt$|\.gitignore$|\.gitattributes$)'){throw "Unapproved source path: $file"}
  if($file -match '\.(exe|dll|dat|vpk|rgba|png|zip|bmp)$'){throw "Binary excluded: $file"}
  $target=[System.IO.Path]::GetFullPath((Join-Path $dest $file))
  if(!$target.StartsWith($dest+[System.IO.Path]::DirectorySeparatorChar)){throw 'Destination path escapes clone'}

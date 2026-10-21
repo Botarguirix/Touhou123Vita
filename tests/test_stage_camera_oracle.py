@@ -30,7 +30,7 @@ class StageCameraOracleTests(unittest.TestCase):
                 self.assertTrue(math.isclose(actual, expected, rel_tol=2e-6, abs_tol=2e-6))
 
     def test_core_uses_x86_horizontal_floor_vertical_weight_and_zoom_floor(self):
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         camera = source.split("int t123_stage_camera_pair_target", 1)[1].split("void t123_bg36_scroll_init", 1)[0]
         for expression in (
             "fabsf(player0_x - player1_x) + 80.0f",
@@ -57,7 +57,7 @@ class StageCameraOracleTests(unittest.TestCase):
                 300, 400, y0, y1,
                 initial=(0, 0, .5, 1.0, .5, 0, 0))[1]
             self.assertAlmostEqual(observed, expected)
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         camera = source.split("int t123_stage_camera_y_target", 1)[1].split("int t123_stage_camera_zoom_step", 1)[0]
         self.assertIn("2.0f * current_zoom - 1.0f", camera)
         self.assertIn("minimum_y > 270.0f", camera)
@@ -80,7 +80,7 @@ class StageCameraOracleTests(unittest.TestCase):
                 x0, x1, y0, y1,
                 state=(550, target_y, zoom, zoom, 550, current_y))[2]
             self.assertTrue(math.isclose(actual, expected, abs_tol=3e-4))
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         easing = source.split("int t123_stage_camera_y_step", 1)[1].split("int t123_stage_camera_zoom_step", 1)[0]
         self.assertIn("? 10.0f : 20.0f", easing)
         self.assertIn("difference / divisor + 1.0f", easing)
@@ -131,7 +131,7 @@ class StageCameraOracleTests(unittest.TestCase):
             200, 200, 0, 0, state=(320, 420, 1.0, 0.5, 320, 420))[0]
         self.assertTrue(math.isclose(zoom_out, 0.96210259, abs_tol=2e-6))
         self.assertTrue(math.isclose(zoom_in, 0.50825, abs_tol=2e-6))
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         easing = source.split("int t123_stage_camera_zoom_step", 1)[1].split("void t123_bg36_scroll_init", 1)[0]
         self.assertIn("(target_zoom - current_zoom) / 5.0f - 0.002f", easing)
         self.assertIn("(target_zoom - current_zoom) / 80.0f + 0.002f", easing)
@@ -146,7 +146,7 @@ class StageCameraOracleTests(unittest.TestCase):
             with self.subTest(state=state):
                 actual = original_camera_update(*points, state=state)[1]
                 self.assertTrue(math.isclose(actual, expected, abs_tol=2e-4))
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         easing = source.split("int t123_stage_camera_x_step", 1)[1].split("void t123_bg36_scroll_init", 1)[0]
         self.assertIn("difference / 30.0f + 5.0f", easing)
         self.assertIn("difference / 30.0f - 5.0f", easing)
@@ -188,14 +188,14 @@ class StageCameraOracleTests(unittest.TestCase):
         self.assertIn("00438d24\t8b 8e 54 01 00 00\tmov\tecx, dword ptr [esi + 0x154]", caller)
         self.assertIn("00429401\td9 46 10\tfld\tdword ptr [esi + 0x10]", probe)
         self.assertIn("00429415\td9 46 14\tfld\tdword ptr [esi + 0x14]", probe)
-        stage = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        stage = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         projection = stage.split("int t123_stage_camera_project", 1)[1].split("void t123_bg36_scroll_init", 1)[0]
         self.assertIn("(world_x - camera->x - viewport_x) * camera->zoom + 320.0f", projection)
         self.assertIn("(world_y - camera->y - viewport_y) * camera->zoom + 420.0f", projection)
-        fight = (ROOT / "src" / "fight.c").read_text(encoding="utf-8")
+        fight = (ROOT / "legacy" / "src" / "fight.c").read_text(encoding="utf-8")
         self.assertIn("t123_stage_camera_step(&g->camera", fight)
         self.assertIn("-(float)g->p[0].y", fight)
-        vita = (ROOT / "src" / "vita_main.c").read_text(encoding="utf-8")
+        vita = (ROOT / "legacy" / "src" / "vita_main.c").read_text(encoding="utf-8")
         self.assertIn("T123StageCamera camera=g->scene==SCENE_FIGHT?g->camera", vita)
         self.assertIn("t123_stage_camera_project(&camera,world_x,world_y", vita)
         self.assertIn("float world_x=g->scene==SCENE_FIGHT?(float)p->x:", vita)
@@ -208,12 +208,12 @@ class StageCameraOracleTests(unittest.TestCase):
         self.assertIn("soft2d_draw_texture_region_scale_alpha(t,pose->tx,pose->ty,(int)pose->tx+pose->tw", vita)
         self.assertIn("sprite_region_crop_contract_seen=soft2d_texture_region_crop_contract()", vita)
         self.assertIn("&&sprite_region_crop_contract_seen&&", vita)
-        soft2d = (ROOT / "src" / "soft2d.c").read_text(encoding="utf-8")
+        soft2d = (ROOT / "legacy" / "src" / "soft2d.c").read_text(encoding="utf-8")
         self.assertIn("soft2d_draw_texture_region_scale(&texture,1,1,3,3,20,20,1,1)", soft2d)
         self.assertIn("soft2d_draw_texture_region_scale_alpha(&texture,0,0,1,1,40,40,1,1,128)", soft2d)
         runner = (ROOT / "tools" / "vita3k-test.ps1").read_text(encoding="utf-8")
         self.assertIn("!$result.sprite_region_crop_contract", runner)
-        pattern = (ROOT / "src" / "pattern.c").read_text(encoding="utf-8")
+        pattern = (ROOT / "legacy" / "src" / "pattern.c").read_text(encoding="utf-8")
         self.assertIn("f->tx=(int16_t)get16(v+4);f->ty=(int16_t)get16(v+6);f->tw=(int16_t)get16(v+8);f->th=(int16_t)get16(v+10)", pattern)
 
 

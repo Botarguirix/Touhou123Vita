@@ -19,7 +19,7 @@ $mode=if($AutoTest){'auto'}else{'interactive'}
 if(!$BuildDirectory){$BuildDirectory=Join-Path $root "artifacts/manual-vita-$mode"}
 $build=[IO.Path]::GetFullPath($BuildDirectory)
 New-Item -ItemType Directory -Force $build | Out-Null
-$include=Join-Path $root 'include';$source=Join-Path $root 'src'
+$include=Join-Path $root 'legacy/include';$source=Join-Path $root 'legacy/src'
 $coreNames=@('core.c','fight.c','animation.c','resources.c','pattern.c','input.c','stage.c','replay.c');$objects=@()
 foreach($name in $coreNames){
     $object=Join-Path $build ($name+'.o')
@@ -52,7 +52,7 @@ $packArgs=@(
     '-a',((Join-Path $sceSys 'livearea/contents/startup.png')+'=sce_sys/livearea/contents/startup.png'),
     '-a',((Join-Path $sceSys 'livearea/contents/template.xml')+'=sce_sys/livearea/contents/template.xml')
 )
-if($AutoTest){$packArgs+=@('-a',((Join-Path $root 'tests/auto-test.txt')+'=auto-test.txt'))}
+if($AutoTest){$packArgs+=@('-a',((Join-Path $root 'legacy/tests/auto-test.txt')+'=auto-test.txt'))}
 $packArgs+=@('-s',$sfo,'-b',$self,$vpk)
 & (Join-Path $VitaSDK 'bin/vita-pack-vpk.exe') @packArgs
 if($LASTEXITCODE -ne 0){throw 'VPK packaging failed'}

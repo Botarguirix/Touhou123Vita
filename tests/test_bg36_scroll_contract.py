@@ -70,8 +70,8 @@ class Bg36ScrollContractTests(unittest.TestCase):
         self.assertLess(cloud_s_pass, tile_pass)
         self.assertLess(tile_pass, torii_pass)
 
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
-        vita_source = (ROOT / "src" / "vita_main.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
+        vita_source = (ROOT / "legacy" / "src" / "vita_main.c").read_text(encoding="utf-8")
         bg36_page = vita_source.split('stage_layer==2&&!strcmp(stage_names[stage_index],"bg36")', 1)[1].split('stage_layer==2&&(!strcmp(stage_names[stage_index],"bg37")', 1)[0]
         self.assertIn("for(unsigned i=0;i<4;i++)if(stage_extras[i])", bg36_page)
         self.assertIn("t123_bg36_project_aux_quad(i", bg36_page)
@@ -110,7 +110,7 @@ class Bg36ScrollContractTests(unittest.TestCase):
         # reinitializes scroll state, but must not erase an already rendered page.
         stage_step = vita_source.split("static int stage_step", 1)[1].split("static int gallery_step", 1)[0]
         self.assertNotIn("stage_bg36_cloud_quads_projected=0", stage_step)
-        stage_source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        stage_source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         self.assertIn("float pivot_x = (aux_slot == 0u || aux_slot == 1u || aux_slot == 3u) ? width * 0.5f : 0.0f", stage_source)
         self.assertIn("float pivot_y = (aux_slot == 0u || aux_slot == 1u || aux_slot == 3u) ? height : 0.0f", stage_source)
         self.assertIn("(local_x + translation.x) * zoom", stage_source)
@@ -147,8 +147,8 @@ class Bg36ScrollContractTests(unittest.TestCase):
                      "stage-layout")
         constructor = (stage_dir / "00475eb0.c").read_text(encoding="utf-8")
         common_loader = (stage_dir / "0046fe40.c").read_text(encoding="utf-8")
-        stage_source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
-        vita_source = (ROOT / "src" / "vita_main.c").read_text(encoding="utf-8")
+        stage_source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
+        vita_source = (ROOT / "legacy" / "src" / "vita_main.c").read_text(encoding="utf-8")
         resource_loader = (ROOT / "artifacts" / "kernel" / EXPECTED_SHA256 /
                            "resource-loader" / "00405030.c").read_text(encoding="utf-8")
         self.assertIn("FUN_0046fe40(0x24,0x56,1)", constructor)

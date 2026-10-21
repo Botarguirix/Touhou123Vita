@@ -15,7 +15,7 @@ $core=@('core.c','fight.c','animation.c','resources.c','pattern.c')
 $objects=@()
 foreach($name in $core){
     $object=Join-Path $build ($name+'.o')
-    & $cc '-I' (Join-Path $root 'include') '-O3' '-DNDEBUG' '-std=gnu11' '-Wall' '-Wextra' '-Werror' '-c' (Join-Path $root "src/$name") '-o' $object
+    & $cc '-I' (Join-Path $root 'legacy/include') '-O3' '-DNDEBUG' '-std=gnu11' '-Wall' '-Wextra' '-Werror' '-c' (Join-Path $root "legacy/src/$name") '-o' $object
     if($LASTEXITCODE -ne 0){throw "Core compile failed: $name"}
     $objects+=,$object
 }
@@ -23,7 +23,7 @@ $library=Join-Path $build 'libt123_core.a'
 & $ar rcs $library @objects
 if($LASTEXITCODE -ne 0){throw 'Core archive failed'}
 $probe=Join-Path $build 'resource_probe.o'
-& $cc '-I' (Join-Path $root 'include') '-O3' '-DNDEBUG' '-std=gnu11' '-Wno-misleading-indentation' '-Dmain=t123_resource_probe_main' '-c' (Join-Path $root 'tests/resource_probe.c') '-o' $probe
+& $cc '-I' (Join-Path $root 'legacy/include') '-O3' '-DNDEBUG' '-std=gnu11' '-Wno-misleading-indentation' '-Dmain=t123_resource_probe_main' '-c' (Join-Path $root 'legacy/tests/resource_probe.c') '-o' $probe
 if($LASTEXITCODE -ne 0){throw 'Resource probe compile failed'}
 $runner=Join-Path $build 'pat_image_audit_main.o'
 & $cc '-O3' '-DNDEBUG' '-std=gnu11' '-c' (Join-Path $PSScriptRoot 'pat_image_audit_main.c') '-o' $runner

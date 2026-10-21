@@ -1,6 +1,8 @@
 # Propuesta y roadmap: Touhou 12.3 en PS Vita por recompilación estática
 
-Fecha: 20 de octubre de 2026. Sustituye la estrategia del [roadmap anterior](ROADMAP.md) si se aprueba; ese documento queda como historial.
+Fecha: 20 de octubre de 2026. **Aprobada el 21 de octubre de 2026**; sustituye la estrategia del [roadmap anterior](ROADMAP.md), que queda como historial.
+
+**Estado: F0 completada** (21 oct 2026). Detalles en [PE_INVENTORY.md](PE_INVENTORY.md): la ruta sigue adelante, con dos ajustes en F1 (descubrimiento propio de funciones y switch, y verificación del modo x87 que deja D3D9).
 
 ## 1. Diagnóstico del proyecto actual
 
@@ -114,6 +116,7 @@ Cada fase tiene un criterio de salida. Si una fase se atasca, se reevalúa la ru
 - Inventario exacto del PE: secciones, compilador y versión del CRT de MSVC, si está empaquetado, IAT completa, objetos COM creados (`CoCreateInstance`: DirectSound, DirectInput), efectos D3DX embebidos e hilos.
 - Lista de funciones desde el proyecto Ghidra existente más heurísticas, con conteo y tamaño.
 - **Salida:** documento `docs/PE_INVENTORY.md` con la decisión de seguir o no seguir con D.
+- **Resultado:** completada. Se etiquetó `legacy-reimpl-2.199`, el motor está en `legacy/` y sigue compilando (host y VPK). Herramientas nuevas: `tools/pe_inventory.py` y `tools/export-functions.ps1`. Decisión: seguir. El proyecto Ghidra deja el 47 % de `.text` fuera de funciones (switch sin resolver), así que F1 empieza por el descubrimiento propio de funciones.
 
 ### F1 — Lifter y cobertura
 - Traductor x86 → C para el conjunto de instrucciones que usa el PE: enteros, x87, SSE si existe y cadenas (`rep movs`).

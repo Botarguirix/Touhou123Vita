@@ -83,13 +83,13 @@ class Bg33PeVtableOracleTests(unittest.TestCase):
         for address, value in expected.items():
             offset = self.pe.get_offset_from_rva(address - self.pe.OPTIONAL_HEADER.ImageBase)
             self.assertEqual(struct.unpack('<d', self.data[offset:offset + 8])[0], value)
-        source = (ROOT / 'src' / 'stage.c').read_text(encoding='utf-8')
+        source = (ROOT / 'legacy' / 'src' / 'stage.c').read_text(encoding='utf-8')
         self.assertIn('320.0f / zoom', source)
         self.assertIn('640.0f - (viewport_x + camera_x)', source)
         self.assertIn('420.0f / zoom - (viewport_y + camera_y)', source)
 
     def test_bg33_background_is_integrated_into_live_fight_and_vita3k_gate(self):
-        source = (ROOT / "src" / "vita_main.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "vita_main.c").read_text(encoding="utf-8")
         runner = (ROOT / "tools" / "vita3k-test.ps1").read_text(encoding="utf-8")
         prepare = source.split("static void prepare_battle_bg33", 1)[1].split(
             "static void stage_load_extras", 1)[0]

@@ -93,12 +93,12 @@ class Bg12StageContractTests(unittest.TestCase):
         self.assertIn((0x472584, "call", "0x406ee0"), ops)
         helper = (self.stage_export / "00406ee0.c").read_text(encoding="utf-8")
         self.assertIn("*(float *)(param_1 + 0xb0) = param_2 + *(float *)(param_1 + 0xb0);", helper)
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         self.assertIn("*x = 492.0f", source)
         self.assertIn("*y = -401.0f", source)
 
     def test_bg12_layout_layer_retains_base_tiles_for_the_composition_map(self):
-        source = (ROOT / "src" / "vita_main.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "vita_main.c").read_text(encoding="utf-8")
         self.assertIn('if(stage_layer&&strcmp(stage_names[stage_index],"bg12")&&strcmp(stage_names[stage_index],"bg02"))continue;', source)
 
 

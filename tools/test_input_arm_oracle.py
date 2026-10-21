@@ -204,9 +204,9 @@ def main():
             str(cc), "-mcpu=cortex-a9", "-marm", "-O2", "-std=c11",
             "-ffreestanding", "-fno-builtin", "-fno-tree-vectorize",
             "-Wall", "-Wextra", "-Werror",
-            "-nostdlib", "-I", str(ROOT / "include"),
+            "-nostdlib", "-I", str(ROOT / "legacy/include"),
             "-Wl,-Ttext=0x10000", "-Wl,-e,_start", "-Wl,--build-id=none",
-            str(startup), str(harness), str(ROOT / "src/input.c"), "-lgcc",
+            str(startup), str(harness), str(ROOT / "legacy/src/input.c"), "-lgcc",
             "-o", str(elf),
         ]
         subprocess.run(command, check=True, cwd=ROOT)

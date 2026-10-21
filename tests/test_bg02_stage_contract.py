@@ -64,17 +64,17 @@ class Bg02StageContractTests(unittest.TestCase):
         self.assertEqual(struct.unpack("<f", self.pe.get_data(0x85AB30 - self.base, 4))[0], -472.0)
 
     def test_ported_segment_offsets_match_original_renderer(self):
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         for offset in ("{-332.0f, -472.0f}", "{0.0f, 0.0f}", "{312.0f, -472.0f}"):
             self.assertIn(offset, source)
-        header = (ROOT / "include" / "t123" / "stage.h").read_text(encoding="utf-8")
+        header = (ROOT / "legacy" / "include" / "t123" / "stage.h").read_text(encoding="utf-8")
         self.assertIn("t123_bg02_sprite_offset", header)
 
     def test_ported_frame_and_sprite_index_helpers_match_pe_cycle(self):
-        source = (ROOT / "src" / "stage.c").read_text(encoding="utf-8")
+        source = (ROOT / "legacy" / "src" / "stage.c").read_text(encoding="utf-8")
         self.assertIn("return (counter / 3u) % 16u;", source)
         self.assertIn("t123_bg02_frame(counter) * 3u + segment", source)
-        header = (ROOT / "include" / "t123" / "stage.h").read_text(encoding="utf-8")
+        header = (ROOT / "legacy" / "include" / "t123" / "stage.h").read_text(encoding="utf-8")
         self.assertIn("t123_bg02_sprite_index", header)
 
 
