@@ -129,8 +129,12 @@ static int patterned_states(void){
         CHECK(burst.objects[0].world_x>350.6f&&burst.objects[0].world_x<350.7f);
         CHECK(burst.objects[0].world_y>80.9f&&burst.objects[0].world_y<81.4f);
         CHECK(burst.p[1].action==50&&burst.p[1].stun==20);
+        /* update_objects includes the creation-frame collision pass. Like
+           PE +0x34c, active remains set until the next manager update; the
+           resolved contact must already suppress another damage pass. */
         CHECK(burst.objects[0].active&&burst.objects[0].life==1&&
-              burst.objects[0].age==0&&burst.objects[0].hit_done==0);
+              burst.objects[0].age==1&&burst.objects[0].hit_done==1&&
+              burst.objects[0].persist_after_hit==1);
         fight_step(&burst,0);
         CHECK(!burst.objects[0].active);
         CHECK(burst.p[1].hp==initial_hp-800&&burst.p[0].hits==1);
@@ -230,7 +234,11 @@ static int patterned_states(void){
         moves[6]=(T123Move){811,0,10,0,{1,1,&bullet_duration},&bullet_pose};
         pattern.moves=moves;pattern.move_count=7;
         Fight volley;fight_init(&volley);fixture_bind_character_patterns(&volley,&pattern,0,&pattern,16);
-        volley.ai=0;volley.scene=SCENE_FIGHT;volley.p[0].skill_card_id=104;volley.p[1].x=286;
+        volley.ai=0;volley.scene=SCENE_FIGHT;volley.p[0].skill_card_id=104;
+        /* Full world-unit boxes: on the first movement tick the rightmost
+           projectile ends at x=369, the next at 359. A hurt box starting at
+           360 isolates the first projectile instead of overlapping all four. */
+        volley.p[1].x=380;
         fight_step(&volley,IN_SPELLCARD);
         CHECK(volley.p[0].action==505&&volley.p[0].action_sequence_count==5);
         /* Action age >20 selects the four-projectile x86 spread. */
@@ -246,9 +254,11 @@ static int patterned_states(void){
             CHECK(o->active&&o->owner==0&&o->action==811&&o->sequence==0);
             CHECK(o->x==304&&o->y==96&&o->vx==expected_vx[n]&&o->vy==expected_vy[n]&&o->life==120);
         }
-        /* The projectile's first active movement update overlaps this guard
+        /* The projectile's first active movement update overlaps this hurt
            fixture; it should hit once, then remain damage-free. */
         fight_step(&volley,0);CHECK(volley.object_spawns==4&&volley.p[1].hp==volley.max_hp-550&&volley.p[0].hits==1);
+        CHECK(!volley.objects[0].active&&volley.objects[1].active&&
+              volley.objects[2].active&&volley.objects[3].active);
         fight_step(&volley,0);CHECK(volley.object_spawns==4&&volley.p[1].hp==volley.max_hp-550&&volley.p[0].hits==1);
         CHECK(volley.object_spawns==4);
 

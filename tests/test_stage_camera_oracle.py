@@ -200,8 +200,10 @@ class StageCameraOracleTests(unittest.TestCase):
         self.assertIn("t123_stage_camera_project(&camera,world_x,world_y", vita)
         self.assertIn("float world_x=g->scene==SCENE_FIGHT?(float)p->x:", vita)
         self.assertIn("float world_y=g->scene==SCENE_FIGHT?-(float)p->y:0.0f", vita)
-        self.assertIn("float object_x=o->action==821?o->world_x:(float)o->x", vita)
-        self.assertIn("float object_y=o->action==821?o->world_y:(float)o->y", vita)
+        # Remilia 801, like Suika 821, now carries full fractional world
+        # coordinates. Both must reach the same camera projection unrounded.
+        self.assertIn("float object_x=(o->action==821||o->action==801)?o->world_x:(float)o->x", vita)
+        self.assertIn("float object_y=(o->action==821||o->action==801)?o->world_y:(float)o->y", vita)
         self.assertIn("t123_stage_camera_project(&camera,object_x,-object_y", vita)
         self.assertIn("screen_x-p->face*(float)pose->ox*zoom", vita)
         self.assertIn("screen_y-(float)pose->oy*zoom", vita)

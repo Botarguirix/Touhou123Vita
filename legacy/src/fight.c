@@ -181,7 +181,10 @@ static T123Object *spawn_suika_530_burst(Fight *g,int owner){
  if(!object)return NULL;
  object->world_x=x;object->world_y=y;object->x=(int)x;object->y=(int)y;
  /* The original sequence-0 burst has alpha 0 and retires before its next
-    active update; its authored PAT box remains live for the creation frame. */
+    active update; its authored PAT box remains live for the creation frame.
+    0x47ce20 marks the contact without clearing +0x34c: preserve the object
+    until that next update while preventing a second damage resolution. */
+ object->persist_after_hit=1;
  object->alpha=0;
  return object;
 }
