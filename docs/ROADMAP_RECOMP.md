@@ -2,7 +2,9 @@
 
 Fecha: 20 de octubre de 2026. **Aprobada el 21 de octubre de 2026**; sustituye la estrategia del [roadmap anterior](ROADMAP.md), que queda como historial.
 
-**Estado: F0 completada** (21 oct 2026). Detalles en [PE_INVENTORY.md](PE_INVENTORY.md): la ruta sigue adelante, con dos ajustes en F1 (descubrimiento propio de funciones y switch, y verificación del modo x87 que deja D3D9).
+**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). Siguiente: F1.2, lifter mínimo.
+
+F0 (21 oct 2026). Detalles en [PE_INVENTORY.md](PE_INVENTORY.md): la ruta sigue adelante, con dos ajustes en F1 (descubrimiento propio de funciones y switch, y verificación del modo x87 que deja D3D9).
 
 ## 1. Diagnóstico del proyecto actual
 
