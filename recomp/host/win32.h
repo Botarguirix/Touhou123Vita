@@ -16,15 +16,30 @@
 #define _strnicmp strncasecmp
 #endif
 
-/* Guest memory map used by the host. */
+/* Guest memory map, identical on PC and Vita. Everything the guest can dereference
+ * lies below GUEST_WINDOW (128 MiB), so on the Vita it is one memory block:
+ *   0x00110000 stack (2 MiB)      0x00400000 image (th123.exe, to 0x008A4000)
+ *   0x00900000 TIB, PEB           0x01000000 heap (96 MiB)
+ *   0x07000000 VirtualAlloc (16 MiB)
+ * Fake call targets and module handles sit above the window: they are compared
+ * and called, never read. */
 enum {
     GUEST_STACK_BASE = 0x00110000u, GUEST_STACK_SIZE = 0x00200000u,
-    GUEST_HEAP_BASE = 0x10000000u, GUEST_HEAP_SIZE = 0x40000000u,
-    GUEST_VIRTUAL_BASE = 0x50000000u, GUEST_VIRTUAL_SIZE = 0x20000000u,
-    GUEST_FAKE_BASE = 0x7F000000u,  /* call targets of host functions; never mapped */
-    GUEST_TIB = 0x7FFDE000u, GUEST_PEB = 0x7FFDF000u,
+    GUEST_TIB = 0x00900000u, GUEST_PEB = 0x00901000u,
+    GUEST_HEAP_BASE = 0x01000000u, GUEST_HEAP_SIZE = 0x06000000u,
+    GUEST_VIRTUAL_BASE = 0x07000000u, GUEST_VIRTUAL_SIZE = 0x01000000u,
+    GUEST_FAKE_BASE = 0x7F000000u,
     FAKE_MODULE_KERNEL32 = 0x7C800000u, FAKE_MODULE_OTHER = 0x7C900000u,
 };
+_Static_assert(GUEST_VIRTUAL_BASE + GUEST_VIRTUAL_SIZE <= GUEST_WINDOW, "guest map exceeds the window");
+
+uint32_t heap_used(void);
+uint32_t virtual_used(void);
+extern char trace_path[256];
+/* Platform hooks (platform_pc.c / recomp/vita/platform_vita.c). */
+void platform_log(const char *line);   /* mirrors trace lines (Vita: on-screen log) */
+uint64_t platform_ticks_us(void);      /* monotonic microseconds */
+void platform_finish(const char *summary);
 
 #define ARG(c, n) rd32((c)->esp.d + 4u + 4u * (n))
 #define STR(a) ((char *)G(a))
@@ -50,6 +65,7 @@ const char *api_name(uint32_t fake);        /* for traces */
 /* -- support ----------------------------------------------------------------------- */
 void trace(const char *fmt, ...);
 void trace_summary(void);
+void trace_close(void); /* before the process ends: the Vita does not flush on exit */
 extern unsigned long long import_calls;
 _Noreturn void host_exit(Cpu *c, uint32_t code, const char *why);
 

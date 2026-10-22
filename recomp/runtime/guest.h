@@ -59,6 +59,10 @@ extern unsigned guest_trace_pos;
 #endif
 
 /* -- memory ------------------------------------------------------------------------ */
+/* Guest addresses below GUEST_WINDOW are backed by host memory. On PC the host
+   reserves the whole 4 GiB range (so stray accesses fault); on the Vita it is a
+   single block of GUEST_WINDOW bytes. */
+#define GUEST_WINDOW 0x08000000u
 extern uint8_t *guest_base;
 #define G(a) (guest_base + (uint32_t)(a))
 
@@ -94,6 +98,7 @@ uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *ar
 /* Reports and exits, or longjmps to guest_fault_trap when a test harness set one. */
 _Noreturn void guest_fault(Cpu *c, uint32_t address, const char *what);
 extern jmp_buf *guest_fault_trap;
+extern char guest_fault_text[256]; /* last guest_fault, for reports */
 
 /* -- integer flags ------------------------------------------------------------------ */
 static inline uint8_t parity8(uint32_t r) { return (uint8_t)!__builtin_parity(r & 0xFF); }

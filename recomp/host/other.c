@@ -7,13 +7,12 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #define API(name) static void name(Cpu *c)
 
 /* -- WINMM -------------------------------------------------------------------------- */
 API(timeBeginPeriod) { ret_stdcall(c, 0, 1); }
-API(timeGetTime) { ret_stdcall(c, (uint32_t)((uint64_t)clock() * 1000u / CLOCKS_PER_SEC), 0); }
+API(timeGetTime) { ret_stdcall(c, (uint32_t)(platform_ticks_us() / 1000u), 0); }
 
 /* -- USER32 ------------------------------------------------------------------------- */
 enum { FAKE_HWND = 0x00010010u, FAKE_HDC = 0x00020020u, FAKE_HICON = 0x00030030u };
@@ -170,10 +169,13 @@ API(WSAStartup) {
 }
 API(WSACleanup) { ret_stdcall(c, 0, 0); }
 
-/* -- D3D9: fails on purpose until the graphics layer exists (F2.2) ----------------- */
+/* -- D3D9: the run stops here until the graphics layer exists (F2.2) --------------
+ * Stopping (instead of returning NULL, which F2.0 did to observe the game's error
+ * path) gives PC and Vita the same deterministic end point: on the Vita the guest
+ * NULL page is inside the memory window, so the failure path would diverge. */
 API(Direct3DCreate9) {
-    trace("Direct3DCreate9(SDK %u): returning NULL, graphics layer pending (F2.2)", ARG(c, 0));
-    ret_stdcall(c, 0, 1);
+    trace("Direct3DCreate9(SDK %u) reached", ARG(c, 0));
+    host_exit(c, 0xD3D9, "Direct3DCreate9 reached: graphics layer pending (F2.2)");
 }
 
 /* -- IMAGEHLP ---------------------------------------------------------------------------- */

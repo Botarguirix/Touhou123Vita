@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#ifdef _WIN32
+#if defined(__vita__)
+#include <psp2/kernel/sysmem.h>
+#elif defined(_WIN32)
 #include <windows.h>
 #else
 #include <sys/mman.h>
@@ -20,7 +22,16 @@ uint32_t guest_image_base, guest_image_size;
 int guest_mem_init(void) {
     if (guest_base)
         return 0;
-#ifdef _WIN32
+#if defined(__vita__)
+    /* One block for the whole guest window; zeroed like freshly committed pages. */
+    SceUID block = sceKernelAllocMemBlock("t123 guest", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW,
+                                          GUEST_WINDOW, NULL);
+    void *p = NULL;
+    if (block < 0 || sceKernelGetMemBlockBase(block, &p) < 0)
+        return -1;
+    memset(p, 0, GUEST_WINDOW);
+    guest_base = p;
+#elif defined(_WIN32)
     guest_base = VirtualAlloc(NULL, (SIZE_T)1 << 32, MEM_RESERVE, PAGE_NOACCESS);
 #else
     void *p = mmap(NULL, (size_t)1 << 32, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -32,7 +43,10 @@ int guest_mem_init(void) {
 int guest_map(uint32_t address, uint32_t size) {
     uint32_t lo = address & ~0xFFFu;
     uint64_t hi = ((uint64_t)address + size + 0xFFF) & ~(uint64_t)0xFFF;
-#ifdef _WIN32
+#if defined(__vita__)
+    (void)lo;
+    return hi <= GUEST_WINDOW ? 0 : -1; /* the window is allocated up front */
+#elif defined(_WIN32)
     return VirtualAlloc(G(lo), (SIZE_T)(hi - lo), MEM_COMMIT, PAGE_READWRITE) ? 0 : -1;
 #else
     return mprotect(G(lo), (size_t)(hi - lo), PROT_READ | PROT_WRITE);
@@ -166,11 +180,13 @@ uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *ar
 }
 
 jmp_buf *guest_fault_trap;
+char guest_fault_text[256];
 
 _Noreturn void guest_fault(Cpu *c, uint32_t address, const char *what) {
-    fprintf(stderr, "guest_fault at 0x%08x: %s\n"
+    snprintf(guest_fault_text, sizeof guest_fault_text, "guest_fault at 0x%08x: %s", address, what);
+    fprintf(stderr, "%s\n"
             "  eax=%08x ecx=%08x edx=%08x ebx=%08x esp=%08x ebp=%08x esi=%08x edi=%08x\n",
-            address, what, c->eax.d, c->ecx.d, c->edx.d, c->ebx.d, c->esp.d, c->ebp.d,
+            guest_fault_text, c->eax.d, c->ecx.d, c->edx.d, c->ebx.d, c->esp.d, c->ebp.d,
             c->esi.d, c->edi.d);
     if (guest_fault_trap)
         longjmp(*guest_fault_trap, 1);

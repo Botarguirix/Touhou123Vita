@@ -12,8 +12,12 @@
 #ifdef _WIN32
 #include <direct.h>
 #define mkdir_host(p) _mkdir(p)
+#define file_seek fseeko64
+#define file_tell ftello64
 #else
 #define mkdir_host(p) mkdir(p, 0755)
+#define file_seek(f, o, w) fseek(f, (long)(o), w) /* game files are below 2 GiB */
+#define file_tell(f) ((int64_t)ftell(f))
 #endif
 
 enum { TLS_SLOTS = 64, TIB_TLS = 0xE10 };
@@ -34,11 +38,9 @@ API(ExitProcess) { host_exit(c, ARG(c, 0), "ExitProcess"); }
 API(TerminateProcess) { host_exit(c, ARG(c, 1), "TerminateProcess"); }
 API(Sleep) { ret_stdcall(c, 0, 1); }
 
-static uint64_t host_ticks_ms(void) { return (uint64_t)clock() * 1000u / CLOCKS_PER_SEC; }
-
-API(GetTickCount) { ret_stdcall(c, (uint32_t)host_ticks_ms(), 0); }
+API(GetTickCount) { ret_stdcall(c, (uint32_t)(platform_ticks_us() / 1000u), 0); }
 API(QueryPerformanceCounter) {
-    wr64(ARG(c, 0), (uint64_t)clock());
+    wr64(ARG(c, 0), platform_ticks_us()); /* 1 MHz counter */
     ret_stdcall(c, 1, 1);
 }
 API(GetSystemTimeAsFileTime) {
@@ -365,11 +367,11 @@ API(SetFilePointer) {
     int64_t distance = (int32_t)ARG(c, 1);
     if (ARG(c, 2))
         distance = (int64_t)(((uint64_t)rd32(ARG(c, 2)) << 32) | ARG(c, 1));
-    if (!f || fseeko64(f, distance, (int)ARG(c, 3))) {
+    if (!f || file_seek(f, distance, (int)ARG(c, 3))) {
         ret_stdcall(c, 0xFFFFFFFFu, 4);
         return;
     }
-    int64_t pos = ftello64(f);
+    int64_t pos = file_tell(f);
     if (ARG(c, 2))
         wr32(ARG(c, 2), (uint32_t)((uint64_t)pos >> 32));
     ret_stdcall(c, (uint32_t)pos, 4);
@@ -377,10 +379,10 @@ API(SetFilePointer) {
 API(GetFileSize) {
     FILE *f = handle_get(ARG(c, 0), H_FILE);
     if (!f) { ret_stdcall(c, 0xFFFFFFFFu, 2); return; }
-    int64_t here = ftello64(f);
-    fseeko64(f, 0, SEEK_END);
-    int64_t size = ftello64(f);
-    fseeko64(f, here, SEEK_SET);
+    int64_t here = file_tell(f);
+    file_seek(f, 0, SEEK_END);
+    int64_t size = file_tell(f);
+    file_seek(f, here, SEEK_SET);
     if (ARG(c, 1))
         wr32(ARG(c, 1), (uint32_t)((uint64_t)size >> 32));
     ret_stdcall(c, (uint32_t)size, 2);

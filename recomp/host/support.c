@@ -9,19 +9,29 @@
 /* -- traces ---------------------------------------------------------------------------- */
 static FILE *trace_file;
 unsigned long long import_calls;
+char trace_path[256] = "host-trace.log";
 
 void trace(const char *fmt, ...) {
-    if (!trace_file) {
-        trace_file = fopen("host-trace.log", "w");
-        if (!trace_file)
-            return;
-    }
+    char line[1024];
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(trace_file, fmt, ap);
+    vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
-    fputc('\n', trace_file);
-    fflush(trace_file);
+    if (!trace_file)
+        trace_file = fopen(trace_path, "w");
+    if (trace_file) {
+        fputs(line, trace_file);
+        fputc('\n', trace_file);
+        fflush(trace_file);
+    }
+    platform_log(line);
+}
+
+void trace_close(void) {
+    if (trace_file) {
+        fclose(trace_file);
+        trace_file = NULL;
+    }
 }
 
 /* -- guest heap -------------------------------------------------------------------------
@@ -117,6 +127,8 @@ uint32_t heap_realloc(uint32_t p, uint32_t size, int zero) {
     return q;
 }
 
+uint32_t heap_used(void) { return heap_top - GUEST_HEAP_BASE; }
+
 uint32_t guest_strdup(const char *s) {
     uint32_t p = heap_alloc((uint32_t)strlen(s) + 1, 0);
     if (p)
@@ -126,6 +138,8 @@ uint32_t guest_strdup(const char *s) {
 
 /* -- virtual memory: bump allocation in its own region, committed on request -------- */
 static uint32_t virtual_top = GUEST_VIRTUAL_BASE;
+
+uint32_t virtual_used(void) { return virtual_top - GUEST_VIRTUAL_BASE; }
 
 uint32_t virtual_alloc(uint32_t address, uint32_t size) {
     size = (size + 0xFFFF) & ~0xFFFFu;
@@ -211,6 +225,7 @@ static void api_dispatch(Cpu *c) {
 }
 
 void trace_summary(void) {
+    trace("# memory: heap %u KiB, VirtualAlloc %u KiB", heap_used() / 1024, virtual_used() / 1024);
     trace("# Win32 calls by function:");
     for (unsigned i = 0; i < fake_count; i++)
         if (fakes[i].calls)

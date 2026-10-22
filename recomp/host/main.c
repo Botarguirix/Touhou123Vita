@@ -73,15 +73,30 @@ static void setup_thread_environment(Cpu *c) {
     c->esp.d = GUEST_STACK_BASE + GUEST_STACK_SIZE - 16;
 }
 
+#ifdef __vita__
+/* Deep guest call chains run on the host stack. */
+unsigned int sceUserMainThreadStackSize = 8 * 1024 * 1024;
+#define DEFAULT_DATA_DIR "ux0:data/touhou123vita"
+#else
+#define DEFAULT_DATA_DIR "."
+#endif
+
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s th123.exe [data directory]\n", argv[0]);
+    char exe[1100];
+    snprintf(host_data_dir, sizeof host_data_dir, "%s", argc > 2 ? argv[2] : DEFAULT_DATA_DIR);
+    snprintf(exe, sizeof exe, "%s", argc > 1 ? argv[1] : DEFAULT_DATA_DIR "/th123.exe");
+#ifdef __vita__
+    snprintf(trace_path, sizeof trace_path, "%s/recomp-trace.log", host_data_dir);
+#endif
+    trace("# th123 recompiled host, image %s", exe);
+    if (guest_mem_init()) {
+        platform_finish("cannot allocate the guest memory window");
         return 2;
     }
-    if (argc > 2)
-        snprintf(host_data_dir, sizeof host_data_dir, "%s", argv[2]);
-    if (guest_mem_init() || guest_load_pe(argv[1])) {
-        fprintf(stderr, "cannot load %s\n", argv[1]);
+    if (guest_load_pe(exe)) {
+        char why[1200];
+        snprintf(why, sizeof why, "cannot load %s (copy your th123.exe and th123a/b/c.dat there)", exe);
+        platform_finish(why);
         return 2;
     }
     guest_register(t123_lifted, t123_lifted_count);
@@ -98,18 +113,27 @@ int main(int argc, char **argv) {
 
     jmp_buf fault;
     guest_fault_trap = &fault;
+    uint64_t started = platform_ticks_us();
     if (setjmp(finished) == 0) {
         if (setjmp(fault) == 0) {
             push32(&cpu, GUEST_RETURN_SENTINEL);
             guest_call(&cpu, entry);
             exit_code = cpu.eax.d;
         } else {
-            exit_reason = "guest_fault (see stderr)";
+            trace("# %s", guest_fault_text);
+            exit_reason = guest_fault_text;
             exit_code = 0xFA17;
         }
     }
+    uint64_t elapsed_ms = (platform_ticks_us() - started) / 1000u;
     trace_summary();
-    printf("th123 host: %s, exit code %08x, %llu Win32 calls (trace: host-trace.log)\n",
-           exit_reason, exit_code, import_calls);
+    char summary[512];
+    snprintf(summary, sizeof summary,
+             "th123 host: %s, exit code %08x, %llu Win32 calls in %llu ms, heap %u KiB (trace: %s)",
+             exit_reason, exit_code, import_calls, (unsigned long long)elapsed_ms, heap_used() / 1024,
+             trace_path);
+    trace("# %s", summary);
+    trace_close();
+    platform_finish(summary);
     return exit_code == 0 ? 0 : 1;
 }

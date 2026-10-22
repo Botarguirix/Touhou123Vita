@@ -28,7 +28,8 @@ foreach($path in $paths){if(Test-Path (Join-Path $root $path)){git -C $root add 
 if($LASTEXITCODE -ne 0){throw 'Staging failed'}
 $staged=@(git -C $root diff --cached --name-only)
 foreach($path in $staged){
- if($path -match '^(assets|original|local|artifacts|build[^/]*)/' -or $path -match '\.(exe|dll|dat|vpk|self|rgba|png|zip|rep|pf)$'){throw "Disallowed publication file: $path"}
+ # docs/images holds screenshots of the project's own debug output, never game assets.
+ if($path -match '^(assets|original|local|artifacts|build[^/]*)/' -or ($path -match '\.(exe|dll|dat|vpk|self|rgba|png|zip|rep|pf)$' -and $path -notmatch '^docs/images/[^/]+\.png$')){throw "Disallowed publication file: $path"}
 }
 Write-Output 'Verified staged source paths:'
 $staged | Write-Output
