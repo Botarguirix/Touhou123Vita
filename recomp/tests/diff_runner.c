@@ -22,12 +22,31 @@ extern const unsigned t123_lifted_count;
 enum { DATA = 0x1000000, DATA_SIZE = 1024, ARGS_SIZE = 64, STACK = 0x2000000, STACK_SIZE = 0x10000,
        STOP = 0x3000000 };
 
+/* Raw image for synthetic tests: "T123RAW\0", u32 base, u32 size, bytes. */
+static int load_image(const char *path) {
+    FILE *f = fopen(path, "rb");
+    char magic[8];
+    if (!f)
+        return -1;
+    if (fread(magic, 1, 8, f) == 8 && !memcmp(magic, "T123RAW", 8)) {
+        uint32_t base, size;
+        int ok = fread(&base, 4, 1, f) == 1 && fread(&size, 4, 1, f) == 1 &&
+                 guest_map(base, size) == 0 && fread(G(base), 1, size, f) == size;
+        fclose(f);
+        guest_image_base = base;
+        guest_image_size = size;
+        return ok ? 0 : -1;
+    }
+    fclose(f);
+    return guest_load_pe(path);
+}
+
 int main(int argc, char **argv) {
     if (argc != 4) {
-        fprintf(stderr, "usage: %s th123.exe cases.bin results.bin\n", argv[0]);
+        fprintf(stderr, "usage: %s th123.exe|image.raw cases.bin results.bin\n", argv[0]);
         return 2;
     }
-    if (guest_mem_init() || guest_load_pe(argv[1]) || guest_map(DATA, 0x1000) ||
+    if (guest_mem_init() || load_image(argv[1]) || guest_map(DATA, 0x1000) ||
         guest_map(STACK, STACK_SIZE)) {
         fprintf(stderr, "cannot prepare guest memory\n");
         return 2;

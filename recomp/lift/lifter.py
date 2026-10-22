@@ -32,7 +32,12 @@ CONDITIONS = {
 }
 ALU = {"add": "add", "adc": "adc", "sub": "sub", "sbb": "sbb"}
 LOGIC = {"and": "&", "or": "|", "xor": "^"}
-SHIFTS = {"shl": "shl", "sal": "shl", "shr": "shr", "sar": "sar", "rol": "rol", "ror": "ror"}
+SHIFTS = {"shl": "shl", "sal": "shl", "shr": "shr", "sar": "sar", "rol": "rol", "ror": "ror",
+          "rcl": "rcl", "rcr": "rcr"}
+SEGMENT_SELECTORS = {"cs": "SEL_CS", "ds": "SEL_DS", "es": "SEL_ES", "ss": "SEL_SS",
+                     "fs": "SEL_FS", "gs": "SEL_GS"}
+STRING_REP = {"": 0, "rep": 1, "repe": 1, "repz": 1, "repne": 2, "repnz": 2}
+BIT_OPS = {"bt": None, "bts": "|", "btr": "& ~", "btc": "^"}
 X87_ARITH = ["X87_ADD", "X87_MUL", None, None, "X87_SUB", "X87_SUBR", "X87_DIV", "X87_DIVR"]
 # DC/DE register forms swap SUB/SUBR and DIV/DIVR relative to D8.
 X87_ARITH_REV = ["X87_ADD", "X87_MUL", None, None, "X87_SUBR", "X87_SUB", "X87_DIVR", "X87_DIV"]
@@ -59,6 +64,7 @@ class Lifter:
         self.image = discovery.image
         self.entries = entries
         self.lifted: set[int] = set()
+        self.traps: set[int] = set()
 
     # -- operands -------------------------------------------------------------------------
     def reg(self, ins, reg_id) -> str:
@@ -146,10 +152,17 @@ class Lifter:
 
         if base in ("wait", "nop"):
             return ";"
+        if base in ("int3", "hlt", "ud2"):
+            # A trap in the original as well: kept as a visible fault, not counted as
+            # an unsupported instruction.
+            self.traps.add(ins.address)
+            return f'guest_fault(c, 0x{ins.address:08x}u, "{base} executed");'
         k = self._opcode_offset(ins)
         if k + 1 < len(ins.bytes) and 0xD8 <= ins.bytes[k] <= 0xDF:
             return self.lift_x87(ins)
         if base == "mov":
+            if ops[1].type == X.X86_OP_REG and ins.reg_name(ops[1].reg) in SEGMENT_SELECTORS:
+                return self.write(ins, ops[0], f"(uint16_t){SEGMENT_SELECTORS[ins.reg_name(ops[1].reg)]}")
             return self.write(ins, ops[0], self.read(ins, ops[1], ops[0].size))
         if base in ("movzx", "movsx"):
             src = self.read(ins, ops[1])
@@ -186,14 +199,38 @@ class Lifter:
             return self.rmw(ins, ops[0], lambda x: f"({t})~{x}")
         if base in SHIFTS:
             n = BITS[ops[0].size]
-            if SHIFTS[base] in ("rol", "ror") and n != 32:
-                raise Unsupported(f"{base} of {n} bits")
             count = "1" if len(ops) == 1 else self.read(ins, ops[1], 1)
             return self.rmw(ins, ops[0], lambda x: f"op_{SHIFTS[base]}{n}(c, {x}, (uint8_t){count})")
+        if base in ("shld", "shrd"):
+            if ops[0].size != 4:
+                raise Unsupported(f"{base} of 16 bits")
+            src = self.read(ins, ops[1])
+            count = self.read(ins, ops[2], 1)
+            return self.rmw(ins, ops[0], lambda x: f"op_{base}32(c, {x}, {src}, (uint8_t){count})")
+        if base in BIT_OPS:
+            return self.lift_bit_op(ins, base)
+        if base == "xadd":
+            if ops[0].size != 4:
+                raise Unsupported("xadd of 8/16 bits")
+            src = self.reg(ins, ops[1].reg)
+            if ops[0].type == X.X86_OP_MEM:
+                return f"{{ uint32_t ea = {self.address(ins, ops[0])}; {src} = op_xadd32_mem(c, ea, {src}); }}"
+            dst = self.reg(ins, ops[0].reg)
+            return f"{{ uint32_t a = {dst}, b = {src}; {dst} = op_add32(c, a, b); {src} = a; }}"
+        if base == "xlatb":
+            return "c->eax.b.l = rd8(c->ebx.d + c->eax.b.l);"
+        if base == "pushfd":
+            return "push32(c, get_eflags(c));"
+        if base == "popfd":
+            return "set_eflags(c, pop32(c));"
+        if base == "cpuid":
+            return "op_cpuid(c);"
         if base == "imul":
             if len(ops) == 1:
+                if ops[0].size == 1:
+                    return f"op_imul1_8(c, {self.read(ins, ops[0])});"
                 if ops[0].size != 4:
-                    raise Unsupported("imul r/m8/16")
+                    raise Unsupported("imul r/m16")
                 return f"op_imul1_32(c, {self.read(ins, ops[0])});"
             n = BITS[ops[0].size]
             a = self.read(ins, ops[0]) if len(ops) == 2 else self.read(ins, ops[1])
@@ -241,6 +278,9 @@ class Lifter:
             size = {"b": 1, "w": 2, "d": 4}[base[-1]]
             kind = "movs" if base.startswith("movs") else "stos"
             return f"op_rep_{kind}(c, {size}, {int(prefix == 'rep')}, 0x{ins.address:08x}u);"
+        if base in ("scasb", "scasw", "scasd", "cmpsb", "cmpsw", "cmpsd") and prefix in STRING_REP:
+            size = {"b": 1, "w": 2, "d": 4}[base[-1]]
+            return f"op_{base[:4]}(c, {size}, {STRING_REP[prefix]}, 0x{ins.address:08x}u);"
         if base == "ret":
             pop = ops[0].imm if ops else 0
             return f"c->esp.d += {4 + pop}u; return;"
@@ -253,6 +293,32 @@ class Lifter:
         if base == "call":
             return self.lift_call(ins, nxt)
         raise Unsupported(m)
+
+    def lift_bit_op(self, ins, base: str) -> str:
+        """bt/bts/btr/btc r/m32, r32|imm8. A register offset on a memory operand
+        addresses a bit string, so it can move the effective address."""
+        dst, off = ins.operands
+        if dst.size != 4:
+            raise Unsupported(f"{base} of 16 bits")
+        op = BIT_OPS[base]
+        if dst.type == X.X86_OP_MEM:
+            ea = self.address(ins, dst)
+            if off.type == X.X86_OP_REG:
+                addr, bit = f"bt_address({ea}, o)", "(o & 31u)"
+                head = f"uint32_t o = {self.reg(ins, off.reg)}; uint32_t a = {addr};"
+            else:
+                bit = f"{off.imm & 31}u"
+                head = f"uint32_t a = {ea};"
+            body = f"{{ {head} uint32_t v = rd32(a); c->cf = (v >> {bit}) & 1;"
+            if op:
+                body += f" wr32(a, v {op} (1u << {bit}));"
+            return body + " }"
+        reg = self.reg(ins, dst.reg)
+        bit = f"({self.read(ins, off, 4)} & 31u)" if off.type == X.X86_OP_REG else f"{off.imm & 31}u"
+        body = f"{{ uint32_t b = {bit}; c->cf = ({reg} >> b) & 1;"
+        if op:
+            body += f" {reg} = {reg} {op} (1u << b);"
+        return body + " }"
 
     @staticmethod
     def _opcode_offset(ins) -> int:
@@ -279,17 +345,21 @@ class Lifter:
         if op.type == X.X86_OP_IMM:
             return self.branch(fn, op.imm & 0xFFFFFFFF)
         switch = next((s for s in fn.switches if s.site == ins.address), None)
-        if switch is not None and switch.bound != "heuristic":
+        if switch is not None:
+            # The jump goes to whatever the original table holds; only targets that
+            # discovery followed have labels. For a bounded table that is all of them;
+            # for a heuristic one, an unexpected entry fails visibly instead of jumping.
             index = self.reg(ins, op.mem.index)
-            cases = " ".join(f"case 0x{t:08x}u: goto L_{t:08x};" for t in sorted(set(switch.targets)))
+            cases = " ".join(f"case 0x{t:08x}u: goto L_{t:08x};" for t in sorted(set(switch.targets))
+                             if t in fn.insns)
+            reason = "switch target outside table" if switch.bound not in ("heuristic", "pending") \
+                else f"switch target not discovered ({switch.bound} bound)"
             return (f"switch (rd32(0x{op.mem.disp & 0xFFFFFFFF:x}u + {index} * 4u)) {{ {cases} "
-                    f"default: guest_fault(c, 0x{ins.address:08x}u, \"switch target outside table\"); }}")
+                    f"default: guest_fault(c, 0x{ins.address:08x}u, \"{reason}\"); }}")
         if op.type == X.X86_OP_MEM and not op.mem.base and not op.mem.index:
             slot = op.mem.disp & 0xFFFFFFFF
             if slot in self.image.imports:
                 return f"guest_call_import(c, 0x{slot:08x}u); return;"
-        if switch is not None:
-            raise Unsupported("heuristic switch")
         return f"{{ uint32_t t = {self.read(ins, op, 4)}; guest_call(c, t); return; }}"
 
     # -- x87 -----------------------------------------------------------------------------------
@@ -311,6 +381,8 @@ class Lifter:
                 return f"x87_compare(c, {src}, {reg - 2}, 0);"
             return f"x87_arith(c, {X87_ARITH[reg]}, 0, {src}, 0);"
         table = {
+            (0xD9, 4): f"x87_fldenv(c, {ea});", (0xD9, 6): f"x87_fnstenv(c, {ea});",
+            (0xDD, 4): f"x87_frstor(c, {ea});", (0xDD, 6): f"x87_fnsave(c, {ea});",
             (0xD9, 0): f"x87_fld_m32(c, {ea});", (0xD9, 2): f"x87_fst_m32(c, {ea}, 0);",
             (0xD9, 3): f"x87_fst_m32(c, {ea}, 1);", (0xD9, 5): f"x87_set_cw(c, rd16({ea}));",
             (0xD9, 7): f"wr16({ea}, x87_get_cw(c));",
@@ -354,7 +426,8 @@ class Lifter:
                      (5, 5): "x87_fld_const(c, 6);", (5, 6): "x87_fld_const(c, 0);",
                      (6, 0): "x87_binary_special(c, 4);", (6, 1): "x87_binary_special(c, 1);",
                      (6, 2): "x87_binary_special(c, 5);", (6, 3): "x87_binary_special(c, 0);",
-                     (7, 0): "x87_binary_special(c, 3);", (7, 2): "x87_unary(c, 2);",
+                     (7, 0): "x87_binary_special(c, 3);", (6, 5): "x87_binary_special(c, 6);",
+                     (7, 2): "x87_unary(c, 2);",
                      (7, 4): "x87_unary(c, 3);", (7, 5): "x87_binary_special(c, 2);",
                      (7, 6): "x87_unary(c, 4);", (7, 7): "x87_unary(c, 5);"}
             if (reg, rm) in fixed:
@@ -416,22 +489,61 @@ class Lifter:
         lines.append("}")
         return "\n".join(lines)
 
+    PREAMBLE = [
+        "/* Generated by recomp/lift from the user's th123.exe. Do not commit. */",
+        '#include "guest.h"',
+        "#pragma GCC diagnostic ignored \"-Wunused-label\"",
+        "",
+    ]
+
+    @staticmethod
+    def table_source(entries: list[int]) -> list[str]:
+        table = ["", "const GuestEntry t123_lifted[] = {"]
+        table += [f"    {{0x{e:08x}u, {fn_name(e)}}}," for e in sorted(entries)]
+        table += ["};", f"const unsigned t123_lifted_count = {len(entries)};", ""]
+        return table
+
     def lift(self, entries: list[int]) -> LiftResult:
+        """Single translation unit (small batches and tests)."""
         self.lifted = set(entries)
         result = LiftResult("", sorted(entries))
         bodies = []
         for entry in sorted(entries):
             fn = self.d.explore(entry, "call", self.entries)
             bodies.append(self.lift_function(fn, result))
-        header = [
-            "/* Generated by recomp/lift from the user's th123.exe. Do not commit. */",
-            '#include "guest.h"',
-            "#pragma GCC diagnostic ignored \"-Wunused-label\"",
-            "",
-        ]
-        header += [f"void {fn_name(e)}(Cpu *c);" for e in sorted(entries)]
-        table = ["", "const GuestEntry t123_lifted[] = {"]
-        table += [f"    {{0x{e:08x}u, {fn_name(e)}}}," for e in sorted(entries)]
-        table += ["};", f"const unsigned t123_lifted_count = {len(entries)};", ""]
-        result.source = "\n".join(header + [""] + bodies + table)
+        header = self.PREAMBLE + [f"void {fn_name(e)}(Cpu *c);" for e in sorted(entries)]
+        result.source = "\n".join(header + [""] + bodies + self.table_source(entries))
         return result
+
+    def lift_units(self, entries: list[int], unit_bytes: int = 1_000_000,
+                   progress=None) -> tuple[dict[str, str], LiftResult]:
+        """Whole-program output: lifted.h with every prototype, unit_NNN.c files of
+        about unit_bytes of C each, and table.c with the dispatch table."""
+        self.lifted = set(entries)
+        result = LiftResult("", sorted(entries))
+        files: dict[str, str] = {}
+        prototypes = [f"void {fn_name(e)}(Cpu *c);" for e in sorted(entries)]
+        files["lifted.h"] = "\n".join(["#ifndef T123_LIFTED_H", "#define T123_LIFTED_H",
+                                       '#include "guest.h"', *prototypes, "#endif", ""])
+        unit: list[str] = []
+        size = 0
+
+        def flush():
+            nonlocal unit, size
+            if unit:
+                name = f"unit_{len(files) - 1:03d}.c"
+                files[name] = "\n".join(self.PREAMBLE + ['#include "lifted.h"', ""] + unit + [""])
+                unit, size = [], 0
+
+        for i, entry in enumerate(sorted(entries)):
+            fn = self.d.explore(entry, "call", self.entries)
+            body = self.lift_function(fn, result)
+            unit.append(body)
+            size += len(body)
+            if size >= unit_bytes:
+                flush()
+            if progress and i % 500 == 0:
+                progress(i, len(entries))
+        flush()
+        files["table.c"] = "\n".join(['#include "lifted.h"'] + self.table_source(entries))
+        return files, result

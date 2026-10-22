@@ -38,9 +38,13 @@ typedef struct {
 typedef struct Cpu {
     GuestReg eax, ecx, edx, ebx, esp, ebp, esi, edi;
     uint8_t cf, zf, sf, of, pf, df;
+    uint8_t id_flag; /* EFLAGS.ID, toggled by the CRT to probe for cpuid */
     uint32_t fs_base;
     X87 fpu;
 } Cpu;
+
+/* Fixed Windows user-mode selectors, for code that stores segment registers. */
+enum { SEL_CS = 0x1B, SEL_DS = 0x23, SEL_ES = 0x23, SEL_SS = 0x23, SEL_FS = 0x3B, SEL_GS = 0x00 };
 
 typedef void (*GuestFn)(Cpu *c);
 
@@ -142,16 +146,87 @@ T123_DEFINE_FLAGS(8, uint8_t, int8_t, 7)
 T123_DEFINE_FLAGS(16, uint16_t, int16_t, 15)
 T123_DEFINE_FLAGS(32, uint32_t, int32_t, 31)
 
-static inline uint32_t op_rol32(Cpu *c, uint32_t a, uint8_t n) {
-    n &= 31; if (!n) return a;
-    uint32_t r = (a << n) | (a >> (32 - n));
-    c->cf = r & 1; c->of = (r >> 31) ^ c->cf; return r;
+#define T123_DEFINE_ROTATES(N, T, BITS)                                                      \
+static inline T op_rol##N(Cpu *c, T a, uint8_t n) {                                          \
+    n &= 31; if (!n) return a;                                                               \
+    uint8_t k = n % (BITS); T r = k ? (T)((a << k) | (a >> ((BITS) - k))) : a;               \
+    c->cf = r & 1; c->of = ((r >> ((BITS) - 1)) & 1) ^ c->cf; return r;                      \
+}                                                                                            \
+static inline T op_ror##N(Cpu *c, T a, uint8_t n) {                                          \
+    n &= 31; if (!n) return a;                                                               \
+    uint8_t k = n % (BITS); T r = k ? (T)((a >> k) | (a << ((BITS) - k))) : a;               \
+    c->cf = (r >> ((BITS) - 1)) & 1;                                                         \
+    c->of = ((r >> ((BITS) - 1)) ^ (r >> ((BITS) - 2))) & 1; return r;                       \
+}                                                                                            \
+static inline T op_rcl##N(Cpu *c, T a, uint8_t n) {                                          \
+    n = (uint8_t)((n & 31) % ((BITS) + 1)); if (!n) return a;                                \
+    for (uint8_t i = 0; i < n; i++) {                                                        \
+        uint8_t out = (a >> ((BITS) - 1)) & 1; a = (T)((a << 1) | c->cf); c->cf = out;       \
+    }                                                                                        \
+    c->of = ((a >> ((BITS) - 1)) & 1) ^ c->cf; return a;                                     \
+}                                                                                            \
+static inline T op_rcr##N(Cpu *c, T a, uint8_t n) {                                          \
+    n = (uint8_t)((n & 31) % ((BITS) + 1)); if (!n) return a;                                \
+    c->of = ((a >> ((BITS) - 1)) & 1) ^ c->cf; /* defined for n == 1 */                      \
+    for (uint8_t i = 0; i < n; i++) {                                                        \
+        uint8_t out = a & 1; a = (T)((a >> 1) | ((T)c->cf << ((BITS) - 1))); c->cf = out;    \
+    }                                                                                        \
+    return a;                                                                                \
 }
-static inline uint32_t op_ror32(Cpu *c, uint32_t a, uint8_t n) {
+
+T123_DEFINE_ROTATES(8, uint8_t, 8)
+T123_DEFINE_ROTATES(16, uint16_t, 16)
+T123_DEFINE_ROTATES(32, uint32_t, 32)
+
+/* shld/shrd r/m32, r32, count. */
+static inline uint32_t op_shld32(Cpu *c, uint32_t a, uint32_t b, uint8_t n) {
     n &= 31; if (!n) return a;
-    uint32_t r = (a >> n) | (a << (32 - n));
-    c->cf = r >> 31; c->of = (r >> 31) ^ ((r >> 30) & 1); return r;
+    uint32_t r = (a << n) | (b >> (32 - n));
+    c->cf = (a >> (32 - n)) & 1; c->of = ((r ^ a) >> 31) & 1;
+    c->zf = r == 0; c->sf = r >> 31; c->pf = parity8(r); return r;
 }
+static inline uint32_t op_shrd32(Cpu *c, uint32_t a, uint32_t b, uint8_t n) {
+    n &= 31; if (!n) return a;
+    uint32_t r = (a >> n) | (b << (32 - n));
+    c->cf = (a >> (n - 1)) & 1; c->of = ((r ^ a) >> 31) & 1;
+    c->zf = r == 0; c->sf = r >> 31; c->pf = parity8(r); return r;
+}
+
+/* imul r/m8: ax = al * src (signed). */
+static inline void op_imul1_8(Cpu *c, uint8_t b) {
+    int16_t p = (int16_t)((int8_t)c->eax.b.l * (int8_t)b);
+    c->eax.w = (uint16_t)p;
+    c->cf = c->of = p != (int8_t)p;
+    c->zf = (uint8_t)p == 0; c->sf = ((uint16_t)p >> 7) & 1; c->pf = parity8((uint8_t)p);
+}
+
+/* xadd: dst = dst + src, src = old dst; `lock` makes the memory form atomic. */
+static inline uint32_t op_xadd32_mem(Cpu *c, uint32_t ea, uint32_t src) {
+    uint32_t old = __atomic_fetch_add((uint32_t *)G(ea), src, __ATOMIC_SEQ_CST);
+    (void)op_add32(c, old, src);
+    return old;
+}
+
+/* EFLAGS image for pushfd: CF PF ZF SF DF OF, IF and reserved bit 1 set, ID kept. */
+static inline uint32_t get_eflags(Cpu *c) {
+    return (uint32_t)c->cf | 2u | (uint32_t)c->pf << 2 | (uint32_t)c->zf << 6 |
+           (uint32_t)c->sf << 7 | 1u << 9 | (uint32_t)c->df << 10 | (uint32_t)c->of << 11 |
+           (uint32_t)c->id_flag << 21;
+}
+static inline void set_eflags(Cpu *c, uint32_t f) {
+    c->cf = f & 1; c->pf = (f >> 2) & 1; c->zf = (f >> 6) & 1; c->sf = (f >> 7) & 1;
+    c->df = (f >> 10) & 1; c->of = (f >> 11) & 1; c->id_flag = (f >> 21) & 1;
+}
+
+/* bt/bts with a register bit offset: for memory operands the offset addresses a
+   bit string (signed, may leave the dword). */
+static inline uint32_t bt_address(uint32_t ea, uint32_t offset) {
+    return ea + (uint32_t)(((int32_t)offset >> 5) * 4);
+}
+
+void op_cpuid(Cpu *c);
+void op_scas(Cpu *c, unsigned size, int rep, uint32_t address);  /* rep: 0, 1 repe, 2 repne */
+void op_cmps(Cpu *c, unsigned size, int rep, uint32_t address);
 
 /* imul r, r/m(, imm): truncated product; CF=OF when the signed result overflowed. */
 static inline uint32_t op_imul32(Cpu *c, uint32_t a, uint32_t b) {
@@ -241,7 +316,11 @@ void x87_compare(Cpu *c, x87_t b, int pops, int unordered_ok);   /* st0 vs b -> 
 void x87_comi(Cpu *c, unsigned i, int pop);                      /* fcomi/fucomi -> EFLAGS */
 void x87_fxch(Cpu *c, unsigned i);
 void x87_unary(Cpu *c, int which); /* 0 chs 1 abs 2 sqrt 3 rndint 4 sin 5 cos 6 tst 7 xam */
-void x87_binary_special(Cpu *c, int which); /* 0 fpatan 1 fyl2x 2 fscale 3 fprem 4 f2xm1 5 fptan */
+void x87_binary_special(Cpu *c, int which); /* 0 fpatan 1 fyl2x 2 fscale 3 fprem 4 f2xm1 5 fptan 6 fprem1 */
+void x87_fnstenv(Cpu *c, uint32_t a);
+void x87_fldenv(Cpu *c, uint32_t a);
+void x87_fnsave(Cpu *c, uint32_t a);
+void x87_frstor(Cpu *c, uint32_t a);
 x87_t x87_round_pc(Cpu *c, x87_t v);        /* apply PC with the current RC */
 
 #endif

@@ -65,7 +65,9 @@ class Switch:
     targets: list[int]
     index_table: int | None
     index_entries: int
-    bound: str  # "cmp", "and" or "heuristic"
+    bound: str  # "cmp", "and", "flow:<reg>", "heuristic" or "pending"
+    pending: tuple | None = None  # (register, cmp address, inclusive) for register bounds
+    index_reg: str = ""           # index register of a heuristic table, for CFG bounds
 
 
 @dataclass
@@ -103,6 +105,8 @@ class Discovery:
         # Bytes known to be jump/index tables; exploration never decodes through them.
         self.data_mask = bytearray(self.code_hi - self.code_lo)
         self._scope: set[int] | None = None  # instructions of the function being explored
+        self._last_const = 0
+        self._last_copy = ("", 0)
 
     # -- decoding -----------------------------------------------------------------
     def _decode_detail(self, va: int):
@@ -222,6 +226,32 @@ class Discovery:
                 return None
         return None
 
+    def _table_targets(self, site: int, table: int, count: int, index_table: int | None):
+        """(table, entries, targets, index_entries) for a bounded table, or None."""
+        if not 0 < count <= MAX_TABLE_ENTRIES:
+            return None
+        index_entries = 0
+        if index_table is not None:
+            raw = self.image.read(index_table, count)
+            if len(raw) != count:
+                return None
+            index_entries = count
+            count = max(raw) + 1
+        targets = []
+        for i in range(count):
+            value = self.image.u32(table + 4 * i)
+            if value is None or not self._in_code(value):
+                if i == 0 and count > 1:
+                    # MSVC biases tables whose index is known to be >= 1
+                    # (`jmp [idx*4 + vec - 4]`): slot 0 is never read.
+                    continue
+                return None
+            targets.append(value)
+        if len(targets) < count:
+            table += 4
+            count -= 1
+        return table, count, targets, index_entries
+
     def resolve_switch(self, site: Insn) -> Switch | None:
         if site.mem is None:
             return None
@@ -233,6 +263,7 @@ class Discovery:
         count = None
         bound = "heuristic"
         index_table = None
+        pending = None
         va = site.address
         for _ in range(24):
             prev = self.prev_insn(va)
@@ -251,14 +282,17 @@ class Discovery:
                     tracked = self._reg(d, m.base)
                     continue
             if d.id == X.X86_INS_CMP and writes_tracked and d.operands[1].type in (X.X86_OP_IMM, X.X86_OP_REG):
-                if d.operands[1].type == X.X86_OP_IMM:
-                    imm = d.operands[1].imm & 0xFFFFFFFF
-                else:  # cmp idx, reg where reg was just loaded with an immediate
-                    imm = self._recent_immediate(d.address, self._reg(d, d.operands[1].reg))
-                    if imm is None:
-                        break
                 after = self._decode_detail(d.address + d.size)
                 inclusive = not (after is not None and after.mnemonic in ("jae", "jb", "jnb", "jnae"))
+                if d.operands[1].type == X.X86_OP_IMM:
+                    imm = d.operands[1].imm & 0xFFFFFFFF
+                else:  # cmp idx, reg where reg holds a constant
+                    other = self._reg(d, d.operands[1].reg)
+                    imm = self._recent_immediate(d.address, other)
+                    if imm is None:
+                        # Resolved on the complete body by _resolve_pending.
+                        pending = (other, d.address, inclusive)
+                        break
                 count = imm + 1 if inclusive else imm
                 bound = "cmp"
                 break
@@ -273,45 +307,29 @@ class Discovery:
                 break  # loaded from memory: the bound is not visible here
             if d.id in (X.X86_INS_CALL,) or (d.id == X.X86_INS_JMP):
                 break
-        if count is not None and not (0 < count <= MAX_TABLE_ENTRIES):
-            count, bound = None, "heuristic"
-        index_entries = 0
-        if index_table is not None:
-            if count is None:
+        if count is not None:
+            resolved = self._table_targets(site.address, table, count, index_table)
+            if resolved is None:
                 return None
-            raw = self.image.read(index_table, count)
-            if len(raw) != count:
-                return None
-            index_entries = count
-            count = max(raw) + 1
+            table, count, targets, index_entries = resolved
+            return Switch(site.address, table, count, targets, index_table, index_entries, bound)
+        if pending is not None and index_table is not None:
+            # Two-level table with a register bound: nothing to follow until resolved.
+            return Switch(site.address, table, 0, [], index_table, 0, "pending", pending)
+        # Unbounded: read entries while they point near the dispatch site and the
+        # table does not run into code already decoded for this function.
         targets = []
-        if count is None:
-            # Unbounded: read entries while they point near the dispatch site and the
-            # table does not run into code already decoded for this function.
-            for i in range(256):
-                value = self.image.u32(table + 4 * i)
-                if value is None or not self._in_code(value) or abs(value - site.address) > HEURISTIC_REACH:
-                    break
-                if i and self._scope is not None and (table + 4 * i) in self._scope:
-                    break
-                targets.append(value)
-            if not targets:
-                return None
-            count = len(targets)
-        else:
-            for i in range(count):
-                value = self.image.u32(table + 4 * i)
-                if value is None or not self._in_code(value):
-                    if i == 0 and count > 1:
-                        # MSVC biases tables whose index is known to be >= 1
-                        # (`jmp [idx*4 + vec - 4]`): slot 0 is never read.
-                        continue
-                    return None
-                targets.append(value)
-            if len(targets) < count:
-                table += 4
-                count -= 1
-        return Switch(site.address, table, count, targets, index_table, index_entries, bound)
+        for i in range(256):
+            value = self.image.u32(table + 4 * i)
+            if value is None or not self._in_code(value) or abs(value - site.address) > HEURISTIC_REACH:
+                break
+            if i and self._scope is not None and (table + 4 * i) in self._scope:
+                break
+            targets.append(value)
+        if not targets:
+            return None
+        return Switch(site.address, table, len(targets), targets, None, 0, "heuristic", pending,
+                      self._reg(site_ins, index) if index_table is None else "")
 
     # -- function exploration ---------------------------------------------------------
     @staticmethod
@@ -325,14 +343,195 @@ class Discovery:
         fn = Function(entry, source)
         self._scope = fn.insns
         try:
-            self._explore(fn, entries)
+            self._explore(fn, entries, [entry])
+            self._resolve_pending(fn, entries)
         finally:
             self._scope = None
         return fn
 
-    def _explore(self, fn: Function, entries: set[int]) -> None:
+    # -- register constants along the control-flow graph ------------------------------------
+    def _successors(self, fn: Function, va: int) -> list[int]:
+        insn = self.cache[va]
+        nxt = va + insn.size
+        if insn.kind in (RET, STOP):
+            return []
+        if insn.kind == JMP:
+            return [insn.target]
+        if insn.kind == JMP_IND:
+            return [t for sw in fn.switches if sw.site == va for t in sw.targets]
+        if insn.kind == JCC:
+            return [insn.target, nxt]
+        return [nxt]
+
+    def _writes(self, d, reg: str) -> str:
+        """'const' (with self._last_const set), 'other' or '' for no write to reg."""
+        mnemonic = d.mnemonic
+        if mnemonic.startswith(("rep", "movs", "stos", "lods", "cmps", "scas")) and reg in ("esi", "edi", "ecx"):
+            return "other"
+        if mnemonic == "leave" and reg == "ebp":
+            return "other"
+        if d.id == X.X86_INS_CALL and reg in ("eax", "ecx", "edx"):
+            return "other"
+        if mnemonic in ("cdq", "mul", "div", "idiv") and reg in ("eax", "edx"):
+            return "other"
+        if mnemonic in ("imul",) and len(d.operands) == 1 and reg in ("eax", "edx"):
+            return "other"
+        if not d.operands:
+            return ""
+        if d.id == X.X86_INS_XCHG and any(o.type == X.X86_OP_REG and self._reg(d, o.reg) == reg
+                                          for o in d.operands):
+            return "other"
+        op0 = d.operands[0]
+        if op0.type != X.X86_OP_REG or self._reg(d, op0.reg) != reg:
+            return ""
+        if d.id in (X.X86_INS_PUSH, X.X86_INS_CMP, X.X86_INS_TEST):
+            return ""
+        if op0.size != 4:
+            return "other"
+        if d.id == X.X86_INS_MOV and d.operands[1].type == X.X86_OP_IMM:
+            self._last_const = d.operands[1].imm & 0xFFFFFFFF
+            return "const"
+        if (d.id == X.X86_INS_XOR and d.operands[1].type == X.X86_OP_REG
+                and self._reg(d, d.operands[1].reg) == reg):
+            self._last_const = 0
+            return "const"
+        # Derived values: `mov reg, other` and `lea reg, [other + k]`.
+        if d.id == X.X86_INS_MOV and d.operands[1].type == X.X86_OP_REG:
+            self._last_copy = (self._reg(d, d.operands[1].reg), 0)
+            return "copy"
+        if d.id == X.X86_INS_LEA:
+            m = d.operands[1].mem
+            if m.base and not m.index:
+                self._last_copy = (self._reg(d, m.base), m.disp)
+                return "copy"
+        return "other"
+
+    def _reaching_constant(self, fn: Function, va: int, reg: str, depth: int = 0,
+                           preds: dict | None = None) -> int | None:
+        """Value of reg just before instruction va when every path from the function
+        entry defines it with the same constant (directly or through copies and
+        `lea reg, [other + k]`); None otherwise."""
+        if depth > 4:
+            return None
+        if preds is None:
+            preds = {}
+            for a in fn.insns:
+                for s in self._successors(fn, a):
+                    preds.setdefault(s, []).append(a)
+        value, seen, work = None, {va}, list(preds.get(va, []))
+        if not work:
+            return None
+        while work:
+            p = work.pop()
+            if p in seen:
+                continue
+            seen.add(p)
+            kind = self._writes(self._decode_detail(p), reg)
+            if kind == "other":
+                return None
+            if kind in ("const", "copy"):
+                if kind == "const":
+                    k = self._last_const
+                else:
+                    source, offset = self._last_copy
+                    base = self._reaching_constant(fn, p, source, depth + 1, preds)
+                    if base is None:
+                        return None
+                    k = (base + offset) & 0xFFFFFFFF
+                if value is not None and value != k:
+                    return None
+                value = k
+                continue
+            if p == fn.entry:
+                return None  # reaches the entry undefined: value comes from the caller
+            more = preds.get(p)
+            if not more:
+                return None
+            work.extend(more)
+        return value
+
+    def _guarding_cmp(self, fn: Function, site: int, reg: str) -> int | None:
+        """Entry count from `cmp reg, imm` + conditional jump found on every CFG path
+        into site (the bound may sit in another block that jumps to the dispatch)."""
+        preds: dict[int, list[int]] = {}
+        for a in fn.insns:
+            for s in self._successors(fn, a):
+                preds.setdefault(s, []).append(a)
+        counts, seen, work = set(), {site}, [(p, 0) for p in preds.get(site, [])]
+        while work:
+            p, steps = work.pop()
+            if p in seen:
+                continue
+            seen.add(p)
+            d = self._decode_detail(p)
+            if (d.id == X.X86_INS_CMP and d.operands[0].type == X.X86_OP_REG
+                    and self._reg(d, d.operands[0].reg) == reg and d.operands[1].type == X.X86_OP_IMM):
+                # The guarding jump may come a few flag-neutral instructions later.
+                after, cursor = None, p + d.size
+                for _ in range(10):
+                    after = self._decode_detail(cursor)
+                    if after is None or after.mnemonic not in ("mov", "push", "pop", "lea", "nop"):
+                        break
+                    cursor += after.size
+                if after is None or after.mnemonic not in ("ja", "jbe", "jae", "jb", "jnbe", "jna"):
+                    return None
+                imm = d.operands[1].imm & 0xFFFFFFFF
+                counts.add(imm if after.mnemonic in ("jae", "jb") else imm + 1)
+                continue
+            if self._writes(d, reg) or steps > 24 or p == fn.entry:
+                return None
+            work.extend((q, steps + 1) for q in preds.get(p, []))
+        return counts.pop() if len(counts) == 1 else None
+
+    def _resolve_pending(self, fn: Function, entries: set[int]) -> None:
+        """Bounds held in registers (`cmp idx, ebp`) or compared in another block are
+        resolved on the complete body; newly found case targets are explored and the
+        process repeats."""
+        for _ in range(16):
+            progress = False
+            for sw in fn.switches:
+                if sw.pending is None and sw.bound == "heuristic" and sw.index_reg:
+                    count = self._guarding_cmp(fn, sw.site, sw.index_reg)
+                    resolved = None if count is None else \
+                        self._table_targets(sw.site, sw.table, count, None)
+                    if resolved is not None:
+                        sw.table, sw.entries, sw.targets, sw.index_entries = resolved
+                        sw.bound = "flow:cmp"
+                        self._mark_data(sw.table, 4 * sw.entries)
+                        new = [t for t in sw.targets if t not in fn.insns]
+                        if new:
+                            self._explore(fn, entries, new)
+                        progress = True
+                    continue
+                if sw.pending is None:
+                    continue
+                reg, cmp_va, inclusive = sw.pending
+                k = self._reaching_constant(fn, cmp_va, reg)
+                if k is None:
+                    continue
+                resolved = self._table_targets(sw.site, sw.table, k + 1 if inclusive else k,
+                                               sw.index_table)
+                if resolved is None:
+                    continue
+                sw.table, sw.entries, sw.targets, sw.index_entries = resolved
+                sw.bound, sw.pending = f"flow:{reg}", None
+                self._mark_data(sw.table, 4 * sw.entries)
+                if sw.index_table is not None:
+                    self._mark_data(sw.index_table, sw.index_entries)
+                new = [t for t in sw.targets if t not in fn.insns]
+                if new:
+                    self._explore(fn, entries, new)
+                progress = True
+            if not progress:
+                break
+        for sw in fn.switches:
+            if sw.pending is not None and not sw.targets:
+                sw.pending = None
+                fn.unresolved_jumps.append(sw.site)
+
+    def _explore(self, fn: Function, entries: set[int], start: list[int]) -> None:
         entry = fn.entry
-        stack = [entry]
+        stack = list(start)
         while stack:
             va = stack.pop()
             while True:

@@ -7,6 +7,7 @@
  *   chained a op b op c                          (PC rounding of intermediates)
  *   fsqrt, frndint
  *   fstp m32 / fstp m64 / fistp m32               (store-time rounding)
+ *   fprem1                                        (IEEE remainder, complete case)
  * Operands are float-representable for PC=24 (where double rounding through 53 bits
  * is proven innocuous) and kept inside the float/double exponent range, because the
  * runtime does not model the extended exponent of x87 registers.
@@ -85,6 +86,24 @@ static long double native_unary(uint16_t cw, int which, double a) {
         __asm__ volatile("fldl %1\n\tfrndint\n\tfstpt %0" : "=m"(r) : "m"(a));
     __asm__ volatile("fldcw %0" ::"m"(saved));
     return r;
+}
+
+static Cpu cpu_with(uint16_t cw);
+
+/* fprem1 (IEEE remainder of st0 by st1); the stack is left empty. */
+static long double native_fprem1(double a, double b) {
+    long double r;
+    __asm__ volatile("fldl %2\n\tfldl %1\n\tfprem1\n\tfstpt %0\n\tfstp %%st(0)"
+                     : "=m"(r) : "m"(a), "m"(b));
+    return r;
+}
+
+static long double runtime_fprem1(double a, double b) {
+    Cpu c = cpu_with(0x037F);
+    x87_push(&c, b);
+    x87_push(&c, a);
+    x87_binary_special(&c, 6);
+    return x87_st(&c, 0);
 }
 
 static void native_stores(uint16_t cw, long double v, float *f, double *d, int32_t *i) {
@@ -209,6 +228,15 @@ int main(int argc, char **argv) {
                 }
             }
         }
+    }
+    /* fprem1 with exponent differences small enough for a complete remainder. */
+    for (unsigned k = 0; k < cases; k++) {
+        double a = random_operand(0), b = random_operand(0);
+        if (b == 0 || fabs(log2(fabs(a / b))) > 60)
+            continue;
+        long double n = native_fprem1(a, b), r = runtime_fprem1(a, b);
+        checks++;
+        if (!same(n, r)) report("fprem1", 0x037F, a, b, n, r);
     }
     printf("x87 native comparison: %u checks, %d mismatches; "
            "control-word sensitivity: PC %u, RC %u\n", checks, mismatches, pc_sensitive, rc_sensitive);

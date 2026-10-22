@@ -70,6 +70,10 @@ Comparación con el proyecto Ghidra (5 558 funciones y 2,37 MB dentro de funcion
 
 Si existe `original/th123.exe`, la prueba comprueba además que el punto de entrada real decodifica.
 
+## Actualización F1.3
+
+La resolución de topes por flujo de datos de [F1_COVERAGE.md](F1_COVERAGE.md) cambió las cifras: 6 406 funciones, 99,48 % de cobertura, 48 switch heurísticos (2 en el juego) y 2 saltos indirectos sin resolver. Las tablas de este documento reflejan la versión de F1.1.
+
 ## Siguiente
 
 F1.2: **lifter mínimo**. Traducir a C y compilar en PC el kernel de animación ya verificado (`tools/x86_animation_oracle.py`, 4 096 casos) y pasar su prueba de equivalencia. Antes hay que fijar el modelo x87 con el resultado de la tarea T1 de Codex ([CODEX_TAREAS.md](CODEX_TAREAS.md)).

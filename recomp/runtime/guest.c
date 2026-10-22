@@ -193,6 +193,63 @@ void op_rep_stos(Cpu *c, unsigned size, int rep, uint32_t address) {
         c->ecx.d = 0;
 }
 
+/* cpuid: a Pentium Pro class CPU with FPU, TSC, CX8 and CMOV but no MMX/SSE/SSE2.
+ * The MSVC CRT then keeps its x87 code paths (__sse2_available stays 0), which the
+ * runtime models and validates; its SSE2 math routines are never entered. */
+void op_cpuid(Cpu *c) {
+    switch (c->eax.d) {
+    case 0:
+        c->eax.d = 1;
+        c->ebx.d = 0x756E6547; c->edx.d = 0x49656E69; c->ecx.d = 0x6C65746E; /* GenuineIntel */
+        break;
+    case 1:
+        c->eax.d = 0x00000633; c->ebx.d = 0; c->ecx.d = 0;
+        c->edx.d = 1u << 0 | 1u << 4 | 1u << 8 | 1u << 15;
+        break;
+    default:
+        c->eax.d = c->ebx.d = c->ecx.d = c->edx.d = 0;
+        break;
+    }
+}
+
+static uint32_t string_value(Cpu *c, unsigned size, uint32_t a) {
+    return size == 1 ? rd8(a) : size == 2 ? rd16(a) : rd32(a);
+}
+
+static void string_compare(Cpu *c, unsigned size, uint32_t a, uint32_t b) {
+    if (size == 1) (void)op_sub8(c, (uint8_t)a, (uint8_t)b);
+    else if (size == 2) (void)op_sub16(c, (uint16_t)a, (uint16_t)b);
+    else (void)op_sub32(c, a, b);
+}
+
+void op_scas(Cpu *c, unsigned size, int rep, uint32_t address) {
+    if (c->df)
+        guest_fault(c, address, "scas with DF=1");
+    uint32_t acc = size == 1 ? c->eax.b.l : size == 2 ? c->eax.w : c->eax.d;
+    do {
+        if (rep && c->ecx.d == 0)
+            break;
+        string_compare(c, size, acc, string_value(c, size, c->edi.d));
+        c->edi.d += size;
+        if (rep)
+            c->ecx.d--;
+    } while (rep && (rep == 1 ? c->zf : !c->zf));
+}
+
+void op_cmps(Cpu *c, unsigned size, int rep, uint32_t address) {
+    if (c->df)
+        guest_fault(c, address, "cmps with DF=1");
+    do {
+        if (rep && c->ecx.d == 0)
+            break;
+        string_compare(c, size, string_value(c, size, c->esi.d), string_value(c, size, c->edi.d));
+        c->esi.d += size;
+        c->edi.d += size;
+        if (rep)
+            c->ecx.d--;
+    } while (rep && (rep == 1 ? c->zf : !c->zf));
+}
+
 /* -- x87 ---------------------------------------------------------------------------------
  * Values live in x87_t. Precision control (PC) is applied to the result of every
  * arithmetic operation, using the rounding control (RC) of the guest control word:
@@ -298,17 +355,8 @@ x87_t x87_m64(uint32_t a) { double d; memcpy(&d, G(a), 8); return d; }
 void x87_fld_m32(Cpu *c, uint32_t a) { x87_push(c, x87_m32(a)); }
 void x87_fld_m64(Cpu *c, uint32_t a) { x87_push(c, x87_m64(a)); }
 
-void x87_fld_m80(Cpu *c, uint32_t a) {
-    uint64_t mant = rd64(a);
-    uint16_t se = rd16(a + 8);
-    int exp = se & 0x7FFF;
-    x87_t v;
-    if (exp == 0x7FFF)
-        v = (mant << 1) ? (x87_t)NAN : (x87_t)INFINITY;
-    else
-        v = ldexpl((long double)mant, exp - 16383 - 63);
-    x87_push(c, (se & 0x8000) ? -v : v);
-}
+static long double read80(uint32_t a);
+void x87_fld_m80(Cpu *c, uint32_t a) { x87_push(c, (x87_t)read80(a)); }
 
 void x87_fild(Cpu *c, int64_t v) { x87_push(c, (x87_t)v); }
 
@@ -334,8 +382,7 @@ void x87_fst_m64(Cpu *c, uint32_t a, int pop) {
     if (pop) x87_pop(c);
 }
 
-void x87_fst_m80(Cpu *c, uint32_t a, int pop) {
-    long double v = x87_st(c, 0);
+static void write80(uint32_t a, long double v) {
     uint16_t se = signbit(v) ? 0x8000 : 0;
     uint64_t mant = 0;
     if (isnan(v)) {
@@ -350,7 +397,65 @@ void x87_fst_m80(Cpu *c, uint32_t a, int pop) {
     }
     wr64(a, mant);
     wr16(a + 8, se);
+}
+
+static long double read80(uint32_t a) {
+    uint64_t mant = rd64(a);
+    uint16_t se = rd16(a + 8);
+    int exp = se & 0x7FFF;
+    long double v;
+    if (exp == 0x7FFF)
+        v = (mant << 1) ? (long double)NAN : (long double)INFINITY;
+    else
+        v = ldexpl((long double)mant, exp - 16383 - 63);
+    return (se & 0x8000) ? -v : v;
+}
+
+void x87_fst_m80(Cpu *c, uint32_t a, int pop) {
+    write80(a, x87_st(c, 0));
     if (pop) x87_pop(c);
+}
+
+/* 32-bit protected-mode environment (28 bytes): CW, SW, TW, then pointers (zero).
+ * Tags are 00 (valid) or 11 (empty); the zero/special distinction is not modelled. */
+static uint16_t tag_word(Cpu *c) {
+    uint16_t tw = 0;
+    for (unsigned p = 0; p < 8; p++)
+        if (c->fpu.tag_empty & (1u << p))
+            tw |= (uint16_t)(3u << (2 * p));
+    return tw;
+}
+
+void x87_fnstenv(Cpu *c, uint32_t a) {
+    memset(G(a), 0, 28);
+    wr32(a, c->fpu.cw | 0xFFFF0000u);
+    wr32(a + 4, x87_get_sw(c) | 0xFFFF0000u);
+    wr32(a + 8, tag_word(c) | 0xFFFF0000u);
+    c->fpu.cw |= 0x3F; /* fnstenv masks all exceptions */
+}
+
+void x87_fldenv(Cpu *c, uint32_t a) {
+    c->fpu.cw = rd16(a);
+    uint16_t sw = rd16(a + 4), tw = rd16(a + 8);
+    c->fpu.sw = sw & ~0x3800;
+    c->fpu.top = (sw >> 11) & 7;
+    c->fpu.tag_empty = 0;
+    for (unsigned p = 0; p < 8; p++)
+        if (((tw >> (2 * p)) & 3) == 3)
+            c->fpu.tag_empty |= (uint8_t)(1u << p);
+}
+
+void x87_fnsave(Cpu *c, uint32_t a) {
+    x87_fnstenv(c, a);
+    for (unsigned i = 0; i < 8; i++)
+        write80(a + 28 + 10 * i, x87_st(c, i));
+    x87_reset(c);
+}
+
+void x87_frstor(Cpu *c, uint32_t a) {
+    x87_fldenv(c, a);
+    for (unsigned i = 0; i < 8; i++)
+        c->fpu.st[phys(c, i)] = (x87_t)read80(a + 28 + 10 * i);
 }
 
 void x87_fst_st(Cpu *c, unsigned i, int pop) {
@@ -478,6 +583,7 @@ void x87_binary_special(Cpu *c, int which) {
     case 1: x87_set_st(c, 1, x87_round_pc(c, b * log2l(a))); x87_pop(c); break;      /* fyl2x */
     case 2: x87_set_st(c, 0, ldexpl(a, (int)truncl(b))); break;                      /* fscale */
     case 3: x87_set_st(c, 0, fmodl(a, b)); c->fpu.sw &= ~0x0400; break;              /* fprem */
+    case 6: x87_set_st(c, 0, remainderl(a, b)); c->fpu.sw &= ~0x0400; break;         /* fprem1 */
     case 4: /* f2xm1; expm1 avoids the cancellation of exp2(x) - 1 for small x */
         x87_set_st(c, 0, x87_round_pc(c, expm1l(a * 0.693147180559945309417232121458176568L)));
         break;

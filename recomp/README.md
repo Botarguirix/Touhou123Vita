@@ -8,6 +8,7 @@ Pipeline de la [ruta de recompilación](../docs/ROADMAP_RECOMP.md): `th123.exe` 
 | `analysis/discover.py` | F1 | Descubrimiento de funciones por descenso recursivo, tablas de switch de MSVC y funciones noreturn |
 | `discover.py` | F1 | CLI: ejecuta el descubrimiento sobre `original/th123.exe` |
 | `lift/lifter.py`, `lift_functions.py` | F1.2 | Traductor x86 → C y su CLI ([F1_LIFTER.md](../docs/F1_LIFTER.md)) |
+| `lift_all.py` | F1.3 | Traduce, compila y enlaza el ejecutable completo; censo de faltas ([F1_COVERAGE.md](../docs/F1_COVERAGE.md)) |
 | `runtime/` | F1.2 | Runtime guest: CPU, memoria, dispatch y modelo x87 de estado explícito |
 | `verify/differential.py`, `tests/*.c` | F1.2 | Runner diferencial contra Unicorn y programas de prueba |
 
