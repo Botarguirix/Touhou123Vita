@@ -48,6 +48,16 @@ enum { SEL_CS = 0x1B, SEL_DS = 0x23, SEL_ES = 0x23, SEL_SS = 0x23, SEL_FS = 0x3B
 
 typedef void (*GuestFn)(Cpu *c);
 
+/* Debug builds (-DT123_TRACE_CALLS) remember the last guest functions entered, so a
+   crash can be placed in the original code. */
+extern uint32_t guest_trace_ring[64];
+extern unsigned guest_trace_pos;
+#ifdef T123_TRACE_CALLS
+#define T123_ENTER(a) (guest_trace_ring[guest_trace_pos++ & 63] = (a))
+#else
+#define T123_ENTER(a) ((void)0)
+#endif
+
 /* -- memory ------------------------------------------------------------------------ */
 extern uint8_t *guest_base;
 #define G(a) (guest_base + (uint32_t)(a))
@@ -76,6 +86,11 @@ void guest_register(const GuestEntry *table, unsigned count); /* lifted function
 void guest_intercept(uint32_t address, GuestFn fn);           /* host replacements */
 void guest_call(Cpu *c, uint32_t target);  /* return address already pushed */
 void guest_call_import(Cpu *c, uint32_t iat_slot);
+extern uint32_t guest_current_target; /* address of the call being dispatched */
+/* Host -> guest call (callbacks such as window procedures and thread entries):
+   pushes argv right to left and a sentinel return address, returns eax. */
+#define GUEST_RETURN_SENTINEL 0xFFFFFFF0u
+uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *argv);
 /* Reports and exits, or longjmps to guest_fault_trap when a test harness set one. */
 _Noreturn void guest_fault(Cpu *c, uint32_t address, const char *what);
 extern jmp_buf *guest_fault_trap;
@@ -281,7 +296,7 @@ static inline void op_sahf(Cpu *c) {
     c->sf = (ah >> 7) & 1; c->zf = (ah >> 6) & 1; c->pf = (ah >> 2) & 1; c->cf = ah & 1;
 }
 
-/* String operations (DF must be clear; checked by the runtime). */
+/* String operations; DF=1 steps backwards. */
 void op_rep_movs(Cpu *c, unsigned size, int rep, uint32_t address);
 void op_rep_stos(Cpu *c, unsigned size, int rep, uint32_t address);
 

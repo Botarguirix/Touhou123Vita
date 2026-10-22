@@ -3,7 +3,7 @@ Unicorn and as lifted C (recomp/tests/diff_runner.c) from the same random states
 
 Covers the instructions added for whole-program coverage (F1.3): xadd, imul r/m8,
 rcl/rcr, rol/ror of 8/16 bits, shld/shrd, bt/bts/btr/btc, xlatb, scas/cmps with
-repe/repne, pushfd/popfd and fnsave/frstor. cpuid and segment-register reads
+repe/repne (forward and with DF=1), pushfd/popfd and fnsave/frstor. cpuid and segment-register reads
 are excluded on purpose: the runtime reports fixed values (docs/F1_COVERAGE.md).
 No game code is involved, so the test does not need th123.exe.
 """
@@ -46,6 +46,9 @@ SNIPPETS = {
              "8d7e40 b904000000 66f3a7 894e78 c3"),
     "flags_roundtrip": ("8b06 034604 9c 58 25c5080000 894608 8b460c 25c5080000 50 9d "
                         "0f924610 0f944611 0f984612 0f904613 0f9a4614 c3"),
+    # std; rep movsb / rep stosb / repne scasb backwards; cld; store esi, edi, ecx.
+    "strings_df": ("56 8d7e7f 8d763f b908000000 fd f3a4 b041 b904000000 f3aa b910000000 f2ae fc "
+                   "89f0 5e 894670 897e74 894e78 c3"),
     # fld a; fld b; fnsave [esp]; fld1 (clobbers); frstor [esp]; fstp; fstp.
     # fprem1 itself is checked against the real FPU in x87_native_test.c: Unicorn
     # rounds the quotient wrongly for negative divisors.

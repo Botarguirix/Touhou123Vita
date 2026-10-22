@@ -85,7 +85,7 @@ int guest_load_pe(const char *path) {
 /* -- calls ----------------------------------------------------------------------------- */
 static const GuestEntry *lifted;
 static unsigned lifted_count;
-static GuestEntry intercepts[256];
+static GuestEntry intercepts[2048]; /* kept sorted by address */
 static unsigned intercept_count;
 
 void guest_register(const GuestEntry *table, unsigned count) {
@@ -93,24 +93,13 @@ void guest_register(const GuestEntry *table, unsigned count) {
     lifted_count = count;
 }
 
-void guest_intercept(uint32_t address, GuestFn fn) {
-    if (intercept_count == sizeof intercepts / sizeof intercepts[0]) {
-        fprintf(stderr, "guest: intercept table full\n");
-        exit(3);
-    }
-    intercepts[intercept_count++] = (GuestEntry){address, fn};
-}
-
-static GuestFn find(uint32_t target) {
-    for (unsigned i = 0; i < intercept_count; i++)
-        if (intercepts[i].address == target)
-            return intercepts[i].fn;
-    unsigned lo = 0, hi = lifted_count;
+static GuestFn search(const GuestEntry *table, unsigned count, uint32_t target) {
+    unsigned lo = 0, hi = count;
     while (lo < hi) {
         unsigned mid = (lo + hi) / 2;
-        if (lifted[mid].address == target)
-            return lifted[mid].fn;
-        if (lifted[mid].address < target)
+        if (table[mid].address == target)
+            return table[mid].fn;
+        if (table[mid].address < target)
             lo = mid + 1;
         else
             hi = mid;
@@ -118,18 +107,62 @@ static GuestFn find(uint32_t target) {
     return NULL;
 }
 
+void guest_intercept(uint32_t address, GuestFn fn) {
+    unsigned i = 0;
+    while (i < intercept_count && intercepts[i].address < address)
+        i++;
+    if (i < intercept_count && intercepts[i].address == address) {
+        intercepts[i].fn = fn; /* replace */
+        return;
+    }
+    if (intercept_count == sizeof intercepts / sizeof intercepts[0]) {
+        fprintf(stderr, "guest: intercept table full\n");
+        exit(3);
+    }
+    memmove(&intercepts[i + 1], &intercepts[i], (intercept_count - i) * sizeof intercepts[0]);
+    intercepts[i] = (GuestEntry){address, fn};
+    intercept_count++;
+}
+
+static GuestFn find(uint32_t target) {
+    GuestFn fn = intercept_count ? search(intercepts, intercept_count, target) : NULL;
+    return fn ? fn : search(lifted, lifted_count, target);
+}
+
+uint32_t guest_current_target;
+uint32_t guest_trace_ring[64];
+unsigned guest_trace_pos;
+
 void guest_call(Cpu *c, uint32_t target) {
     GuestFn fn = find(target);
     if (!fn)
         guest_fault(c, target, "call to a function that is neither lifted nor intercepted");
+    guest_current_target = target;
     fn(c);
 }
 
+/* Imports go through the IAT contents, as in the original: the host fills every
+ * slot with an address it intercepts, so `call [slot]` and pointers loaded from
+ * the IAT reach the same implementation. Without a filled IAT the slot address
+ * itself is looked up (unit-test harnesses register intercepts that way). */
 void guest_call_import(Cpu *c, uint32_t iat_slot) {
     GuestFn fn = find(iat_slot);
-    if (!fn)
-        guest_fault(c, iat_slot, "import without a host implementation");
-    fn(c);
+    if (fn) {
+        guest_current_target = iat_slot;
+        fn(c);
+        return;
+    }
+    guest_call(c, rd32(iat_slot));
+}
+
+uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *argv) {
+    uint32_t esp = c->esp.d;
+    for (unsigned i = argc; i-- > 0;)
+        push32(c, argv[i]);
+    push32(c, GUEST_RETURN_SENTINEL);
+    guest_call(c, target);
+    c->esp.d = esp; /* works for both cdecl and stdcall callbacks */
+    return c->eax.d;
 }
 
 jmp_buf *guest_fault_trap;
@@ -165,21 +198,35 @@ void op_idiv1_32(Cpu *c, uint32_t b, uint32_t address) {
     c->edx.d = (uint32_t)(int32_t)(n % d);
 }
 
+/* String instructions step by +size, or by -size when DF=1 (std). */
 void op_rep_movs(Cpu *c, unsigned size, int rep, uint32_t address) {
-    if (c->df)
-        guest_fault(c, address, "movs with DF=1");
+    (void)address;
     uint32_t count = rep ? c->ecx.d : 1;
-    memmove(G(c->edi.d), G(c->esi.d), (size_t)count * size);
-    c->esi.d += count * size;
-    c->edi.d += count * size;
+    if (!c->df) {
+        /* Forward, element by element semantics: overlapping copies replicate. */
+        if (c->edi.d <= c->esi.d || c->edi.d >= c->esi.d + count * size) {
+            memmove(G(c->edi.d), G(c->esi.d), (size_t)count * size);
+        } else {
+            for (uint32_t i = 0; i < count * size; i++)
+                wr8(c->edi.d + i, rd8(c->esi.d + i));
+        }
+        c->esi.d += count * size;
+        c->edi.d += count * size;
+    } else {
+        for (uint32_t i = 0; i < count; i++) {
+            memmove(G(c->edi.d), G(c->esi.d), size);
+            c->esi.d -= size;
+            c->edi.d -= size;
+        }
+    }
     if (rep)
         c->ecx.d = 0;
 }
 
 void op_rep_stos(Cpu *c, unsigned size, int rep, uint32_t address) {
-    if (c->df)
-        guest_fault(c, address, "stos with DF=1");
+    (void)address;
     uint32_t count = rep ? c->ecx.d : 1;
+    int32_t step = c->df ? -(int32_t)size : (int32_t)size;
     for (uint32_t i = 0; i < count; i++) {
         if (size == 1)
             wr8(c->edi.d, c->eax.b.l);
@@ -187,7 +234,7 @@ void op_rep_stos(Cpu *c, unsigned size, int rep, uint32_t address) {
             wr16(c->edi.d, c->eax.w);
         else
             wr32(c->edi.d, c->eax.d);
-        c->edi.d += size;
+        c->edi.d += (uint32_t)step;
     }
     if (rep)
         c->ecx.d = 0;
@@ -223,28 +270,28 @@ static void string_compare(Cpu *c, unsigned size, uint32_t a, uint32_t b) {
 }
 
 void op_scas(Cpu *c, unsigned size, int rep, uint32_t address) {
-    if (c->df)
-        guest_fault(c, address, "scas with DF=1");
+    (void)address;
     uint32_t acc = size == 1 ? c->eax.b.l : size == 2 ? c->eax.w : c->eax.d;
+    uint32_t step = c->df ? (uint32_t)-(int32_t)size : size;
     do {
         if (rep && c->ecx.d == 0)
             break;
         string_compare(c, size, acc, string_value(c, size, c->edi.d));
-        c->edi.d += size;
+        c->edi.d += step;
         if (rep)
             c->ecx.d--;
     } while (rep && (rep == 1 ? c->zf : !c->zf));
 }
 
 void op_cmps(Cpu *c, unsigned size, int rep, uint32_t address) {
-    if (c->df)
-        guest_fault(c, address, "cmps with DF=1");
+    (void)address;
+    uint32_t step = c->df ? (uint32_t)-(int32_t)size : size;
     do {
         if (rep && c->ecx.d == 0)
             break;
         string_compare(c, size, string_value(c, size, c->esi.d), string_value(c, size, c->edi.d));
-        c->esi.d += size;
-        c->edi.d += size;
+        c->esi.d += step;
+        c->edi.d += step;
         if (rep)
             c->ecx.d--;
     } while (rep && (rep == 1 ? c->zf : !c->zf));

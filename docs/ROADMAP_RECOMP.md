@@ -2,9 +2,31 @@
 
 Fecha: 20 de octubre de 2026. **Aprobada el 21 de octubre de 2026**; sustituye la estrategia del [roadmap anterior](ROADMAP.md), que queda como historial.
 
-**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). **F1.2 (lifter mínimo + modelo x87 explícito) completada**: el kernel de animación traducido pasa 2 048/2 048 casos, el x87 coincide con la FPU real en 2,7 M comprobaciones y 55/57 funciones x87 reales coinciden con el original ([F1_LIFTER.md](F1_LIFTER.md)). **F1.3 completada**: las 6 406 funciones se traducen, compilan y enlazan en PC, y el código del juego tiene **0 instrucciones sin soporte**; quedan 856 SSE2 del CRT, que no se ejecutan por la política de `cpuid` ([F1_COVERAGE.md](F1_COVERAGE.md)). **F1 cerrada.** Siguiente: F2.0, arranque en PC host sobre una capa Win32 mínima.
+**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). **F1.2 (lifter mínimo + modelo x87 explícito) completada**: el kernel de animación traducido pasa 2 048/2 048 casos, el x87 coincide con la FPU real en 2,7 M comprobaciones y 55/57 funciones x87 reales coinciden con el original ([F1_LIFTER.md](F1_LIFTER.md)). **F1.3 completada**: las 6 406 funciones se traducen, compilan y enlazan en PC, y el código del juego tiene **0 instrucciones sin soporte**; quedan 856 SSE2 del CRT, que no se ejecutan por la política de `cpuid` ([F1_COVERAGE.md](F1_COVERAGE.md)). **F1 cerrada.** **F2.0 completada**: el CRT y `WinMain` traducidos arrancan en PC, crean la ventana del juego, abren y parsean los tres DAT y llegan a `Direct3DCreate9` ([F2_BOOT.md](F2_BOOT.md)). Siguiente: F3.0 / H1 (el mismo arranque en Vita3K) y F2.1–F2.2 (hilos, ventana y D3D9).
 
 F0 (21 oct 2026). Detalles en [PE_INVENTORY.md](PE_INVENTORY.md): la ruta sigue adelante, con dos ajustes en F1 (descubrimiento propio de funciones y switch, y verificación del modo x87 que deja D3D9).
+
+## Hitos visibles y cuánto falta (actualizado el 21 oct 2026)
+
+Hasta ahora todo el avance es invisible: el código original ya se traduce, compila y se valida contra el x86, pero todavía no dibuja nada. Estos son los primeros puntos en los que **se puede ver** algo, en el orden en que llegan.
+
+Las estimaciones van en **bloques de trabajo**, con la escala de hoy: F0, F1.1, F1.2 y F1.3 fueron un bloque cada uno. Son estimaciones, no compromisos. Cada hito tiene criterio de salida, y si un bloque destapa un problema mayor se dice.
+
+| # | Hito visible | Qué hace falta | Bloques desde hoy | Dónde se ve |
+|---|---|---|---|---|
+| H1 | **El código recompilado del juego corre en ARM.** El arranque del CRT y `WinMain` se ejecutan en Vita3K, con el progreso en una pantalla de texto | ~~F2.0 en PC~~ (hecho); mapa de memoria guest de 32 bits que quepa en la Vita (una ventana de ~256 MB en vez de 4 GB); compilar las 69 unidades con VitaSDK; reutilizar el VPK y el autotest de Vita3K que ya existen | **1–2** | Vita3K, y en una Vita real con el mismo VPK |
+| H2 | **Primera imagen del juego en PC**: la pantalla de título dibujada por el código original | Ventana y bucle de mensajes, subconjunto de D3D9 (dispositivo, texturas, *vertex buffers*, `DrawPrimitive`) sobre OpenGL/SDL2, los 3 efectos D3DX reescritos, hilos reales (el juego carga en un hilo aparte), DirectInput/DirectSound mínimos, excepciones C++ si aparecen | **4–7** después de H1 | PC |
+| H3 | **Primera imagen del juego en Vita3K / Vita** | La capa D3D9 de H2 sobre vitaGL, fuentes (sustituto de `GetGlyphOutlineA`) y presupuesto de memoria de texturas | **2–4** después de H2 | Vita3K y Vita real |
+| H4 | **Menús y un combate jugable** con mando | Entrada completa, audio (DirectSound → SceAudio), ritmo de frames y rendimiento mínimo aceptable | **4–8** después de H3 | Vita |
+
+En resumen: lo primero que se verá **en Vita3K es H1**, a unos 2–3 bloques. Es un avance real (el código de Hisoutensoku ejecutándose en ARM), pero es texto, no gráficos. La **primera imagen del juego** llega con H2 en PC y con H3 en Vita.
+
+Riesgos que pueden mover estas cifras:
+
+- **Rendimiento del código traducido en el Cortex-A9.** Se mide en H1 con el arranque; si es muy lento, las optimizaciones de F5 se adelantan.
+- **Memoria de la Vita.** Se mide en H1 y H3.
+- **Excepciones de C++ (SEH)**, si el juego las usa en su flujo normal.
+- **Fallos de Vita3K** con un ejecutable de ese tamaño. Por eso conviene probar también en una Vita real desde H1.
 
 ## 1. Diagnóstico del proyecto actual
 
@@ -127,13 +149,16 @@ Cada fase tiene un criterio de salida. Si una fase se atasca, se reevalúa la ru
 - **Salida:** al menos el 99 % de las funciones traducidas y compilando en PC, y todas las pruebas de equivalencia en verde.
 
 ### F2 — Arranque en PC host
-- Capas Win32 mínimas y D3D9 sobre OpenGL/SDL2 en PC.
-- El C generado arranca hasta la pantalla de título, los menús y un combate VS CPU.
+- **F2.0** (completada): CRT y `WinMain` traducidos sobre una capa Win32 mínima y portable (`recomp/host/`: heap y memoria virtual guest, TLS en el TIB, archivos, perfiles `.ini`, código de página 932). Llega a `Direct3DCreate9` después de abrir y parsear los tres DAT ([F2_BOOT.md](F2_BOOT.md)).
+- **F2.1:** ventana, mensajes e hilos reales.
+- **F2.2:** D3D9 sobre OpenGL/SDL2 y los 3 efectos D3DX (hito **H2**: primera imagen en PC).
+- **F2.3:** entrada, audio y combate.
 - Se mide en PC el uso de memoria (heap y texturas) y el número de draw calls por frame.
 - **Salida:** combate completo en PC con el código traducido, y un replay de PC reproducido idéntico.
 
 ### F3 — Primer arranque en Vita
-- El mismo C se compila para ARM con kubridge, la imagen se mapea en una dirección fija y la capa D3D9 pasa a vitaGL. Audio con SceAudio.
+- **F3.0** (hito **H1**, se adelanta y va justo después de F2.0): el mismo C compilado para ARM con VitaSDK, con un mapa de memoria guest de 32 bits dentro de un único bloque de la Vita y la capa de host portable. Lo prueba el autotest de Vita3K y el progreso se ve en una pantalla de texto.
+- **F3.1** (hito **H3**): la capa D3D9 pasa a vitaGL y el audio a SceAudio.
 - Se valida en Vita3K y en hardware, con FPS, RAM y VRAM medidos.
 - **Salida:** MVP en Vita, es decir, título, menús y un combate VS CPU con audio.
 
@@ -165,18 +190,20 @@ Cada fase tiene un criterio de salida. Si una fase se atasca, se reevalúa la ru
 | Motor hecho a mano (`fight.c`, `stage.c`, …) | Se congela como demo `legacy/`; no se sigue extendiendo |
 | Documentación de iteraciones | Historial; el conocimiento del PE ayuda a depurar el código traducido |
 
-## 10. Próximos pasos concretos (cuando se apruebe)
+## 10. Próximos pasos concretos
 
-1. **F0.1:** etiqueta `legacy-reimpl-2.199`, movimiento del motor a `legacy/` y build de la demo sin cambios.
-2. **F0.2:** script `tools/pe_inventory.py` (secciones, IAT, CRT, COM, efectos D3DX) y `docs/PE_INVENTORY.md`.
-3. **F0.3:** extraer la lista de funciones del Ghidra existente y medir cuántas usan x87, SSE, SEH y llamadas indirectas.
-4. **F1.0:** lifter mínimo que traduzca y compile en PC la función de animación ya verificada (`x86_animation_oracle.py`) y pase su prueba de 4 096 casos. Es el primer punto de control real de la ruta.
+Hechos: F0 (inventario y congelación), F1.1 (descubrimiento), F1.2 (lifter y x87) y F1.3 (programa completo).
 
-## 11. Decisiones pendientes del usuario
+1. ~~**F2.0:** llevar el arranque del CRT y `WinMain` traducidos tan lejos como permita una capa Win32 sin gráficos~~ (hecho: llega a `Direct3DCreate9`).
+2. **F3.0 / H1:** build ARM del mismo programa con la ventana de memoria de 32 bits, y prueba en Vita3K y en una Vita real.
+3. **F2.1–F2.2 / H2:** ventana, hilos y D3D9 en PC hasta la pantalla de título.
+4. En paralelo, Codex: T3 (censo de métodos COM, que fija el alcance de la capa D3D9), T4 (zlib/libpng/vorbis para Vita) y T5 (fuentes).
 
-- Aprobar el cambio de ruta (D + C progresiva) y congelar el motor hecho a mano.
-- Lifter propio (licencia libre a elegir) o basado en repentogxm (obliga a GPL-2.0+ en las partes derivadas).
-- Mantener la regla de no publicar el C generado, igual que repentogxm y Vagante2Vita.
+## 11. Decisiones tomadas
+
+- Cambio de ruta aprobado el 21 oct 2026; el motor hecho a mano queda congelado en `legacy/`.
+- **Lifter propio:** no se copia código de repentogxm, solo ideas. La licencia del proyecto queda libre de elegir.
+- El C generado, el `.exe`, los DAT y los recursos no se publican.
 
 ## Fuentes
 

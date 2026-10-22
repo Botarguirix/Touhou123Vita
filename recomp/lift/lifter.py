@@ -459,7 +459,7 @@ class Lifter:
 
     # -- functions ---------------------------------------------------------------------------
     def lift_function(self, fn: Function, result: LiftResult) -> str:
-        lines = [f"void {fn_name(fn.entry)}(Cpu *c) {{"]
+        lines = [f"void {fn_name(fn.entry)}(Cpu *c) {{", f"    T123_ENTER(0x{fn.entry:08x}u);"]
         if fn.entry not in fn.insns:
             lines.append(f"    guest_fault(c, 0x{fn.entry:08x}u, \"entry does not decode\");")
         addresses = sorted(fn.insns)
