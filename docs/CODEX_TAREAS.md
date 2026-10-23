@@ -16,10 +16,10 @@ edita solo los archivos que indica la tarea y termina con el informe final.
 |---|---|---|---|
 | T1 | Flags de `CreateDevice` y modo x87 | Alta, bloquea el modelo x87 del lifter | Hecha (21 oct 2026), integrada en `main`: [X87_MODE.md](X87_MODE.md) |
 | T2 | Efectos D3DX embebidos | Media | Hecha (21 oct 2026), integrada en `main`: [D3DX_EFFECTS.md](D3DX_EFFECTS.md) |
-| T3 | Censo de métodos COM usados | Media | Pendiente |
-| T4 | zlib, libpng y vorbis nativos para Vita | Media | Pendiente |
-| T5 | Peticiones de fuente y sustituto de `GetGlyphOutlineA` | Baja | Pendiente |
-| T6 | Arreglar los fallos de prueba previos de `legacy/` | Baja | Pendiente |
+| T3 | Censo de métodos COM usados | Media | Hecha (22 oct 2026), integrada: [COM_USAGE.md](COM_USAGE.md) |
+| T4 | zlib, libpng y vorbis nativos para Vita | Media | Hecha (22 oct 2026), integrada: `third_party/vita-libs/` |
+| T5 | Peticiones de fuente y sustituto de `GetGlyphOutlineA` | Baja | Hecha (22 oct 2026), integrada: [FONT_RENDERING.md](FONT_RENDERING.md) |
+| T6 | Arreglar los fallos de prueba previos de `legacy/` | Baja | Hecha (22 oct 2026), integrada: ver `legacy/README.md` |
 
 ---
 
