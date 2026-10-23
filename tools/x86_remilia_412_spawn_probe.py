@@ -627,6 +627,10 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
         uc.mem_write(defender + 0xF0, struct.pack("<f", 360.0))
         probe._sync_box_data(defender)
         saved_intercept = probe.intercept_box_transforms
+        # The geometry sweep is an independent fixture. Restore its input
+        # position before observing the manager's natural motion/lifetime.
+        # Otherwise the last dx=200 sample silently moves the lifecycle start.
+        child_position_before_sweep = bytes(uc.mem_read(child + 0xEC, 8))
         try:
             probe.intercept_box_transforms = False
             for dx in (0.0, 40.0, 60.0, 70.0, 71.0, 100.0, 200.0):
@@ -642,6 +646,8 @@ def run_case(dat_dir: Path, x: float, y: float, facing: int, callback_index: int
                                          "transform_helpers": probe.box_transform_calls[transform_start:]})
         finally:
             probe.intercept_box_transforms = saved_intercept
+            uc.mem_write(child + 0xEC, child_position_before_sweep)
+            probe._sync_box_data(child)
         if resolve_damage:
             # Build the original character-pair manager's two-player and
             # team-indexed intrusive-list layout, then enter its PE dispatcher.
