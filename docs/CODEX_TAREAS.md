@@ -20,7 +20,7 @@ edita solo los archivos que indica la tarea y termina con el informe final.
 | T4 | zlib, libpng y vorbis nativos para Vita | Media | Hecha (22 oct 2026), integrada: `third_party/vita-libs/` |
 | T5 | Peticiones de fuente y sustituto de `GetGlyphOutlineA` | Baja | Hecha (22 oct 2026), integrada: [FONT_RENDERING.md](FONT_RENDERING.md) |
 | T6 | Arreglar los fallos de prueba previos de `legacy/` | Baja | Hecha (22 oct 2026), integrada: ver `legacy/README.md` |
-| T7 | Conversión Shift-JIS (CP932) ↔ UTF-16 | Alta, texto del juego | Hecha (24 oct 2026), integrada: ecomp/host/sjis.c (falta conectarla a MultiByteToWideChar) |
+| T7 | Conversión Shift-JIS (CP932) ↔ UTF-16 | Alta, texto del juego | Hecha (24 oct 2026), integrada: `recomp/host/sjis.c` (falta conectarla a `MultiByteToWideChar`) |
 | T8 | Rasterizador de glifos `GGO_GRAY4_BITMAP` | Alta, necesaria para H3 | Hecha (24 oct 2026), integrada: [GLYPHS.md](GLYPHS.md) (fuera de los builds hasta enlazar FreeType) |
 | T9 | Teclado SDL → códigos DIK de DirectInput | Media | Hecha (24 oct 2026), integrada: [INPUT_MAP.md](INPUT_MAP.md) (falta conectarla a `GetDeviceState`) |
 | T10 | Pruebas del heap guest | Media | Hecha (24 oct 2026), integrada; sus dos desbordamientos están corregidos en `support.c` |
