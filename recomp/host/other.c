@@ -3,6 +3,7 @@
  * No window or graphics exist yet: windows are handles, messages never arrive and
  * Direct3DCreate9 fails on purpose, so the run shows how far the game gets before it
  * needs graphics. MessageBoxA texts are written to the trace. */
+#include "render.h"
 #include "win32.h"
 
 #include <stdio.h>
@@ -69,7 +70,18 @@ API(MessageBoxA) {
           ARG(c, 1) ? STR(ARG(c, 1)) : "");
     ret_stdcall(c, 1 /* IDOK */, 4);
 }
-API(PeekMessageA) { ret_stdcall(c, 0, 5); }
+/* Messages: SDL events are polled here; only closing the window produces a message
+   (WM_QUIT), which ends the game's loop the way the original window would. */
+API(PeekMessageA) {
+    if (render_pump_events()) {
+        uint32_t msg = ARG(c, 0);
+        memset(G(msg), 0, 28);
+        wr32(msg + 4, 0x0012 /* WM_QUIT */);
+        ret_stdcall(c, 1, 5);
+        return;
+    }
+    ret_stdcall(c, 0, 5);
+}
 API(GetMessageA) { host_exit(c, 0, "GetMessageA: message loop reached (no window system yet)"); }
 API(DispatchMessageA) { ret_stdcall(c, 0, 1); }
 API(TranslateMessage) { ret_stdcall(c, 0, 1); }
@@ -149,17 +161,9 @@ API(ImmReleaseContext) { ret_stdcall(c, 1, 2); }
 API(ImmGetCompositionStringA) { ret_stdcall(c, 0, 4); }
 API(ImmSetCandidateWindow) { ret_stdcall(c, 1, 2); }
 
-/* -- OLE32: COM objects (DirectSound8, DirectInput8) are not provided yet ---------- */
+/* -- OLE32 (CoCreateInstance is in media.c) ---------------------------------------- */
 API(CoInitialize) { ret_stdcall(c, 0, 1); }
 API(CoUninitialize) { ret_stdcall(c, 0, 0); }
-API(CoCreateInstance) {
-    uint32_t clsid = ARG(c, 0);
-    trace("CoCreateInstance(clsid=%08x-%04x-%04x): not available yet", rd32(clsid), rd16(clsid + 4),
-          rd16(clsid + 6));
-    if (ARG(c, 4))
-        wr32(ARG(c, 4), 0);
-    ret_stdcall(c, 0x80040154u /* REGDB_E_CLASSNOTREG */, 5);
-}
 
 /* -- WS2_32: networking stays off --------------------------------------------------------- */
 API(WSAStartup) {
@@ -169,14 +173,6 @@ API(WSAStartup) {
 }
 API(WSACleanup) { ret_stdcall(c, 0, 0); }
 
-/* -- D3D9: the run stops here until the graphics layer exists (F2.2) --------------
- * Stopping (instead of returning NULL, which F2.0 did to observe the game's error
- * path) gives PC and Vita the same deterministic end point: on the Vita the guest
- * NULL page is inside the memory window, so the failure path would diverge. */
-API(Direct3DCreate9) {
-    trace("Direct3DCreate9(SDK %u) reached", ARG(c, 0));
-    host_exit(c, 0xD3D9, "Direct3DCreate9 reached: graphics layer pending (F2.2)");
-}
 
 /* -- IMAGEHLP ---------------------------------------------------------------------------- */
 API(MakeSureDirectoryPathExists) {
@@ -196,8 +192,8 @@ const ApiEntry win32_other[] = {
     E(CreateFontA), E(SelectObject), E(DeleteObject), E(GetStockObject), E(GetTextMetricsA),
     E(GetGlyphOutlineA),
     E(ImmGetContext), E(ImmReleaseContext), E(ImmGetCompositionStringA), E(ImmSetCandidateWindow),
-    E(CoInitialize), E(CoUninitialize), E(CoCreateInstance),
+    E(CoInitialize), E(CoUninitialize),
     E(WSAStartup), E(WSACleanup),
-    E(Direct3DCreate9), E(MakeSureDirectoryPathExists),
+    E(MakeSureDirectoryPathExists),
     {NULL, NULL},
 };

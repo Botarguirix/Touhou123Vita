@@ -27,7 +27,7 @@ CC = BIN / "arm-vita-eabi-gcc.exe"
 TITLE_ID, TITLE = "THSV12302", "Touhou123Vita Recomp H1"
 RUNTIME, HOST, VITA = ROOT / "recomp/runtime", ROOT / "recomp/host", ROOT / "recomp/vita"
 LIBS = ["-lSceDisplay_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
-        "-lSceProcessmgr_stub", "-lm"]
+        "-lSceProcessmgr_stub", "-lpthread", "-lm", "-lgcc", "-lpthread"]
 
 
 def run(cmd, **kw):
@@ -50,6 +50,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--opt", default="-O1")
+    parser.add_argument("--trace-calls", action="store_true",
+                        help="record guest function entries (crash reports name the last ones; slower)")
     args = parser.parse_args()
     gen = ROOT / "artifacts/recomp" / SHA / "gen"
     out = ROOT / "artifacts/recomp" / SHA / "vita"
@@ -59,12 +61,16 @@ def main() -> None:
         raise SystemExit("run recomp/lift_all.py first")
 
     common = ["-std=gnu11", args.opt, "-frounding-math", "-fno-strict-aliasing", f"-I{RUNTIME}"]
+    if args.trace_calls:
+        common.append("-DT123_TRACE_CALLS")
+        objs = out / "obj-trace"
+        objs.mkdir(parents=True, exist_ok=True)
     gen_flags = common + ["-w", f"-I{gen}"]
     host_flags = common + ["-Wall", "-Wno-unused-parameter", f"-I{HOST}"]
     header = [RUNTIME / "guest.h"]
     tasks = [(s, objs / (s.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for s in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]
-    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name != "platform_pc.c"]
+    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "render_gl.c")]
     tasks += [(s, objs / ("host_" + s.stem + ".o"), host_flags, header + [HOST / "win32.h"])
               for s in host_sources + sorted(VITA.glob("*.c")) + [RUNTIME / "guest.c"]]
     started = time.monotonic()

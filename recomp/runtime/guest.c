@@ -149,8 +149,8 @@ static GuestFn find(uint32_t target) {
 }
 
 _Thread_local uint32_t guest_current_target;
-uint32_t guest_trace_ring[64];
-unsigned guest_trace_pos;
+_Thread_local uint32_t guest_trace_ring[64];
+_Thread_local unsigned guest_trace_pos;
 
 void guest_call(Cpu *c, uint32_t target) {
     GuestFn fn = find(target);

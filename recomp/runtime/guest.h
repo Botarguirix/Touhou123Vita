@@ -50,8 +50,8 @@ typedef void (*GuestFn)(Cpu *c);
 
 /* Debug builds (-DT123_TRACE_CALLS) remember the last guest functions entered, so a
    crash can be placed in the original code. */
-extern uint32_t guest_trace_ring[64];
-extern unsigned guest_trace_pos;
+extern _Thread_local uint32_t guest_trace_ring[64];
+extern _Thread_local unsigned guest_trace_pos;
 #ifdef T123_TRACE_CALLS
 #define T123_ENTER(a) (guest_trace_ring[guest_trace_pos++ & 63] = (a))
 #else

@@ -14,4 +14,9 @@ uint64_t platform_ticks_us(void) {
 
 void platform_finish(const char *summary) { printf("%s\n", summary); }
 
+void platform_sleep_ms(uint32_t ms) {
+    struct timespec ts = {ms / 1000, (long)(ms % 1000) * 1000000L};
+    nanosleep(&ts, NULL);
+}
+
 void platform_memory_report(char *out, size_t size) { snprintf(out, size, "(no memory report on PC)"); }

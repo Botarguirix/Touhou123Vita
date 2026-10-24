@@ -2,7 +2,7 @@
 
 Fecha: 20 de octubre de 2026. **Aprobada el 21 de octubre de 2026**; sustituye la estrategia del [roadmap anterior](ROADMAP.md), que queda como historial.
 
-**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). **F1.2 (lifter mínimo + modelo x87 explícito) completada**: el kernel de animación traducido pasa 2 048/2 048 casos, el x87 coincide con la FPU real en 2,7 M comprobaciones y 55/57 funciones x87 reales coinciden con el original ([F1_LIFTER.md](F1_LIFTER.md)). **F1.3 completada**: las 6 406 funciones se traducen, compilan y enlazan en PC, y el código del juego tiene **0 instrucciones sin soporte**; quedan 856 SSE2 del CRT, que no se ejecutan por la política de `cpuid` ([F1_COVERAGE.md](F1_COVERAGE.md)). **F1 cerrada.** **F2.0 completada**: el CRT y `WinMain` traducidos arrancan en PC, crean la ventana del juego, abren y parsean los tres DAT y llegan a `Direct3DCreate9` ([F2_BOOT.md](F2_BOOT.md)). **H1 / F3.0 conseguido**: el mismo código compilado para ARM arranca en Vita3K con una traza idéntica a la de PC ([H1_VITA_BOOT.md](H1_VITA_BOOT.md)). Siguiente: H2, con F2.1–F2.2 (hilos, ventana y D3D9) hasta la pantalla de título en PC.
+**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). **F1.2 (lifter mínimo + modelo x87 explícito) completada**: el kernel de animación traducido pasa 2 048/2 048 casos, el x87 coincide con la FPU real en 2,7 M comprobaciones y 55/57 funciones x87 reales coinciden con el original ([F1_LIFTER.md](F1_LIFTER.md)). **F1.3 completada**: las 6 406 funciones se traducen, compilan y enlazan en PC, y el código del juego tiene **0 instrucciones sin soporte**; quedan 856 SSE2 del CRT, que no se ejecutan por la política de `cpuid` ([F1_COVERAGE.md](F1_COVERAGE.md)). **F1 cerrada.** **F2.0 completada**: el CRT y `WinMain` traducidos arrancan en PC, crean la ventana del juego, abren y parsean los tres DAT y llegan a `Direct3DCreate9` ([F2_BOOT.md](F2_BOOT.md)). **H1 / F3.0 conseguido**: el mismo código compilado para ARM arranca en Vita3K con una traza idéntica a la de PC ([H1_VITA_BOOT.md](H1_VITA_BOOT.md)). **H2 conseguido**: el código original dibuja la pantalla de título en PC con hilos reales y D3D9 sobre OpenGL ([H2_PC_TITLE.md](H2_PC_TITLE.md)). Siguiente: H3, la capa de render sobre vitaGL.
 
 F0 (21 oct 2026). Detalles en [PE_INVENTORY.md](PE_INVENTORY.md): la ruta sigue adelante, con dos ajustes en F1 (descubrimiento propio de funciones y switch, y verificación del modo x87 que deja D3D9).
 
@@ -15,7 +15,7 @@ Las estimaciones van en **bloques de trabajo**, con la escala de hoy: F0, F1.1, 
 | # | Hito visible | Qué hace falta | Bloques desde hoy | Dónde se ve |
 |---|---|---|---|---|
 | H1 | **El código recompilado del juego corre en ARM.** El arranque del CRT y `WinMain` se ejecutan en Vita3K, con el progreso en una pantalla de texto | **Conseguido el 21 oct 2026** ([H1_VITA_BOOT.md](H1_VITA_BOOT.md)): traza idéntica a la de PC; **confirmado en una Vita real el 23 oct 2026** (2 723 ms hasta D3D) | — | Vita3K y Vita real |
-| H2 | **Primera imagen del juego en PC**: la pantalla de título dibujada por el código original | Ventana y bucle de mensajes, subconjunto de D3D9 (dispositivo, texturas, *vertex buffers*, `DrawPrimitive`) sobre OpenGL/SDL2, los 3 efectos D3DX reescritos, hilos reales (el juego carga en un hilo aparte), DirectInput/DirectSound mínimos, excepciones C++ si aparecen | **4–7** desde hoy | PC |
+| H2 | **Primera imagen del juego en PC**: la pantalla de título dibujada por el código original | Ventana y bucle de mensajes, subconjunto de D3D9 (dispositivo, texturas, *vertex buffers*, `DrawPrimitive`) sobre OpenGL/SDL2, los 3 efectos D3DX reescritos, hilos reales (el juego carga en un hilo aparte), DirectInput/DirectSound mínimos, excepciones C++ si aparecen | **Conseguido el 23 oct 2026** ([H2_PC_TITLE.md](H2_PC_TITLE.md)): 600 fotogramas del título sin errores | PC |
 | H3 | **Primera imagen del juego en Vita3K / Vita** | La capa D3D9 de H2 sobre vitaGL, fuentes (sustituto de `GetGlyphOutlineA`) y presupuesto de memoria de texturas | **2–4** después de H2 | Vita3K y Vita real |
 | H4 | **Menús y un combate jugable** con mando | Entrada completa, audio (DirectSound → SceAudio), ritmo de frames y rendimiento mínimo aceptable | **4–8** después de H3 | Vita |
 
@@ -196,7 +196,7 @@ Hechos: F0 (inventario y congelación), F1.1 (descubrimiento), F1.2 (lifter y x8
 
 1. ~~**F2.0:** llevar el arranque del CRT y `WinMain` traducidos tan lejos como permita una capa Win32 sin gráficos~~ (hecho: llega a `Direct3DCreate9`).
 2. ~~**F3.0 / H1:** build ARM del mismo programa con la ventana de memoria de 32 bits, y prueba en Vita3K~~ (hecho). Queda pendiente la prueba en una Vita real, con las instrucciones de [H1_VITA_BOOT.md](H1_VITA_BOOT.md).
-3. **F2.1–F2.2 / H2:** ventana, hilos y D3D9 en PC hasta la pantalla de título.
+3. ~~**F2.1–F2.2 / H2:** ventana, hilos y D3D9 en PC hasta la pantalla de título~~ (hecho).
 4. En paralelo, Codex: T3 (censo de métodos COM, que fija el alcance de la capa D3D9), T4 (zlib/libpng/vorbis para Vita) y T5 (fuentes).
 
 ## 11. Decisiones tomadas

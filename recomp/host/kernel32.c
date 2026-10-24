@@ -72,7 +72,7 @@ API(TlsAlloc) {
     for (unsigned i = 0; i < TLS_SLOTS; i++) {
         if (!tls_used[i]) {
             tls_used[i] = 1;
-            wr32(GUEST_TIB + TIB_TLS + 4 * i, 0);
+            wr32(c->fs_base + TIB_TLS + 4 * i, 0);
             ret_stdcall(c, i, 0);
             return;
         }
@@ -83,12 +83,12 @@ API(TlsFree) { if (ARG(c, 0) < TLS_SLOTS) tls_used[ARG(c, 0)] = 0; ret_stdcall(c
 API(TlsGetValue) {
     uint32_t i = ARG(c, 0);
     last_error = 0;
-    ret_stdcall(c, i < TLS_SLOTS ? rd32(GUEST_TIB + TIB_TLS + 4 * i) : 0, 1);
+    ret_stdcall(c, i < TLS_SLOTS ? rd32(c->fs_base + TIB_TLS + 4 * i) : 0, 1);
 }
 API(TlsSetValue) {
     uint32_t i = ARG(c, 0);
     if (i < TLS_SLOTS)
-        wr32(GUEST_TIB + TIB_TLS + 4 * i, ARG(c, 1));
+        wr32(c->fs_base + TIB_TLS + 4 * i, ARG(c, 1));
     ret_stdcall(c, i < TLS_SLOTS, 2);
 }
 
@@ -480,6 +480,19 @@ API(GetConsoleOutputCP) { ret_stdcall(c, 932, 0); }
 API(GetConsoleMode) { ret_stdcall(c, 0, 2); }
 
 /* -- exceptions: C++ throw/unwind are not supported yet -------------------------------- */
+/* The CRT reaches this on a fatal error (stack cookie, invalid parameter, abort):
+   report the thread and its last guest functions, then stop. */
+API(UnhandledExceptionFilter) {
+    uint32_t record = ARG(c, 0) ? rd32(ARG(c, 0)) : 0;
+    trace("# UnhandledExceptionFilter on thread %u: exception %08x at %08x", rd32(c->fs_base + 0x24),
+          record ? rd32(record) : 0, record ? rd32(record + 12) : 0);
+    trace("# last guest functions entered on this thread (oldest first):");
+    for (unsigned k = 0; k < 64; k++) {
+        uint32_t f = guest_trace_ring[(guest_trace_pos + k) & 63];
+        if (f) trace("#   %08x", f);
+    }
+    host_exit(c, 0xC0000409u, "UnhandledExceptionFilter: fatal CRT error in the guest");
+}
 API(RaiseException) {
     trace("RaiseException(code=%08x, flags=%u, args=%u)", ARG(c, 0), ARG(c, 1), ARG(c, 2));
     host_exit(c, 0xE06D7363u, "RaiseException (C++ throw): SEH unwinding is not implemented");
@@ -511,6 +524,6 @@ const ApiEntry win32_kernel32[] = {
     E(WriteFile), E(SetFilePointer), E(GetFileSize), E(FlushFileBuffers), E(GetFileAttributesA),
     E(CreateDirectoryA), E(DeleteFileA), E(SetCurrentDirectoryA), E(GetCurrentDirectoryA), E(lstrlenA),
     E(GetPrivateProfileIntA), E(GetPrivateProfileStringA),
-    E(GetConsoleCP), E(GetConsoleOutputCP), E(GetConsoleMode), E(RaiseException),
+    E(GetConsoleCP), E(GetConsoleOutputCP), E(GetConsoleMode), E(RaiseException), E(UnhandledExceptionFilter),
     {NULL, NULL},
 };

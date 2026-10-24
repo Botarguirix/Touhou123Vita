@@ -90,6 +90,8 @@ static void redraw(void) {
 
 uint64_t platform_ticks_us(void) { return sceKernelGetProcessTimeWide(); }
 
+void platform_sleep_ms(uint32_t ms) { sceKernelDelayThread(ms * 1000u); }
+
 void platform_log(const char *line) {
     if (!strncmp(line, "#   ", 4) || !strncmp(line, "GetProcAddress", 14) || !strncmp(line, "GetModuleHandleA", 16))
         return; /* per-call detail stays in the trace file; the screen shows milestones */

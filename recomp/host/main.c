@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "render.h"
 #include "win32.h"
 
 #ifdef _WIN32
@@ -44,13 +45,37 @@ extern const unsigned t123_lifted_count;
 static jmp_buf finished;
 static uint32_t exit_code;
 static const char *exit_reason = "returned";
+static uint64_t started;
+static _Thread_local int is_main_thread;
 
+static int finish(void) {
+    uint64_t elapsed_ms = (platform_ticks_us() - started) / 1000u;
+    if (d3d_frames) {
+        trace("# frames presented: %llu, draws: %llu", d3d_frames, d3d_draws);
+        render_capture_bmp("last-frame.bmp");
+    }
+    trace_summary();
+    char summary[512];
+    snprintf(summary, sizeof summary,
+             "th123 host: %s, exit code %08x, %llu Win32 calls in %llu ms, heap %u KiB (trace: %s)",
+             exit_reason, exit_code, import_calls, (unsigned long long)elapsed_ms, heap_used() / 1024,
+             trace_path);
+    trace("# %s", summary);
+    trace_close();
+    platform_finish(summary);
+    return exit_code == 0 ? 0 : 1;
+}
+
+/* The game presents from its own render thread, so the run can end on any guest
+   thread; only the main thread can unwind to main(). */
 _Noreturn void host_exit(Cpu *c, uint32_t code, const char *why) {
     (void)c;
     exit_code = code;
     exit_reason = why;
     trace("# exit: %s (code %08x)", why, code);
-    longjmp(finished, 1);
+    if (is_main_thread)
+        longjmp(finished, 1);
+    exit(finish());
 }
 
 static void setup_thread_environment(Cpu *c) {
@@ -106,6 +131,12 @@ int main(int argc, char **argv) {
         return 2;
     }
     guest_register(t123_lifted, t123_lifted_count);
+    crt_native_init();
+    d3d9_init();
+    media_init();
+    const char *frames = getenv("T123_FRAMES"); /* 0 = run until the window closes */
+    if (frames)
+        d3d9_set_frame_limit(strtoull(frames, NULL, 10));
     imports_init();
 #ifdef _WIN32
     AddVectoredExceptionHandler(1, guest_access_violation);
@@ -130,7 +161,8 @@ int main(int argc, char **argv) {
 
     jmp_buf fault;
     guest_fault_trap = &fault;
-    uint64_t started = platform_ticks_us();
+    started = platform_ticks_us();
+    is_main_thread = 1;
     if (setjmp(finished) == 0) {
         if (setjmp(fault) == 0) {
             push32(&cpu, GUEST_RETURN_SENTINEL);
@@ -142,15 +174,5 @@ int main(int argc, char **argv) {
             exit_code = 0xFA17;
         }
     }
-    uint64_t elapsed_ms = (platform_ticks_us() - started) / 1000u;
-    trace_summary();
-    char summary[512];
-    snprintf(summary, sizeof summary,
-             "th123 host: %s, exit code %08x, %llu Win32 calls in %llu ms, heap %u KiB (trace: %s)",
-             exit_reason, exit_code, import_calls, (unsigned long long)elapsed_ms, heap_used() / 1024,
-             trace_path);
-    trace("# %s", summary);
-    trace_close();
-    platform_finish(summary);
-    return exit_code == 0 ? 0 : 1;
+    return finish();
 }

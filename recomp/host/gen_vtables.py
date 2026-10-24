@@ -16,7 +16,7 @@ HEADERS = [ROOT / "local/SokuLib/directx" / n for n in ("d3d9.h", "d3dx9effect.h
 HEADERS.append(Path(r"C:\msys64\ucrt64\include\dsound.h"))
 WANTED = ["IDirect3D9", "IDirect3DDevice9", "IDirect3DSwapChain9", "IDirect3DTexture9",
           "IDirect3DSurface9", "ID3DXEffect", "IDirectInput8A", "IDirectInputDevice8A",
-          "IDirectSound8", "IDirectSoundBuffer"]
+          "IDirectSound8", "IDirectSoundBuffer", "IDirectSoundBuffer8", "IDirectSound3DBuffer", "IDirectSound3DListener"]
 OUT = Path(__file__).with_name("com_vtables.h")
 
 

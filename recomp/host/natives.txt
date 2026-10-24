@@ -1,0 +1,5 @@
+# Guest functions replaced by native host code (recomp/host/crt_native.c).
+# The lifter emits every call to these addresses through guest_call, so the host
+# intercept is used even from lifted callers. One hex address per line.
+00820850  memcpy/memmove (MSVC CRT)
+008236b0  memcpy/memmove (MSVC CRT)

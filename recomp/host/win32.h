@@ -39,6 +39,7 @@ extern char trace_path[256];
 /* Platform hooks (platform_pc.c / recomp/vita/platform_vita.c). */
 void platform_log(const char *line);   /* mirrors trace lines (Vita: on-screen log) */
 uint64_t platform_ticks_us(void);      /* monotonic microseconds */
+void platform_sleep_ms(uint32_t ms);
 void platform_finish(const char *summary);
 void platform_memory_report(char *out, size_t size);
 
@@ -56,6 +57,14 @@ static inline void ret_cdecl(Cpu *c, uint32_t value) {
 
 /* -- registry ---------------------------------------------------------------------- */
 typedef struct { const char *name; GuestFn fn; } ApiEntry;
+extern const ApiEntry win32_threads[];
+extern const ApiEntry win32_d3d9[];
+extern const ApiEntry win32_media[];
+void d3d9_init(void);
+void media_init(void);
+void crt_native_init(void);
+void d3d9_set_frame_limit(unsigned long long frames);
+extern unsigned long long d3d_frames, d3d_draws;
 extern const ApiEntry win32_kernel32[];
 extern const ApiEntry win32_other[];
 

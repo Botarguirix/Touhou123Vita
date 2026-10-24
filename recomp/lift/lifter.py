@@ -10,6 +10,7 @@ DC/DE forms makes mnemonic-based decoding unsafe.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from capstone import x86_const as X
 
@@ -45,6 +46,18 @@ X87_ARITH_REV = ["X87_ADD", "X87_MUL", None, None, "X87_SUBR", "X87_SUB", "X87_D
 
 class Unsupported(Exception):
     pass
+
+
+def _load_natives() -> frozenset[int]:
+    """Addresses with a native host replacement: always called through guest_call."""
+    path = Path(__file__).resolve().parents[1] / "host/natives.txt"
+    if not path.exists():
+        return frozenset()
+    return frozenset(int(line.split()[0], 16) for line in path.read_text().splitlines()
+                     if line.strip() and not line.startswith("#"))
+
+
+NATIVES = _load_natives()
 
 
 def fn_name(va: int) -> str:
@@ -132,7 +145,7 @@ class Lifter:
 
     # -- control flow helpers ---------------------------------------------------------------
     def call_expr(self, target: int) -> str:
-        if target in self.lifted:
+        if target in self.lifted and target not in NATIVES:
             return f"{fn_name(target)}(c);"
         return f"guest_call(c, 0x{target:08x}u);"
 

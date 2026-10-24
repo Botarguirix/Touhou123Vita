@@ -57,7 +57,7 @@ def build(jobs: int) -> Path:
     if errors:
         raise SystemExit("\n".join(errors))
     exe = out / "th123_host.exe"
-    link = subprocess.run([str(GCC), *[str(t[1]) for t in tasks], "-lm", "-o", str(exe)],
+    link = subprocess.run([str(GCC), *[str(t[1]) for t in tasks], "-static", "-lSDL2", "-lopengl32", "-lsetupapi", "-limm32", "-lversion", "-lwinmm", "-lole32", "-loleaut32", "-lgdi32", "-luuid", "-luser32", "-ladvapi32", "-lshell32", "-lcfgmgr32", "-lm", "-lpthread", "-o", str(exe)],
                           env=env(), capture_output=True, text=True)
     if link.returncode:
         raise SystemExit(link.stderr)

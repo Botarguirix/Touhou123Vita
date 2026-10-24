@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <string.h>
 
 /* -- traces ---------------------------------------------------------------------------- */
@@ -17,6 +18,8 @@ void trace(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
+    static pthread_mutex_t trace_lock = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&trace_lock);
     if (!trace_file)
         trace_file = fopen(trace_path, "w");
     if (trace_file) {
@@ -25,6 +28,7 @@ void trace(const char *fmt, ...) {
         fflush(trace_file);
     }
     platform_log(line);
+    pthread_mutex_unlock(&trace_lock);
 }
 
 void trace_close(void) {
@@ -36,12 +40,14 @@ void trace_close(void) {
 
 /* -- guest heap -------------------------------------------------------------------------
  * Size-class free lists (16-byte classes up to 4 KiB) plus a first-fit list for large
- * blocks; a 16-byte header before every block holds the requested size. Blocks are not
- * coalesced: adequate for bring-up, to be measured before Vita (F3). */
+ * blocks; a 16-byte header before every block holds the requested size. Large blocks are
+ * split on allocation and coalesced with their free neighbours (the DAT loader churns
+ * multi-MiB buffers; without it 96 MiB were exhausted during boot). */
 enum { HDR = 16, CLASS_STEP = 16, CLASSES = 256, MAGIC = 0x48454150u /* "HEAP" */ };
 static uint32_t heap_top = GUEST_HEAP_BASE, heap_committed = GUEST_HEAP_BASE;
 static uint32_t free_class[CLASSES + 1];
 static uint32_t free_large;
+static uint32_t heap_live;
 
 static uint32_t round_up(uint32_t n) { return (n + CLASS_STEP - 1) & ~(uint32_t)(CLASS_STEP - 1); }
 
@@ -62,7 +68,7 @@ static uint32_t carve(uint32_t capacity) {
     return block + HDR;
 }
 
-uint32_t heap_alloc(uint32_t size, int zero) {
+static uint32_t heap_alloc_locked(uint32_t size, int zero) {
     uint32_t capacity = round_up(size ? size : 1), p = 0;
     if (capacity / CLASS_STEP <= CLASSES) {
         uint32_t k = capacity / CLASS_STEP;
@@ -71,19 +77,34 @@ uint32_t heap_alloc(uint32_t size, int zero) {
             free_class[k] = rd32(p);
         }
     } else {
+        /* first fit in the address-ordered list; the tail is split off when it can
+           still hold a large block */
         uint32_t prev = 0;
         for (uint32_t q = free_large; q; prev = q, q = rd32(q)) {
-            if (block_capacity(q) >= capacity && block_capacity(q) <= capacity * 2) {
-                if (prev) wr32(prev, rd32(q)); else free_large = rd32(q);
-                p = q;
-                break;
+            uint32_t have = block_capacity(q);
+            if (have < capacity)
+                continue;
+            uint32_t next = rd32(q);
+            if (have - capacity >= HDR + (CLASSES + 1) * CLASS_STEP) {
+                uint32_t rest = q + capacity + HDR;
+                wr32(rest - HDR + 8, have - capacity - HDR);
+                wr32(rest - HDR + 4, 0);
+                wr32(rest, next);
+                next = rest;
+                wr32(q - HDR + 8, capacity);
             }
+            if (prev) wr32(prev, next); else free_large = next;
+            p = q;
+            break;
         }
     }
     if (!p)
         p = carve(capacity);
-    if (!p)
+    if (!p) {
+        trace("# heap exhausted: request %u bytes, live %u KiB", size, heap_live >> 10);
         return 0;
+    }
+    heap_live += block_capacity(p);
     wr32(p - HDR, size);
     wr32(p - HDR + 4, MAGIC);
     if (zero)
@@ -91,17 +112,31 @@ uint32_t heap_alloc(uint32_t size, int zero) {
     return p;
 }
 
-void heap_free(uint32_t p) {
+static void heap_free_locked(uint32_t p) {
     if (!p || rd32(p - HDR + 4) != MAGIC)
         return;
     wr32(p - HDR + 4, 0);
     uint32_t capacity = block_capacity(p);
+    heap_live -= capacity;
     if (capacity / CLASS_STEP <= CLASSES) {
         wr32(p, free_class[capacity / CLASS_STEP]);
         free_class[capacity / CLASS_STEP] = p;
     } else {
-        wr32(p, free_large);
-        free_large = p;
+        /* address-ordered insert, merging with the neighbours that touch */
+        uint32_t prev = 0, q = free_large;
+        while (q && q < p) { prev = q; q = rd32(q); }
+        if (q && p + capacity + HDR == q) {
+            capacity += HDR + block_capacity(q);
+            q = rd32(q);
+        }
+        if (prev && prev + block_capacity(prev) + HDR == p) {
+            wr32(prev - HDR + 8, block_capacity(prev) + HDR + capacity);
+            wr32(prev, q);
+            return;
+        }
+        wr32(p - HDR + 8, capacity);
+        wr32(p, q);
+        if (prev) wr32(prev, p); else free_large = p;
     }
 }
 
@@ -109,9 +144,9 @@ uint32_t heap_size(uint32_t p) {
     return p && rd32(p - HDR + 4) == MAGIC ? rd32(p - HDR) : 0xFFFFFFFFu;
 }
 
-uint32_t heap_realloc(uint32_t p, uint32_t size, int zero) {
+static uint32_t heap_realloc_locked(uint32_t p, uint32_t size, int zero) {
     if (!p)
-        return heap_alloc(size, zero);
+        return heap_alloc_locked(size, zero);
     uint32_t old = heap_size(p);
     if (size <= block_capacity(p)) {
         if (zero && size > old)
@@ -119,11 +154,31 @@ uint32_t heap_realloc(uint32_t p, uint32_t size, int zero) {
         wr32(p - HDR, size);
         return p;
     }
-    uint32_t q = heap_alloc(size, zero);
+    uint32_t q = heap_alloc_locked(size, zero);
     if (!q)
         return 0;
     memcpy(G(q), G(p), old);
-    heap_free(p);
+    heap_free_locked(p);
+    return q;
+}
+
+/* The guest heap is shared by all guest threads. */
+static pthread_mutex_t heap_lock = PTHREAD_MUTEX_INITIALIZER;
+uint32_t heap_alloc(uint32_t size, int zero) {
+    pthread_mutex_lock(&heap_lock);
+    uint32_t p = heap_alloc_locked(size, zero);
+    pthread_mutex_unlock(&heap_lock);
+    return p;
+}
+void heap_free(uint32_t p) {
+    pthread_mutex_lock(&heap_lock);
+    heap_free_locked(p);
+    pthread_mutex_unlock(&heap_lock);
+}
+uint32_t heap_realloc(uint32_t p, uint32_t size, int zero) {
+    pthread_mutex_lock(&heap_lock);
+    uint32_t q = heap_realloc_locked(p, size, zero);
+    pthread_mutex_unlock(&heap_lock);
     return q;
 }
 
@@ -159,13 +214,18 @@ typedef struct { int type; void *host; uint32_t extra; } Handle;
 static Handle handles[4096];
 uint32_t last_error;
 
+static pthread_mutex_t handle_lock = PTHREAD_MUTEX_INITIALIZER;
+
 uint32_t handle_new(int type, void *host, uint32_t extra) {
+    pthread_mutex_lock(&handle_lock);
     for (unsigned i = 1; i < 4096; i++) {
         if (!handles[i].type) {
             handles[i] = (Handle){type, host, extra};
+            pthread_mutex_unlock(&handle_lock);
             return 0x1000u + i * 4;
         }
     }
+    pthread_mutex_unlock(&handle_lock);
     return 0;
 }
 
@@ -244,8 +304,8 @@ static void unimplemented(Cpu *c) {
 }
 
 static GuestFn lookup(const char *name) {
-    const ApiEntry *tables[] = {win32_kernel32, win32_other};
-    for (unsigned t = 0; t < 2; t++)
+    const ApiEntry *tables[] = {win32_threads, win32_d3d9, win32_media, win32_kernel32, win32_other};
+    for (unsigned t = 0; t < 5; t++)
         for (const ApiEntry *e = tables[t]; e->name; e++)
             if (!strcmp(e->name, name))
                 return e->fn;

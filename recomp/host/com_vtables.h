@@ -384,4 +384,79 @@ static const ComMethod IDirectSoundBuffer_methods[] = {
 };
 #define IDirectSoundBuffer_count 21u
 
+static const ComMethod IDirectSoundBuffer8_methods[] = {
+    {"QueryInterface", 3}, /* 0 */
+    {"AddRef", 1}, /* 1 */
+    {"Release", 1}, /* 2 */
+    {"GetCaps", 2}, /* 3 */
+    {"GetCurrentPosition", 3}, /* 4 */
+    {"GetFormat", 4}, /* 5 */
+    {"GetVolume", 2}, /* 6 */
+    {"GetPan", 2}, /* 7 */
+    {"GetFrequency", 2}, /* 8 */
+    {"GetStatus", 2}, /* 9 */
+    {"Initialize", 3}, /* 10 */
+    {"Lock", 8}, /* 11 */
+    {"Play", 4}, /* 12 */
+    {"SetCurrentPosition", 2}, /* 13 */
+    {"SetFormat", 2}, /* 14 */
+    {"SetVolume", 2}, /* 15 */
+    {"SetPan", 2}, /* 16 */
+    {"SetFrequency", 2}, /* 17 */
+    {"Stop", 1}, /* 18 */
+    {"Unlock", 5}, /* 19 */
+    {"Restore", 1}, /* 20 */
+    {"SetFX", 4}, /* 21 */
+    {"AcquireResources", 4}, /* 22 */
+    {"GetObjectInPath", 5}, /* 23 */
+};
+#define IDirectSoundBuffer8_count 24u
+
+static const ComMethod IDirectSound3DBuffer_methods[] = {
+    {"QueryInterface", 3}, /* 0 */
+    {"AddRef", 1}, /* 1 */
+    {"Release", 1}, /* 2 */
+    {"GetAllParameters", 2}, /* 3 */
+    {"GetConeAngles", 3}, /* 4 */
+    {"GetConeOrientation", 2}, /* 5 */
+    {"GetConeOutsideVolume", 2}, /* 6 */
+    {"GetMaxDistance", 2}, /* 7 */
+    {"GetMinDistance", 2}, /* 8 */
+    {"GetMode", 2}, /* 9 */
+    {"GetPosition", 2}, /* 10 */
+    {"GetVelocity", 2}, /* 11 */
+    {"SetAllParameters", 3}, /* 12 */
+    {"SetConeAngles", 4}, /* 13 */
+    {"SetConeOrientation", 5}, /* 14 */
+    {"SetConeOutsideVolume", 3}, /* 15 */
+    {"SetMaxDistance", 3}, /* 16 */
+    {"SetMinDistance", 3}, /* 17 */
+    {"SetMode", 3}, /* 18 */
+    {"SetPosition", 5}, /* 19 */
+    {"SetVelocity", 5}, /* 20 */
+};
+#define IDirectSound3DBuffer_count 21u
+
+static const ComMethod IDirectSound3DListener_methods[] = {
+    {"QueryInterface", 3}, /* 0 */
+    {"AddRef", 1}, /* 1 */
+    {"Release", 1}, /* 2 */
+    {"GetAllParameters", 2}, /* 3 */
+    {"GetDistanceFactor", 2}, /* 4 */
+    {"GetDopplerFactor", 2}, /* 5 */
+    {"GetOrientation", 3}, /* 6 */
+    {"GetPosition", 2}, /* 7 */
+    {"GetRolloffFactor", 2}, /* 8 */
+    {"GetVelocity", 2}, /* 9 */
+    {"SetAllParameters", 3}, /* 10 */
+    {"SetDistanceFactor", 3}, /* 11 */
+    {"SetDopplerFactor", 3}, /* 12 */
+    {"SetOrientation", 8}, /* 13 */
+    {"SetPosition", 5}, /* 14 */
+    {"SetRolloffFactor", 3}, /* 15 */
+    {"SetVelocity", 5}, /* 16 */
+    {"CommitDeferredSettings", 1}, /* 17 */
+};
+#define IDirectSound3DListener_count 18u
+
 #endif
