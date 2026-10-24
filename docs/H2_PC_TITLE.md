@@ -49,3 +49,19 @@ $env:T123_FRAMES = '600'; python recomp/build_host.py --run
 - **Arreglo:** el estado por hilo del runtime está en un bloque `GuestThread`. En PC es `_Thread_local`; en Vita, una clave pthread ([guest.h](../recomp/runtime/guest.h)). La `Cpu` de cada hilo vive en su `Thread`.
 - **Resultado:** Vita3K pasa ahora por D3D9, DirectInput y DirectSound y entra en la carga de recursos. Después se cae **el propio Vita3K** (lectura de la dirección 0 en su manejador de excepciones del host), no el código guest. Queda sin diagnosticar; hay que probar en una Vita real antes de culpar al emulador.
 - `python recomp/build_vita.py --trace-calls` compila con el registro de funciones guest para los informes de fallo.
+
+## Vita real: memoria de texturas (24 oct 2026)
+
+| Prueba | Resultado |
+|---|---|
+| 300 fotogramas, sin ritmo | Salida limpia en 32,6 s; seguía en la pantalla de carga (1 *draw* por fotograma) |
+| 60 s a 60 Hz, píxeles en el heap de C | Volcado `psp2dmp`: `memcpy` desde NULL en `Texture_LockRect`, porque `calloc` agotó los 32 MiB del heap de newlib |
+| 60 s, píxeles en un *pool* de 96 MiB de CDRAM | Salida limpia, pero el *pool* se llena (97 976 KiB) y el juego sigue pidiendo texturas de 512×512 |
+
+**Medido en PC tras 3 600 fotogramas** (censo al salir):
+
+- Texturas vivas: **155 MiB**, todas A8R8G8B8; el pico fue de 157 MiB. Las mayores son 54 de 512×512 (54 MiB), 15 de 640×640 (23 MiB), 74 de 256×256, 20 de 470×470 y 237 de 128×128.
+- Dibujadas al menos una vez: solo **11,9 MiB**. El resto está precargado.
+- Con zlib nivel 1, todas ocupan **15,7 MiB** (unas 10 veces menos, sin pérdida). Con una paleta de 8 bits solo bajarían a 118 MiB: apenas un tercio usa 256 colores o menos.
+
+**Decisión:** en la Vita (`-DT123_PACKED_TEXTURES`), cada textura se guarda comprimida con zlib nivel 1 (la zlib 1.2.3 de T4) dentro del *pool* de CDRAM. Se descomprime en `LockRect` y se vuelve a comprimir en `UnlockRect`. Con vitaGL (H3), al dibujar se descomprimirán solo las texturas en uso, con una caché. Queda por medir en la Vita el coste de CPU de comprimir unos 155 MiB durante la carga.
