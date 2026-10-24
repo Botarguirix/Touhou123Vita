@@ -39,12 +39,18 @@ static void gl_leave(void) { pthread_mutex_unlock(&gl_lock); }
 
 static int platform_init(uint32_t width, uint32_t height) {
     /* Texture storage is reserved first: vitaGL takes every memory pool above its
-       threshold. 32 MiB of user RAM stay free for thread stacks and file buffers. */
+       threshold. 8 MiB of user RAM stay free for thread stacks and file buffers
+       (with 32 MiB, as first tried, nothing was left for vitaGL on hardware). */
     texture_pool_reserve();
-    if (!vglInitExtended(0, VITA_W, VITA_H, 32 * 1024 * 1024, SCE_GXM_MULTISAMPLE_NONE)) {
-        trace("# vitaGL initialisation failed (is ur0:data/libshacccg.suprx installed?)");
+    char memory[160];
+    platform_memory_report(memory, sizeof memory);
+    trace("# before vitaGL: %s", memory);
+    if (!vglInitExtended(0, VITA_W, VITA_H, 8 * 1024 * 1024, SCE_GXM_MULTISAMPLE_NONE)) {
+        trace("# vitaGL initialisation failed (memory above, and is ur0:data/libshacccg.suprx installed?)");
         return -1;
     }
+    platform_memory_report(memory, sizeof memory);
+    trace("# after vitaGL: %s", memory);
     platform_display_taken();
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_DIGITAL);
     glClearColor(0, 0, 0, 1);

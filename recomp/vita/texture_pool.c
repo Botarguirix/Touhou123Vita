@@ -10,7 +10,7 @@
 
 #include "../host/win32.h"
 
-#define POOL_BYTES (32u << 20) /* deflated textures peak at 16 MiB (Vita3K, 60 s) */
+#define POOL_BYTES (24u << 20) /* deflated textures peak at 16 MiB (Vita3K, 60 s) */
 enum { ALIGN = 64, MIN_SPLIT = 4096 };
 
 typedef struct Block { size_t size; struct Block *next; } Block; /* size includes header */
