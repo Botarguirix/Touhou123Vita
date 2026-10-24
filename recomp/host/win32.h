@@ -40,6 +40,7 @@ extern char trace_path[256];
 void platform_log(const char *line);   /* mirrors trace lines (Vita: on-screen log) */
 uint64_t platform_ticks_us(void);      /* monotonic microseconds */
 void platform_finish(const char *summary);
+void platform_memory_report(char *out, size_t size);
 
 #define ARG(c, n) rd32((c)->esp.d + 4u + 4u * (n))
 #define STR(a) ((char *)G(a))

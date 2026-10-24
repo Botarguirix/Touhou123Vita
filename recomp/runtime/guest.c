@@ -17,6 +17,7 @@
 
 uint8_t *guest_base;
 uint32_t guest_image_base, guest_image_size;
+int guest_mem_error;
 
 /* -- memory ---------------------------------------------------------------------------- */
 int guest_mem_init(void) {
@@ -27,7 +28,11 @@ int guest_mem_init(void) {
     SceUID block = sceKernelAllocMemBlock("t123 guest", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW,
                                           GUEST_WINDOW, NULL);
     void *p = NULL;
-    if (block < 0 || sceKernelGetMemBlockBase(block, &p) < 0)
+    if (block < 0) {
+        guest_mem_error = block;
+        return -1;
+    }
+    if ((guest_mem_error = sceKernelGetMemBlockBase(block, &p)) < 0)
         return -1;
     memset(p, 0, GUEST_WINDOW);
     guest_base = p;
@@ -143,7 +148,7 @@ static GuestFn find(uint32_t target) {
     return fn ? fn : search(lifted, lifted_count, target);
 }
 
-uint32_t guest_current_target;
+_Thread_local uint32_t guest_current_target;
 uint32_t guest_trace_ring[64];
 unsigned guest_trace_pos;
 
@@ -179,8 +184,8 @@ uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *ar
     return c->eax.d;
 }
 
-jmp_buf *guest_fault_trap;
-char guest_fault_text[256];
+_Thread_local jmp_buf *guest_fault_trap;
+_Thread_local char guest_fault_text[256];
 
 _Noreturn void guest_fault(Cpu *c, uint32_t address, const char *what) {
     snprintf(guest_fault_text, sizeof guest_fault_text, "guest_fault at 0x%08x: %s", address, what);

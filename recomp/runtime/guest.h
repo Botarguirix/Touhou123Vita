@@ -67,6 +67,7 @@ extern uint8_t *guest_base;
 #define G(a) (guest_base + (uint32_t)(a))
 
 int guest_mem_init(void);
+extern int guest_mem_error; /* platform error code when guest_mem_init fails */
 int guest_map(uint32_t address, uint32_t size);
 int guest_load_pe(const char *path); /* copies headers and sections at ImageBase */
 extern uint32_t guest_image_base, guest_image_size;
@@ -90,15 +91,15 @@ void guest_register(const GuestEntry *table, unsigned count); /* lifted function
 void guest_intercept(uint32_t address, GuestFn fn);           /* host replacements */
 void guest_call(Cpu *c, uint32_t target);  /* return address already pushed */
 void guest_call_import(Cpu *c, uint32_t iat_slot);
-extern uint32_t guest_current_target; /* address of the call being dispatched */
+extern _Thread_local uint32_t guest_current_target; /* address of the call being dispatched */
 /* Host -> guest call (callbacks such as window procedures and thread entries):
    pushes argv right to left and a sentinel return address, returns eax. */
 #define GUEST_RETURN_SENTINEL 0xFFFFFFF0u
 uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *argv);
 /* Reports and exits, or longjmps to guest_fault_trap when a test harness set one. */
 _Noreturn void guest_fault(Cpu *c, uint32_t address, const char *what);
-extern jmp_buf *guest_fault_trap;
-extern char guest_fault_text[256]; /* last guest_fault, for reports */
+extern _Thread_local jmp_buf *guest_fault_trap;
+extern _Thread_local char guest_fault_text[256]; /* last guest_fault, for reports */
 
 /* -- integer flags ------------------------------------------------------------------ */
 static inline uint8_t parity8(uint32_t r) { return (uint8_t)!__builtin_parity(r & 0xFF); }

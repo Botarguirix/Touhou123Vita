@@ -24,6 +24,15 @@ python recomp/build_vita.py               # VPK: artifacts/recomp/<sha>/vita/T12
 
 El tiempo en Vita3K **no mide el hardware**: Vita3K traduce ARM al x86 del PC. La primera medida de rendimiento real necesita una Vita (ver abajo).
 
+## Confirmado en una PS Vita real (23 oct 2026)
+
+En la consola del usuario el resultado coincide con PC y Vita3K: `Direct3DCreate9` alcanzado, **88 002 llamadas Win32, heap de 1 822 KiB, en 2 723 ms**. La traza es la misma secuencia: CRT, ventana `th123_110a`, los tres DAT abiertos y D3D. Es la primera medida en hardware: el arranque traducido es unas 60 veces más lento que en el PC nativo (44 ms) y unas 5 veces más lento que en Vita3K. Ese tiempo incluye la construcción del índice de los DAT (54 163 `HeapAlloc`), que pasa por la capa de heap del host. Es la primera referencia para F5 (rendimiento).
+
+Por el camino aparecieron dos problemas que Vita3K no mostró:
+
+1. **Memoria:** el primer intento falló con `cannot allocate the guest memory window`. El heap de newlib de VitaSDK, sin tamaño fijado, ocupaba la memoria de usuario. Con `_newlib_heap_size_user = 32 MiB` el bloque de 128 MiB entra; quedaban 191 MiB de usuario libres antes de reservarlo.
+2. **Versión del `.exe`:** en la tarjeta había un `th123.exe` **1.01** (SHA-256 `24e6149f…`) y el código traducido saltaba a un punto de entrada inexistente. Se sustituyó por el 1.10a (el 1.01 quedó como `th123-1.01.exe.bak`). El host comprueba ahora el punto de entrada y el tamaño de imagen, y rechaza otras versiones con un mensaje claro.
+
 ## Qué cambió para ARM
 
 - **Mapa de memoria guest compacto, igual en PC y Vita**: pila `0x110000`, imagen `0x400000`, TIB/PEB `0x900000`, heap `0x1000000` (96 MiB) y `VirtualAlloc` `0x7000000` (16 MiB), todo por debajo de `GUEST_WINDOW` = 128 MiB. En Vita es un solo bloque de memoria; en PC se sigue reservando el rango de 4 GiB para que un acceso fuera de lugar falle. Las direcciones falsas de funciones y módulos están fuera de la ventana: se llaman y se comparan, nunca se leen.

@@ -89,8 +89,14 @@ int main(int argc, char **argv) {
     snprintf(trace_path, sizeof trace_path, "%s/recomp-trace.log", host_data_dir);
 #endif
     trace("# th123 recompiled host, image %s", exe);
+    char memory[160];
+    platform_memory_report(memory, sizeof memory);
+    trace("# before the guest window: %s", memory);
     if (guest_mem_init()) {
-        platform_finish("cannot allocate the guest memory window");
+        char why[320];
+        snprintf(why, sizeof why, "cannot allocate the %u MiB guest memory window (error %08x; %s)",
+                 GUEST_WINDOW >> 20, (unsigned)guest_mem_error, memory);
+        platform_finish(why);
         return 2;
     }
     if (guest_load_pe(exe)) {
@@ -109,6 +115,17 @@ int main(int argc, char **argv) {
     setup_thread_environment(&cpu);
     uint32_t pe = guest_image_base + rd32(guest_image_base + 0x3C);
     uint32_t entry = guest_image_base + rd32(pe + 40);
+    /* The generated code only matches th123.exe 1.10a (SHA-256 f0db9366...a16731e):
+       its entry point is 0x8218b2 and its image 0x4a4000 bytes. Any other build
+       would run unrelated code, so refuse it with a clear message. */
+    if (entry != 0x008218b2u || guest_image_size != 0x004a4000u) {
+        char why[300];
+        snprintf(why, sizeof why,
+                 "wrong th123.exe: entry %08x, image %08x bytes; the recompiled code needs the "
+                 "original 1.10a (entry 008218b2, SHA-256 f0db9366...a16731e)", entry, guest_image_size);
+        platform_finish(why);
+        return 2;
+    }
     trace("# entry %08x, data directory %s", entry, host_data_dir);
 
     jmp_buf fault;

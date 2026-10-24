@@ -13,6 +13,22 @@
 
 enum { W = 960, H = 544, LINES = 32, COLS = 104, CELL_W = 12, CELL_H = 16, ADVANCE = 9 };
 
+/* Without this, VitaSDK's newlib reserves most of the user memory for malloc at
+   start-up and the 128 MiB guest window no longer fits (seen on real hardware;
+   Vita3K is more permissive). The host itself only mallocs the .exe it loads. */
+int _newlib_heap_size_user = 32 * 1024 * 1024;
+
+void platform_memory_report(char *out, size_t size) {
+    SceKernelFreeMemorySizeInfo info = {sizeof info};
+    if (sceKernelGetFreeMemorySize(&info) < 0) {
+        snprintf(out, size, "free memory unknown");
+        return;
+    }
+    snprintf(out, size, "free memory: user %u KiB, cdram %u KiB, phycont %u KiB",
+             (unsigned)(info.size_user / 1024), (unsigned)(info.size_cdram / 1024),
+             (unsigned)(info.size_phycont / 1024));
+}
+
 static uint32_t *frame;
 static uint32_t *font;
 static unsigned font_w, font_h;

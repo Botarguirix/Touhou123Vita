@@ -14,7 +14,7 @@ Las estimaciones van en **bloques de trabajo**, con la escala de hoy: F0, F1.1, 
 
 | # | Hito visible | Qué hace falta | Bloques desde hoy | Dónde se ve |
 |---|---|---|---|---|
-| H1 | **El código recompilado del juego corre en ARM.** El arranque del CRT y `WinMain` se ejecutan en Vita3K, con el progreso en una pantalla de texto | **Conseguido el 21 oct 2026** ([H1_VITA_BOOT.md](H1_VITA_BOOT.md)): traza idéntica a la de PC; VPK de 8,7 MB listo para una Vita real | — | Vita3K; Vita real pendiente de que la pruebes |
+| H1 | **El código recompilado del juego corre en ARM.** El arranque del CRT y `WinMain` se ejecutan en Vita3K, con el progreso en una pantalla de texto | **Conseguido el 21 oct 2026** ([H1_VITA_BOOT.md](H1_VITA_BOOT.md)): traza idéntica a la de PC; **confirmado en una Vita real el 23 oct 2026** (2 723 ms hasta D3D) | — | Vita3K y Vita real |
 | H2 | **Primera imagen del juego en PC**: la pantalla de título dibujada por el código original | Ventana y bucle de mensajes, subconjunto de D3D9 (dispositivo, texturas, *vertex buffers*, `DrawPrimitive`) sobre OpenGL/SDL2, los 3 efectos D3DX reescritos, hilos reales (el juego carga en un hilo aparte), DirectInput/DirectSound mínimos, excepciones C++ si aparecen | **4–7** desde hoy | PC |
 | H3 | **Primera imagen del juego en Vita3K / Vita** | La capa D3D9 de H2 sobre vitaGL, fuentes (sustituto de `GetGlyphOutlineA`) y presupuesto de memoria de texturas | **2–4** después de H2 | Vita3K y Vita real |
 | H4 | **Menús y un combate jugable** con mando | Entrada completa, audio (DirectSound → SceAudio), ritmo de frames y rendimiento mínimo aceptable | **4–8** después de H3 | Vita |
