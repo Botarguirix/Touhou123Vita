@@ -21,7 +21,11 @@ static ComClass effect_class = COM_CLASS(ID3DXEffect);
 
 static uint32_t device_object, swapchain_object;
 unsigned long long d3d_frames, d3d_draws;
+#ifdef __vita__
+static unsigned long long frame_limit = 3600; /* 60 s at the paced 60 Hz: enough to finish loading */
+#else
 static unsigned long long frame_limit = 300;
+#endif
 
 /* -- textures --------------------------------------------------------------------- */
 RenderTexture textures[RENDER_MAX_TEXTURES];

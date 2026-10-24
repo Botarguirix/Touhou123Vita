@@ -1,6 +1,7 @@
 /* Vita placeholder for render.h until the vitaGL backend (H3): the D3D9 layer runs
  * and counts frames, nothing is drawn. Render state is kept so GetRenderState works. */
 #include "../host/render.h"
+#include "../host/win32.h"
 
 static uint32_t states[256];
 
@@ -18,7 +19,17 @@ void render_fvf(uint32_t fvf) { (void)fvf; }
 void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t stride) {
     (void)type; (void)count; (void)data; (void)stride;
 }
-void render_present(void) {}
+/* Without a GPU present the game would run its frames as fast as the CPU allows,
+   while loading proceeds on its own clock; pace to 60 Hz like vsync on PC. */
+void render_present(void) {
+    static uint64_t next;
+    uint64_t now = platform_ticks_us();
+    if (!next || now > next + 100000u)
+        next = now;
+    next += 16667u;
+    if (next > now)
+        platform_sleep_ms((uint32_t)((next - now) / 1000u));
+}
 int render_pump_events(void) { return 0; }
 int render_quit_requested(void) { return 0; }
 int render_capture_bmp(const char *path) { (void)path; return -1; }
