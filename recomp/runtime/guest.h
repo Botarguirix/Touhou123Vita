@@ -50,8 +50,26 @@ typedef void (*GuestFn)(Cpu *c);
 
 /* Debug builds (-DT123_TRACE_CALLS) remember the last guest functions entered, so a
    crash can be placed in the original code. */
-extern _Thread_local uint32_t guest_trace_ring[64];
-extern _Thread_local unsigned guest_trace_pos;
+/* Per-thread runtime state. VitaSDK's _Thread_local gives every thread the same
+   address (measured in Vita3K), so the Vita keeps it behind a pthread key. */
+typedef struct {
+    uint32_t current_target;   /* address of the call being dispatched */
+    uint32_t trace_ring[64];
+    unsigned trace_pos;
+    jmp_buf *fault_trap;
+    char fault_text[256];      /* last guest_fault, for reports */
+} GuestThread;
+#ifdef __vita__
+GuestThread *guest_thread(void);
+#else
+extern _Thread_local GuestThread guest_thread_state;
+#define guest_thread() (&guest_thread_state)
+#endif
+#define guest_trace_ring (guest_thread()->trace_ring)
+#define guest_trace_pos (guest_thread()->trace_pos)
+#define guest_current_target (guest_thread()->current_target)
+#define guest_fault_trap (guest_thread()->fault_trap)
+#define guest_fault_text (guest_thread()->fault_text)
 #ifdef T123_TRACE_CALLS
 #define T123_ENTER(a) (guest_trace_ring[guest_trace_pos++ & 63] = (a))
 #else
@@ -91,15 +109,12 @@ void guest_register(const GuestEntry *table, unsigned count); /* lifted function
 void guest_intercept(uint32_t address, GuestFn fn);           /* host replacements */
 void guest_call(Cpu *c, uint32_t target);  /* return address already pushed */
 void guest_call_import(Cpu *c, uint32_t iat_slot);
-extern _Thread_local uint32_t guest_current_target; /* address of the call being dispatched */
 /* Host -> guest call (callbacks such as window procedures and thread entries):
    pushes argv right to left and a sentinel return address, returns eax. */
 #define GUEST_RETURN_SENTINEL 0xFFFFFFF0u
 uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *argv);
 /* Reports and exits, or longjmps to guest_fault_trap when a test harness set one. */
 _Noreturn void guest_fault(Cpu *c, uint32_t address, const char *what);
-extern _Thread_local jmp_buf *guest_fault_trap;
-extern _Thread_local char guest_fault_text[256]; /* last guest_fault, for reports */
 
 /* -- integer flags ------------------------------------------------------------------ */
 static inline uint8_t parity8(uint32_t r) { return (uint8_t)!__builtin_parity(r & 0xFF); }

@@ -30,6 +30,7 @@ typedef struct {
     uint32_t start, param, exit_code, tib;
     unsigned index;
     pthread_t host;
+    Cpu cpu;             /* not _Thread_local: shared by all threads on the Vita */
 } Thread;
 
 static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -134,8 +135,7 @@ API(CreateMutexA) {
 /* -- threads ------------------------------------------------------------------------- */
 static void *thread_main(void *arg) {
     Thread *t = arg;
-    static _Thread_local Cpu cpu;
-    Cpu *c = &cpu;
+    Cpu *c = &t->cpu;
     memset(c, 0, sizeof *c);
     x87_reset(c);
     x87_set_cw(c, 0x027F);

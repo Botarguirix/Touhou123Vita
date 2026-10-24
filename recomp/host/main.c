@@ -5,6 +5,7 @@
  *
  * usage: th123_host <th123.exe> [data directory]
  */
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,7 +47,7 @@ static jmp_buf finished;
 static uint32_t exit_code;
 static const char *exit_reason = "returned";
 static uint64_t started;
-static _Thread_local int is_main_thread;
+static pthread_t main_thread;
 
 static int finish(void) {
     uint64_t elapsed_ms = (platform_ticks_us() - started) / 1000u;
@@ -73,7 +74,7 @@ _Noreturn void host_exit(Cpu *c, uint32_t code, const char *why) {
     exit_code = code;
     exit_reason = why;
     trace("# exit: %s (code %08x)", why, code);
-    if (is_main_thread)
+    if (pthread_equal(pthread_self(), main_thread))
         longjmp(finished, 1);
     exit(finish());
 }
@@ -162,7 +163,7 @@ int main(int argc, char **argv) {
     jmp_buf fault;
     guest_fault_trap = &fault;
     started = platform_ticks_us();
-    is_main_thread = 1;
+    main_thread = pthread_self();
     if (setjmp(finished) == 0) {
         if (setjmp(fault) == 0) {
             push32(&cpu, GUEST_RETURN_SENTINEL);

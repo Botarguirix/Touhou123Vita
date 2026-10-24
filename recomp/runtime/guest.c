@@ -148,9 +148,24 @@ static GuestFn find(uint32_t target) {
     return fn ? fn : search(lifted, lifted_count, target);
 }
 
-_Thread_local uint32_t guest_current_target;
-_Thread_local uint32_t guest_trace_ring[64];
-_Thread_local unsigned guest_trace_pos;
+#ifdef __vita__
+#include <pthread.h>
+#include <stdlib.h>
+static pthread_key_t thread_key;
+static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
+static void thread_key_init(void) { pthread_key_create(&thread_key, free); }
+GuestThread *guest_thread(void) {
+    pthread_once(&thread_once, thread_key_init);
+    GuestThread *t = pthread_getspecific(thread_key);
+    if (!t) {
+        t = calloc(1, sizeof *t);
+        pthread_setspecific(thread_key, t);
+    }
+    return t;
+}
+#else
+_Thread_local GuestThread guest_thread_state;
+#endif
 
 void guest_call(Cpu *c, uint32_t target) {
     GuestFn fn = find(target);
@@ -184,8 +199,6 @@ uint32_t guest_invoke(Cpu *c, uint32_t target, unsigned argc, const uint32_t *ar
     return c->eax.d;
 }
 
-_Thread_local jmp_buf *guest_fault_trap;
-_Thread_local char guest_fault_text[256];
 
 _Noreturn void guest_fault(Cpu *c, uint32_t address, const char *what) {
     snprintf(guest_fault_text, sizeof guest_fault_text, "guest_fault at 0x%08x: %s", address, what);

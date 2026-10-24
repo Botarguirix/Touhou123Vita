@@ -41,4 +41,11 @@ $env:T123_FRAMES = '600'; python recomp/build_host.py --run
 ## Pendiente (no forma parte de H2)
 
 - Efectos D3DX reales (la función fija basta para el título), Shift-JIS en `MultiByteToWideChar`, `GetGlyphOutlineA` (devuelve `GDI_ERROR`), entrada desde SDL y salida de audio.
-- **Vita:** el VPK compila con un *backend* de render vacío ([render_vita.c](../recomp/vita/render_vita.c)); vitaGL llega con H3. Ver la sección siguiente.
+- **Vita:** el VPK compila con un *backend* de render vacío ([render_vita.c](../recomp/vita/render_vita.c)); vitaGL llega con H3.
+
+## Vita3K con hilos reales
+
+- **Medido:** en VitaSDK, `_Thread_local` da la misma dirección en todos los hilos (sonda en Vita3K: `0x8400066c` en el principal y en los hilos 1–4). Los hilos se pisaban `guest_current_target`, así que un `ReadFile` se despachaba como otra API. El arranque fallaba de forma no determinista justo después de abrir `th123a.dat`: con una excepción C++ o con un parámetro inválido de `strcat_s`/`strcpy_s`.
+- **Arreglo:** el estado por hilo del runtime está en un bloque `GuestThread`. En PC es `_Thread_local`; en Vita, una clave pthread ([guest.h](../recomp/runtime/guest.h)). La `Cpu` de cada hilo vive en su `Thread`.
+- **Resultado:** Vita3K pasa ahora por D3D9, DirectInput y DirectSound y entra en la carga de recursos. Después se cae **el propio Vita3K** (lectura de la dirección 0 en su manejador de excepciones del host), no el código guest. Queda sin diagnosticar; hay que probar en una Vita real antes de culpar al emulador.
+- `python recomp/build_vita.py --trace-calls` compila con el registro de funciones guest para los informes de fallo.
