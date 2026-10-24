@@ -24,8 +24,16 @@ RUNTIME = ROOT / "recomp/runtime"
 HOST = ROOT / "recomp/host"
 
 
+# Integrated Codex modules that are not connected to the Win32 layer yet (need FreeType).
+NOT_YET_WIRED = {"glyph.c"}
+
+
 def env():
     return dict(os.environ, PATH=str(GCC.parent) + os.pathsep + os.environ.get("PATH", ""))
+
+
+# Integrated Codex modules that are not connected to the Win32 layer yet (need FreeType).
+NOT_YET_WIRED = {"glyph.c"}
 
 
 def compile_one(src: Path, obj: Path, flags: list[str], deps: list[Path]) -> str | None:
@@ -35,6 +43,10 @@ def compile_one(src: Path, obj: Path, flags: list[str], deps: list[Path]) -> str
     run = subprocess.run([str(GCC), *flags, "-c", str(src), "-o", str(obj)], env=env(),
                          capture_output=True, text=True)
     return f"{src.name}:\n{run.stderr}" if run.returncode else None
+
+
+# Integrated Codex modules that are not connected to the Win32 layer yet (need FreeType).
+NOT_YET_WIRED = {"glyph.c"}
 
 
 def build(jobs: int) -> Path:
@@ -51,7 +63,8 @@ def build(jobs: int) -> Path:
     tasks = [(src, gen / (src.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for src in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]
     tasks += [(src, out / (src.stem + ".o"), host_flags, header + [HOST / "win32.h"])
-              for src in sorted(HOST.glob("*.c")) + [RUNTIME / "guest.c"]]
+              for src in sorted(HOST.glob("*.c")) + [RUNTIME / "guest.c"]
+              if src.name not in NOT_YET_WIRED]
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         errors = [e for e in pool.map(lambda t: compile_one(*t), tasks) if e]
     if errors:
@@ -62,6 +75,10 @@ def build(jobs: int) -> Path:
     if link.returncode:
         raise SystemExit(link.stderr)
     return exe
+
+
+# Integrated Codex modules that are not connected to the Win32 layer yet (need FreeType).
+NOT_YET_WIRED = {"glyph.c"}
 
 
 def main() -> None:

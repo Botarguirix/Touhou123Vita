@@ -55,9 +55,9 @@ static uint32_t block_capacity(uint32_t p) { return rd32(p - HDR + 8); }
 
 static uint32_t carve(uint32_t capacity) {
     uint32_t block = heap_top;
-    uint32_t end = block + HDR + capacity;
-    if (end > GUEST_HEAP_BASE + GUEST_HEAP_SIZE)
+    if (capacity > GUEST_HEAP_BASE + GUEST_HEAP_SIZE - block - HDR) /* remaining space, no wrap */
         return 0;
+    uint32_t end = block + HDR + capacity;
     while (heap_committed < end) {
         if (guest_map(heap_committed, 0x100000))
             return 0;
@@ -69,6 +69,10 @@ static uint32_t carve(uint32_t capacity) {
 }
 
 static uint32_t heap_alloc_locked(uint32_t size, int zero) {
+    /* larger than the whole heap: refuse before round_up and carve can wrap around
+       (Codex T10 found both overflows) */
+    if (size > GUEST_HEAP_SIZE - HDR)
+        return 0;
     uint32_t capacity = round_up(size ? size : 1), p = 0;
     if (capacity / CLASS_STEP <= CLASSES) {
         uint32_t k = capacity / CLASS_STEP;

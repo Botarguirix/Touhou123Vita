@@ -72,7 +72,7 @@ def main() -> None:
     header = [RUNTIME / "guest.h"]
     tasks = [(s, objs / (s.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for s in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]
-    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "render_gl.c")]
+    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "render_gl.c", "glyph.c")]  # glyph.c: FreeType not in VitaSDK yet
     tasks += [(s, objs / ("host_" + s.stem + ".o"), host_flags, header + [HOST / "win32.h"])
               for s in host_sources + sorted(VITA.glob("*.c")) + [RUNTIME / "guest.c"]]
     started = time.monotonic()

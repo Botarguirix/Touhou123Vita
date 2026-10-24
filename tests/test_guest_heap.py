@@ -1,6 +1,6 @@
 """Pruebas del allocator real, sin modificar support.c ni guest.c.
 
-Dos defectos pendientes (expectedFailure, no se disimulan como aprobados):
+Dos defectos encontrados por T10, corregidos en support.c (24 oct 2026):
 1. Proceso nuevo: heap_alloc(UINT32_MAX,0) devuelve 0x01000010, heap_used=16.
    round_up desborda a cero; debería devolver 0.
 2. Proceso nuevo: heap_alloc(0xfffffff0,0) causa una violacion de acceso: end
@@ -63,9 +63,7 @@ class GuestHeapTests(unittest.TestCase):
         self.assertEqual(row['allocations']+row['frees']+row['reallocations']+row['failed_requests'],100000)
         self.assertLessEqual(row['live_bytes'],row['heap_used'])
         print('heap random:',json.dumps(row,sort_keys=True))
-    @unittest.expectedFailure
     def test_known_round_up_overflow_must_reject_uint32_max(self):self.run_case('oversize-round')
-    @unittest.expectedFailure
     def test_known_carve_end_overflow_must_reject_huge_capacity(self):self.run_case('oversize-end')
 
 if __name__=='__main__':unittest.main()
