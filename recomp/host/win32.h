@@ -43,6 +43,10 @@ void platform_sleep_ms(uint32_t ms);
 /* Texture storage (zeroed): host heap on PC, a CDRAM pool on the Vita. */
 void *platform_texture_alloc(size_t bytes);
 void platform_texture_free(void *p);
+#ifdef __vita__
+void texture_pool_reserve(void);      /* before vitaGL takes the remaining memory */
+void platform_display_taken(void);    /* the renderer owns the screen: stop the text log */
+#endif
 void platform_finish(const char *summary);
 void platform_memory_report(char *out, size_t size);
 

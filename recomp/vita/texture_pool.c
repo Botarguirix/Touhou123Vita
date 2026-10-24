@@ -1,8 +1,8 @@
-/* Texture storage on the Vita. The C heap (_newlib_heap_size_user, 32 MiB) ran out
- * during loading (core dump: memcpy from NULL in Texture_LockRect), while the game
- * keeps about 60 MiB of textures alive on PC. They go to one CPU-mapped CDRAM block
- * instead, managed as an address-ordered free list that splits on allocation and
- * merges neighbours on free. vitaGL (H3) will take over this memory. */
+/* Texture storage on the Vita: the game keeps ~155 MiB of textures alive, stored
+ * deflated by d3d9.c (~16 MiB). The C heap (32 MiB) is too small next to the rest
+ * of the host, so they live in one user-RAM block reserved before vitaGL claims the
+ * remaining memory (CDRAM is left to vitaGL for the uploaded textures), managed as an
+ * address-ordered free list that splits on allocation and merges neighbours on free. */
 #include <psp2/kernel/sysmem.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -10,7 +10,7 @@
 
 #include "../host/win32.h"
 
-#define POOL_BYTES (96u << 20)
+#define POOL_BYTES (32u << 20) /* deflated textures peak at 16 MiB (Vita3K, 60 s) */
 enum { ALIGN = 64, MIN_SPLIT = 4096 };
 
 typedef struct Block { size_t size; struct Block *next; } Block; /* size includes header */
@@ -21,15 +21,21 @@ static size_t live, peak;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int pool_init(void) {
-    SceUID id = sceKernelAllocMemBlock("t123_textures", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, POOL_BYTES, NULL);
+    SceUID id = sceKernelAllocMemBlock("t123_textures", SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, POOL_BYTES, NULL);
     if (id < 0 || sceKernelGetMemBlockBase(id, (void **)&pool) < 0) {
-        trace("# texture pool: CDRAM block of %u MiB not available (%08x)", POOL_BYTES >> 20, (unsigned)id);
+        trace("# texture pool: block of %u MiB not available (%08x)", POOL_BYTES >> 20, (unsigned)id);
         return -1;
     }
     free_list = (Block *)pool;
     free_list->size = POOL_BYTES;
     free_list->next = NULL;
     return 0;
+}
+
+void texture_pool_reserve(void) {
+    pthread_mutex_lock(&lock);
+    if (!pool) pool_init();
+    pthread_mutex_unlock(&lock);
 }
 
 void *platform_texture_alloc(size_t bytes) {

@@ -1,32 +1,80 @@
-/* SDL2 + fixed-function OpenGL implementation of render.h (PC). */
-#define SDL_MAIN_HANDLED
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_opengl.h>
+/* Fixed-function OpenGL implementation of render.h, shared by both platforms:
+ *   PC    SDL2 window + desktop GL (vsync);
+ *   Vita  vitaGL (H3), whose fixed-function emulation compiles its shaders at run
+ *         time with ur0:data/libshacccg.suprx. The 640x480 game is scaled to 4:3
+ *         in the middle of the 960x544 screen. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __vita__
+#include <psp2/ctrl.h>
+#include <pthread.h>
+#include <vitaGL.h>
+#else
+#define SDL_MAIN_HANDLED
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_opengl.h>
+#endif
 
 #include "input_map.h"
 #include "render.h"
 #include "win32.h"
 
-static SDL_Window *window;
-static SDL_GLContext context;
 static uint32_t screen_w, screen_h, fvf;
 static uint32_t states[256];
 static RenderTexture *bound;
-static int quit;
+static int quit, ready;
 static int mag_linear, min_linear;
+
+/* -- platform glue: context, presentation, input ------------------------------------ */
+#ifdef __vita__
+enum { VITA_W = 960, VITA_H = 544, VIEW_W = 725, VIEW_X = (VITA_W - VIEW_W) / 2 };
+/* vitaGL has no per-thread context, but it is not thread-safe: the device is created
+   on one guest thread and two others draw, so every call goes through one lock. */
+static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
+static void gl_enter(void) { pthread_mutex_lock(&gl_lock); }
+static void gl_leave(void) { pthread_mutex_unlock(&gl_lock); }
+#define blend_equation glBlendEquation
+
+static int platform_init(uint32_t width, uint32_t height) {
+    /* Texture storage is reserved first: vitaGL takes every memory pool above its
+       threshold. 32 MiB of user RAM stay free for thread stacks and file buffers. */
+    texture_pool_reserve();
+    if (!vglInitExtended(0, VITA_W, VITA_H, 32 * 1024 * 1024, SCE_GXM_MULTISAMPLE_NONE)) {
+        trace("# vitaGL initialisation failed (is ur0:data/libshacccg.suprx installed?)");
+        return -1;
+    }
+    platform_display_taken();
+    sceCtrlSetSamplingMode(SCE_CTRL_MODE_DIGITAL);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glViewport(VIEW_X, 0, VIEW_W, VITA_H);
+    (void)width; (void)height;
+    return 0;
+}
+static void platform_swap(void) { vglSwapBuffers(GL_FALSE); }
+int render_pump_events(void) { return 0; }
+void render_keyboard_state(uint8_t dik[256]) {
+    SceCtrlData pad;
+    memset(&pad, 0, sizeof pad);
+    sceCtrlPeekBufferPositive(0, &pad, 1);
+    dik_state_from_vita_buttons(pad.buttons, dik);
+}
+#else
+static SDL_Window *window;
+static SDL_GLContext context;
 static void (APIENTRY *blend_equation)(GLenum);
 
-/* The device is created on one guest thread and the game renders from two others:
-   every render call takes the context under a lock and releases it on the way out. */
+/* Desktop GL contexts are per thread: every render call takes the context under a
+   lock and releases it on the way out (wglMakeCurrent refuses a context current on
+   another thread). */
 static SDL_mutex *gl_lock;
 static void *gl_holder; /* thread that has the context current, or NULL */
 static _Thread_local char gl_me;
 
 static void gl_enter(void) {
-    SDL_LockMutex(gl_lock); /* recursive: SDL mutexes may be re-entered by the owner */
+    SDL_LockMutex(gl_lock);
     if (gl_holder == &gl_me)
         return;
     if (SDL_GL_MakeCurrent(window, context) == 0)
@@ -34,17 +82,13 @@ static void gl_enter(void) {
     else
         trace("# GL context unavailable on host thread %lu: %s", SDL_ThreadID(), SDL_GetError());
 }
-/* wglMakeCurrent refuses a context current on another thread: give it back while
-   the lock is still held, so any thread can take it next. */
 static void gl_leave(void) {
     SDL_GL_MakeCurrent(window, NULL);
     gl_holder = NULL;
     SDL_UnlockMutex(gl_lock);
 }
 
-int render_init(uint32_t width, uint32_t height) {
-    if (window)
-        return 0;
+static int platform_init(uint32_t width, uint32_t height) {
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         trace("# SDL_Init failed: %s", SDL_GetError());
@@ -61,22 +105,11 @@ int render_init(uint32_t width, uint32_t height) {
     }
     SDL_GL_SetSwapInterval(1);
     blend_equation = (void (APIENTRY *)(GLenum))SDL_GL_GetProcAddress("glBlendEquation");
-    screen_w = width;
-    screen_h = height;
-    glViewport(0, 0, (GLsizei)width, (GLsizei)height);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, width, height, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glDisable(GL_CULL_FACE);
-    glDisable(GL_LIGHTING);
-    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    trace("# renderer: %s / %s", (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VERSION));
     gl_lock = SDL_CreateMutex();
-    SDL_GL_MakeCurrent(window, NULL);
+    glViewport(0, 0, (GLsizei)width, (GLsizei)height);
     return 0;
 }
+static void platform_swap(void) { SDL_GL_SwapWindow(window); }
 
 int render_pump_events(void) {
     SDL_Event e;
@@ -85,8 +118,6 @@ int render_pump_events(void) {
             quit = 1;
     return quit;
 }
-
-int render_quit_requested(void) { return quit; }
 
 /* T123_PRESS="first-last:scancode[,...]" holds an SDL scancode down during those
    presented frames, so runs can be scripted without a person at the window. */
@@ -113,6 +144,33 @@ void render_keyboard_state(uint8_t dik[256]) {
             uint8_t code = dik_from_sdl_scancode(sc);
             if (code) dik[code] = 0x80;
         }
+}
+#endif
+
+int render_quit_requested(void) { return quit; }
+
+/* -- common ------------------------------------------------------------------------- */
+int render_init(uint32_t width, uint32_t height) {
+    if (ready)
+        return 0;
+    if (platform_init(width, height))
+        return -1;
+    screen_w = width;
+    screen_h = height;
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, width, height, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_LIGHTING);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    trace("# renderer: %s / %s", (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VERSION));
+#ifndef __vita__
+    SDL_GL_MakeCurrent(window, NULL);
+#endif
+    ready = 1;
+    return 0;
 }
 
 static void color4(uint32_t argb, float out[4]) {
@@ -176,10 +234,18 @@ void render_sampler_state(uint32_t sampler, uint32_t type, uint32_t value) {
 
 void render_fvf(uint32_t value) { fvf = value; }
 
-/* D3D formats -> RGBA8 for upload. */
+/* D3D formats -> RGBA8 for upload. The pixels come from d3d9.c (inflated on the Vita). */
 static void upload(RenderTexture *t) {
-    uint8_t *src = t->data;
+    size_t bytes = (size_t)t->pitch * t->height;
+    uint8_t *src = malloc(bytes);
     uint8_t *rgba = malloc((size_t)t->width * t->height * 4);
+    if (!src || !rgba) {
+        trace("# texture upload %ux%u: out of memory", t->width, t->height);
+        free(src);
+        free(rgba);
+        return;
+    }
+    render_texture_pixels(t, src);
     for (uint32_t y = 0; y < t->height; y++) {
         for (uint32_t x = 0; x < t->width; x++) {
             uint8_t *o = rgba + ((size_t)y * t->width + x) * 4;
@@ -215,6 +281,7 @@ static void upload(RenderTexture *t) {
             }
         }
     }
+    free(src);
     if (!t->gl)
         glGenTextures(1, &t->gl);
     glBindTexture(GL_TEXTURE_2D, t->gl);
@@ -251,6 +318,7 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
     if (fvf & 0x040) off += 4;
     if (fvf & 0x080) off += 4;
     uint32_t tex = ((fvf >> 8) & 15) ? off : 0xFFFFFFFFu;
+    gl_enter(); /* the vertex arrays below are shared by the drawing threads */
     static float pos[65536 * 3], uv[65536 * 2];
     static uint8_t col[65536 * 4];
     for (uint32_t i = 0; i < n; i++) {
@@ -266,7 +334,6 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
         if (tex != 0xFFFFFFFFu)
             memcpy(&uv[i * 2], G(v + tex), 8);
     }
-    gl_enter();
     apply_states();
     if (bound && tex != 0xFFFFFFFFu) {
         if (bound->dirty || !bound->gl)
@@ -290,14 +357,27 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
     gl_leave();
 }
 
+/* The last frame is kept for the capture written at exit. Reading it back stalls the
+   GPU, so the Vita only does it once a second. */
 static uint8_t *last_frame;
+static uint32_t capture_w, capture_h;
 
 void render_present(void) {
     gl_enter();
+#ifdef __vita__
+    capture_w = VITA_W;
+    capture_h = VITA_H;
+    int read = d3d_frames % 60 == 0;
+#else
+    capture_w = screen_w;
+    capture_h = screen_h;
+    int read = 1;
+#endif
     if (!last_frame)
-        last_frame = malloc((size_t)screen_w * screen_h * 4);
-    glReadPixels(0, 0, (GLsizei)screen_w, (GLsizei)screen_h, GL_RGBA, GL_UNSIGNED_BYTE, last_frame);
-    SDL_GL_SwapWindow(window);
+        last_frame = malloc((size_t)capture_w * capture_h * 4);
+    if (read && last_frame)
+        glReadPixels(0, 0, (GLsizei)capture_w, (GLsizei)capture_h, GL_RGBA, GL_UNSIGNED_BYTE, last_frame);
+    platform_swap();
     gl_leave();
     render_pump_events();
 }
@@ -305,14 +385,21 @@ void render_present(void) {
 int render_capture_bmp(const char *path) {
     if (!last_frame)
         return -1;
-    FILE *f = fopen(path, "wb");
+    char full[1200];
+#ifdef __vita__
+    snprintf(full, sizeof full, "%s/recomp-screen.bmp", host_data_dir); /* where the Vita runner looks */
+    (void)path;
+#else
+    snprintf(full, sizeof full, "%s", path);
+#endif
+    FILE *f = fopen(full, "wb");
     if (!f)
         return -1;
-    uint32_t data = screen_w * screen_h * 3;
-    uint32_t header[13] = {54 + data, 0, 54, 40, screen_w, screen_h, 0x00180001u, 0, data, 2835, 2835, 0, 0};
+    uint32_t data = capture_w * capture_h * 3;
+    uint32_t header[13] = {54 + data, 0, 54, 40, capture_w, capture_h, 0x00180001u, 0, data, 2835, 2835, 0, 0};
     fwrite("BM", 1, 2, f);
     fwrite(header, 4, 13, f);
-    for (uint32_t i = 0; i < screen_w * screen_h; i++) { /* GL rows are bottom-up, like BMP */
+    for (uint32_t i = 0; i < capture_w * capture_h; i++) { /* GL rows are bottom-up, like BMP */
         uint8_t bgr[3] = {last_frame[i * 4 + 2], last_frame[i * 4 + 1], last_frame[i * 4]};
         fwrite(bgr, 1, 3, f);
     }

@@ -169,6 +169,12 @@ static void texture_store(RenderTexture *t, const uint8_t *src) { memcpy(t->data
 static void texture_fetch(RenderTexture *t, uint8_t *dst) { memcpy(dst, t->data, (size_t)t->pitch * t->height); }
 #endif
 
+void render_texture_pixels(RenderTexture *t, uint8_t *out) {
+    pthread_mutex_lock(&texture_lock);
+    texture_fetch(t, out);
+    pthread_mutex_unlock(&texture_lock);
+}
+
 /* The game streams textures while loading: a released texture gives back its pixels
    and its slot, or the guest heap runs out during boot. */
 static uint32_t texture_release(uint32_t o) {

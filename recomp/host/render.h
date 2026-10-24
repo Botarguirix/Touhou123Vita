@@ -24,6 +24,7 @@ void render_state(uint32_t state, uint32_t value);
 uint32_t render_get_state(uint32_t state);
 void render_texture(uint32_t stage, RenderTexture *t);
 void render_texture_free(RenderTexture *t);
+void render_texture_pixels(RenderTexture *t, uint8_t *out); /* level 0 as stored by the game (d3d9.c) */
 void render_stage_state(uint32_t stage, uint32_t type, uint32_t value);
 void render_sampler_state(uint32_t sampler, uint32_t type, uint32_t value);
 void render_fvf(uint32_t fvf);

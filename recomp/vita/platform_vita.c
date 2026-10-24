@@ -35,6 +35,9 @@ static unsigned font_w, font_h;
 static char lines[LINES][COLS + 1];
 static unsigned line_count;
 static uint64_t last_draw;
+static int display_taken; /* vitaGL owns the screen from CreateDevice on */
+
+void platform_display_taken(void) { display_taken = 1; }
 
 static void init_display(void) {
     if (frame)
@@ -77,6 +80,8 @@ static void draw_text(int x, int y, const char *s, uint32_t color) {
 }
 
 static void redraw(void) {
+    if (display_taken)
+        return;
     init_display();
     if (!frame)
         return;
@@ -125,13 +130,15 @@ void platform_finish(const char *summary) {
     redraw();
     char path[1100];
     snprintf(path, sizeof path, "%s/recomp-screen.bmp", host_data_dir);
-    write_bmp(path);
+    if (!display_taken) /* otherwise the renderer wrote the game frame there */
+        write_bmp(path);
     snprintf(path, sizeof path, "%s/recomp-result.txt", host_data_dir);
     FILE *f = fopen(path, "w");
     if (f) {
         fprintf(f, "%s\n", summary);
         fclose(f);
     }
-    sceKernelDelayThread(5 * 1000 * 1000); /* leave the result on screen */
+    if (!display_taken)
+        sceKernelDelayThread(5 * 1000 * 1000); /* leave the result on screen */
     sceKernelExitProcess(0);
 }

@@ -24,11 +24,13 @@ SHA = "f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e"
 VITASDK = Path(os.environ.get("VITASDK", r"C:\vitasdk"))
 BIN = VITASDK / "bin"
 CC = BIN / "arm-vita-eabi-gcc.exe"
-TITLE_ID, TITLE = "THSV12302", "Touhou123Vita Recomp H1"
+TITLE_ID, TITLE = "THSV12302", "Touhou123Vita Recomp"
 VITA_LIBS = ROOT / "artifacts/vita-libs"  # zlib 1.2.3 built by third_party/vita-libs/build.ps1 (T4)
 RUNTIME, HOST, VITA = ROOT / "recomp/runtime", ROOT / "recomp/host", ROOT / "recomp/vita"
-LIBS = ["-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
-        "-lSceProcessmgr_stub", f"-L{VITA_LIBS / 'lib'}", "-lz", "-lpthread", "-lm", "-lgcc", "-lpthread"]
+LIBS = ["-lvitaGL", "-lvitashark", "-lSceShaccCgExt", "-lmathneon", "-ltaihen_stub", "-lSceShaccCg_stub",
+        "-lSceKernelDmacMgr_stub", "-lSceGxm_stub", "-lSceCommonDialog_stub", "-lSceAppUtil_stub",
+        "-lSceSysmodule_stub", "-lSceIme_stub", "-lSceAppMgr_stub", "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
+        "-lSceProcessmgr_stub", f"-L{VITA_LIBS / 'lib'}", "-lz", "-lstdc++", "-lpthread", "-lm", "-lgcc", "-lpthread"]
 
 
 def run(cmd, **kw):
@@ -72,7 +74,7 @@ def main() -> None:
     header = [RUNTIME / "guest.h"]
     tasks = [(s, objs / (s.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for s in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]
-    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "render_gl.c", "glyph.c")]  # glyph.c: FreeType not in VitaSDK yet (vita/glyph_none.c)
+    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "glyph.c")]  # glyph.c: FreeType not in VitaSDK yet (vita/glyph_none.c)
     tasks += [(s, objs / ("host_" + s.stem + ".o"), host_flags, header + [HOST / "win32.h"])
               for s in host_sources + sorted(VITA.glob("*.c")) + [RUNTIME / "guest.c"]]
     started = time.monotonic()
