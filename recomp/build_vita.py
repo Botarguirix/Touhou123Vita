@@ -25,9 +25,10 @@ VITASDK = Path(os.environ.get("VITASDK", r"C:\vitasdk"))
 BIN = VITASDK / "bin"
 CC = BIN / "arm-vita-eabi-gcc.exe"
 TITLE_ID, TITLE = "THSV12302", "Touhou123Vita Recomp H1"
+VITA_LIBS = ROOT / "artifacts/vita-libs"  # zlib 1.2.3 built by third_party/vita-libs/build.ps1 (T4)
 RUNTIME, HOST, VITA = ROOT / "recomp/runtime", ROOT / "recomp/host", ROOT / "recomp/vita"
 LIBS = ["-lSceDisplay_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
-        "-lSceProcessmgr_stub", "-lpthread", "-lm", "-lgcc", "-lpthread"]
+        "-lSceProcessmgr_stub", f"-L{VITA_LIBS / 'lib'}", "-lz", "-lpthread", "-lm", "-lgcc", "-lpthread"]
 
 
 def run(cmd, **kw):
@@ -66,7 +67,8 @@ def main() -> None:
         objs = out / "obj-trace"
         objs.mkdir(parents=True, exist_ok=True)
     gen_flags = common + ["-w", f"-I{gen}"]
-    host_flags = common + ["-Wall", "-Wno-unused-parameter", f"-I{HOST}"]
+    host_flags = common + ["-Wall", "-Wno-unused-parameter", f"-I{HOST}", f"-I{VITA_LIBS / 'include'}",
+                           "-DT123_PACKED_TEXTURES"]
     header = [RUNTIME / "guest.h"]
     tasks = [(s, objs / (s.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for s in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]

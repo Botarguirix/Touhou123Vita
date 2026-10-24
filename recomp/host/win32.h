@@ -101,3 +101,6 @@ enum { H_FILE = 1, H_EVENT, H_MUTEX, H_THREAD, H_FIND, H_STD };
 extern uint32_t last_error;
 
 #endif
+
+extern uint64_t texture_live, texture_peak;
+void texture_census(void);

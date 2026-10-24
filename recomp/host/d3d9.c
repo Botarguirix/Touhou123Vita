@@ -8,6 +8,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <zlib.h>
 #include <string.h>
 
 #define API(name) static void name(Cpu *c)
@@ -30,7 +32,58 @@ static unsigned long long frame_limit = 300;
 /* -- textures --------------------------------------------------------------------- */
 RenderTexture textures[RENDER_MAX_TEXTURES];
 static unsigned texture_count = 1; /* index 0 = none */
+static unsigned format_bpp(uint32_t format);
+uint64_t texture_live, texture_peak; /* bytes of texture storage */
+void texture_census(void) {
+    struct { uint32_t w, h, f, n; } kinds[64];
+    unsigned nk = 0;
+    for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
+        RenderTexture *t = &textures[i];
+        if (!t->data) continue;
+        unsigned k = 0;
+        while (k < nk && !(kinds[k].w == t->width && kinds[k].h == t->height && kinds[k].f == t->format)) k++;
+        if (k == nk && nk < 64) { kinds[nk].w = t->width; kinds[nk].h = t->height; kinds[nk].f = t->format; kinds[nk++].n = 0; }
+        if (k < nk) kinds[k].n++;
+    }
+    /* how much would an 8-bit palette (lossless when <= 256 distinct colours) save? */
+    uint64_t total = 0, paletted = 0, drawn = 0, compressed = 0;
+    static uint32_t seen[512];
+    static uint8_t used[512];
+    for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
+        RenderTexture *t = &textures[i];
+        if (!t->data || t->format != 21) continue; /* PC layout: raw pixels */
+        uint64_t bytes = (uint64_t)t->pitch * t->height;
+        total += bytes;
+        if (t->drawn) drawn += bytes;
+#ifndef T123_PACKED_TEXTURES
+        uLongf zlen = compressBound((uLong)bytes);
+        static uint8_t *zbuf; static uLongf zcap;
+        if (zcap < zlen) { free(zbuf); zbuf = malloc(zlen); zcap = zlen; }
+        compress2(zbuf, &zlen, t->data, (uLong)bytes, 1);
+        compressed += zlen;
+#endif
+        unsigned n = 0, ok = 1;
+        memset(used, 0, sizeof used);
+        const uint32_t *p = (const uint32_t *)t->data;
+        for (uint64_t j = 0; ok && j < bytes / 4; j++) {
+            uint32_t v = p[j], h = (v * 2654435761u) >> 23;
+            while (used[h] && seen[h] != v) h = (h + 1) & 511;
+            if (!used[h]) { used[h] = 1; seen[h] = v; if (++n > 256) ok = 0; }
+        }
+        if (ok) paletted += bytes;
+    }
+    trace("# ARGB textures drawn at least once: %llu KiB; zlib level 1 of all: %llu KiB",
+          (unsigned long long)(drawn >> 10), (unsigned long long)(compressed >> 10));
+    trace("# ARGB textures: %llu KiB, of which %llu KiB have <= 256 colours (P8 would need %llu KiB)",
+          (unsigned long long)(total >> 10), (unsigned long long)(paletted >> 10),
+          (unsigned long long)((total - paletted + paletted / 4) >> 10));
+    for (unsigned k = 0; k < nk; k++)
+        trace("# live textures: %4u x %ux%u format %u = %u KiB", kinds[k].n, kinds[k].w, kinds[k].h, kinds[k].f,
+              kinds[k].n * kinds[k].w * kinds[k].h * format_bpp(kinds[k].f) >> 10);
+}
 static unsigned free_texture;      /* released slots, linked through next_free */
+/* textures are created and released from the loading thread and the main thread */
+static pthread_mutex_t texture_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static unsigned format_bpp(uint32_t format) {
     switch (format) {
@@ -42,7 +95,7 @@ static unsigned format_bpp(uint32_t format) {
     }
 }
 
-static uint32_t texture_new(uint32_t w, uint32_t h, uint32_t format) {
+static uint32_t texture_new_locked(uint32_t w, uint32_t h, uint32_t format) {
     unsigned i = free_texture;
     if (i)
         free_texture = textures[i].next_free;
@@ -56,16 +109,65 @@ static uint32_t texture_new(uint32_t w, uint32_t h, uint32_t format) {
     t->height = h;
     t->format = format;
     t->pitch = w * format_bpp(format);
+#ifdef T123_PACKED_TEXTURES
+    t->data = NULL; /* no packed data yet = all zero */
+    if (0) {
+#else
     t->data = platform_texture_alloc((size_t)h * t->pitch);
     if (!t->data) { /* report instead of crashing on the first LockRect */
+#endif
         trace("# out of texture memory: %ux%u format %u (%u bytes)", w, h, format, h * t->pitch);
         t->next_free = free_texture;
         free_texture = i;
         return 0;
     }
+#ifndef T123_PACKED_TEXTURES
+    t->stored = (uint64_t)h * t->pitch;
+    texture_live += (uint64_t)h * t->pitch;
+    if (texture_live > texture_peak) texture_peak = texture_live;
+#endif
     t->dirty = 1;
     return com_new(&texture_class, i, 0);
 }
+static uint32_t texture_new(uint32_t w, uint32_t h, uint32_t format) {
+    pthread_mutex_lock(&texture_lock);
+    uint32_t o = texture_new_locked(w, h, format);
+    pthread_mutex_unlock(&texture_lock);
+    return o;
+}
+
+/* Texture contents. On the Vita the game keeps ~155 MiB of 32-bit textures alive but
+   draws only ~12 MiB of them in the first minute (measured on PC); zlib level 1
+   packs all of them in ~16 MiB, so the Vita keeps them deflated and inflates on use. */
+#ifdef T123_PACKED_TEXTURES
+static void texture_store(RenderTexture *t, const uint8_t *src) {
+    uLong bytes = (uLong)t->pitch * t->height;
+    uLongf zlen = compressBound(bytes);
+    uint8_t *tmp = malloc(zlen);
+    uint8_t *packed = NULL;
+    if (tmp && compress2(tmp, &zlen, src, bytes, 1) == Z_OK && (packed = platform_texture_alloc(zlen)))
+        memcpy(packed, tmp, zlen);
+    free(tmp);
+    if (!packed)
+        trace("# cannot store texture %ux%u (%u packed bytes)", t->width, t->height, (unsigned)zlen);
+    pthread_mutex_lock(&texture_lock);
+    texture_live -= t->stored;
+    platform_texture_free(t->data);
+    t->data = packed;
+    t->stored = packed ? zlen : 0;
+    texture_live += t->stored;
+    if (texture_live > texture_peak) texture_peak = texture_live;
+    pthread_mutex_unlock(&texture_lock);
+}
+static void texture_fetch(RenderTexture *t, uint8_t *dst) {
+    uLongf bytes = (uLongf)t->pitch * t->height;
+    if (!t->data || uncompress(dst, &bytes, t->data, (uLong)t->stored) != Z_OK)
+        memset(dst, 0, (size_t)t->pitch * t->height);
+}
+#else
+static void texture_store(RenderTexture *t, const uint8_t *src) { memcpy(t->data, src, (size_t)t->pitch * t->height); }
+static void texture_fetch(RenderTexture *t, uint8_t *dst) { memcpy(dst, t->data, (size_t)t->pitch * t->height); }
+#endif
 
 /* The game streams textures while loading: a released texture gives back its pixels
    and its slot, or the guest heap runs out during boot. */
@@ -73,14 +175,17 @@ static uint32_t texture_release(uint32_t o) {
     uint32_t n = rd32(o + 4);
     if (n) wr32(o + 4, --n);
     if (!n) {
+        pthread_mutex_lock(&texture_lock);
         unsigned i = com_index(o);
         RenderTexture *t = &textures[i];
         render_texture_free(t);
         heap_free(t->pixels);
+        texture_live -= t->stored;
         platform_texture_free(t->data);
         memset(t, 0, sizeof *t);
         t->next_free = free_texture;
         free_texture = i;
+        pthread_mutex_unlock(&texture_lock);
         heap_free(o);
     }
     return n;
@@ -200,7 +305,7 @@ API(Texture_LockRect) {
     RenderTexture *t = &textures[com_index(ARG(c, 0))];
     if (!t->pixels) { /* guest staging copy for the duration of the lock */
         t->pixels = heap_alloc(t->pitch * t->height, 0);
-        memcpy(G(t->pixels), t->data, t->pitch * t->height);
+        texture_fetch(t, G(t->pixels));
     }
     uint32_t lock = ARG(c, 2), rect = ARG(c, 3), bits = t->pixels;
     if (rect)
@@ -212,7 +317,7 @@ API(Texture_LockRect) {
 API(Texture_UnlockRect) {
     RenderTexture *t = &textures[com_index(ARG(c, 0))];
     if (t->pixels) {
-        memcpy(t->data, G(t->pixels), t->pitch * t->height);
+        texture_store(t, G(t->pixels));
         heap_free(t->pixels);
         t->pixels = 0;
     }

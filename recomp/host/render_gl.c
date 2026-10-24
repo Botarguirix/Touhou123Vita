@@ -243,6 +243,7 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
     if (bound && tex != 0xFFFFFFFFu) {
         if (bound->dirty || !bound->gl)
             upload(bound);
+        bound->drawn++;
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, bound->gl);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_linear ? GL_LINEAR : GL_NEAREST);

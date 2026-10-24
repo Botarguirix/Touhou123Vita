@@ -52,7 +52,9 @@ static pthread_t main_thread;
 static int finish(void) {
     uint64_t elapsed_ms = (platform_ticks_us() - started) / 1000u;
     if (d3d_frames) {
-        trace("# frames presented: %llu, draws: %llu", d3d_frames, d3d_draws);
+        trace("# frames presented: %llu, draws: %llu; textures live %llu KiB, peak %llu KiB", d3d_frames, d3d_draws,
+              (unsigned long long)(texture_live >> 10), (unsigned long long)(texture_peak >> 10));
+        texture_census();
         render_capture_bmp("last-frame.bmp");
     }
     trace_summary();

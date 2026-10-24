@@ -9,11 +9,13 @@
 
 typedef struct {
     uint32_t width, height, format, pitch;
-    uint8_t *data;   /* level 0, host memory (keeps the guest heap for the game) */
+    uint8_t *data;   /* level 0 in host memory (deflated on the Vita: see d3d9.c) */
+    uint64_t stored; /* bytes held in data */
     uint32_t pixels; /* guest staging copy while locked, else 0 */
     int dirty;
     unsigned gl;
     unsigned next_free; /* d3d9.c slot free list */
+    unsigned drawn;     /* frames in which it was bound for a draw (measurement) */
 } RenderTexture;
 
 int render_init(uint32_t width, uint32_t height);
