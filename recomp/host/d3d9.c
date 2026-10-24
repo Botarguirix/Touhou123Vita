@@ -56,7 +56,13 @@ static uint32_t texture_new(uint32_t w, uint32_t h, uint32_t format) {
     t->height = h;
     t->format = format;
     t->pitch = w * format_bpp(format);
-    t->data = calloc(h, t->pitch);
+    t->data = platform_texture_alloc((size_t)h * t->pitch);
+    if (!t->data) { /* report instead of crashing on the first LockRect */
+        trace("# out of texture memory: %ux%u format %u (%u bytes)", w, h, format, h * t->pitch);
+        t->next_free = free_texture;
+        free_texture = i;
+        return 0;
+    }
     t->dirty = 1;
     return com_new(&texture_class, i, 0);
 }
@@ -71,7 +77,7 @@ static uint32_t texture_release(uint32_t o) {
         RenderTexture *t = &textures[i];
         render_texture_free(t);
         heap_free(t->pixels);
-        free(t->data);
+        platform_texture_free(t->data);
         memset(t, 0, sizeof *t);
         t->next_free = free_texture;
         free_texture = i;

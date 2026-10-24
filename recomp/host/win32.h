@@ -40,6 +40,9 @@ extern char trace_path[256];
 void platform_log(const char *line);   /* mirrors trace lines (Vita: on-screen log) */
 uint64_t platform_ticks_us(void);      /* monotonic microseconds */
 void platform_sleep_ms(uint32_t ms);
+/* Texture storage (zeroed): host heap on PC, a CDRAM pool on the Vita. */
+void *platform_texture_alloc(size_t bytes);
+void platform_texture_free(void *p);
 void platform_finish(const char *summary);
 void platform_memory_report(char *out, size_t size);
 

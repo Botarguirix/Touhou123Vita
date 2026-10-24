@@ -2,6 +2,7 @@
 #include "win32.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 void platform_log(const char *line) { (void)line; }
@@ -20,3 +21,6 @@ void platform_sleep_ms(uint32_t ms) {
 }
 
 void platform_memory_report(char *out, size_t size) { snprintf(out, size, "(no memory report on PC)"); }
+
+void *platform_texture_alloc(size_t bytes) { return calloc(1, bytes); }
+void platform_texture_free(void *p) { free(p); }
