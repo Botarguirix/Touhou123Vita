@@ -1,5 +1,9 @@
 /* Vita placeholder for render.h until the vitaGL backend (H3): the D3D9 layer runs
  * and counts frames, nothing is drawn. Render state is kept so GetRenderState works. */
+#include <psp2/ctrl.h>
+#include <string.h>
+
+#include "../host/input_map.h"
 #include "../host/render.h"
 #include "../host/win32.h"
 
@@ -32,4 +36,10 @@ void render_present(void) {
 }
 int render_pump_events(void) { return 0; }
 int render_quit_requested(void) { return 0; }
+void render_keyboard_state(uint8_t dik[256]) {
+    SceCtrlData pad;
+    memset(&pad, 0, sizeof pad);
+    sceCtrlPeekBufferPositive(0, &pad, 1);
+    dik_state_from_vita_buttons(pad.buttons, dik);
+}
 int render_capture_bmp(const char *path) { (void)path; return -1; }

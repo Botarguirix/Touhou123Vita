@@ -38,9 +38,19 @@ $env:T123_FRAMES = '600'; python recomp/build_host.py --run
 | `STATUS_BAD_STACK` al salir | El juego presenta desde su propio hilo de render y `host_exit` hacía `longjmp` a `main` desde otro hilo | Desde un hilo secundario se cierra con `exit(finish())` |
 | Fotograma negro | El contexto GL solo estaba activo en el hilo que creó el dispositivo, pero dibujan otros dos hilos | Cada llamada de render toma el contexto bajo un cerrojo y lo suelta al salir |
 
+## Texto y teclado (24 oct 2026)
+
+Los módulos de Codex ya están conectados a la capa Win32:
+
+- **Shift-JIS (T7):** `MultiByteToWideChar` y `WideCharToMultiByte` usan `sjis.c` para las páginas de códigos ACP/OEM/932.
+- **Glifos (T8):** `CreateFontA` guarda la altura y el peso de la fuente, y `SelectObject` asocia la fuente al DC. `GetTextMetricsA` deriva las métricas de Noto. `GetGlyphOutlineA` (`GGO_GRAY4_BITMAP`) convierte el código Shift-JIS a UTF-16 y rasteriza el glifo con FreeType. La fuente se busca en `T123_FONT`, junto a los DAT o en `local/fonts/`. En 900 fotogramas se rasterizaron 312 glifos sin errores. En PC, FreeType se enlaza de forma estática desde MSYS2. En Vita todavía no hay FreeType: `recomp/vita/glyph_none.c` devuelve `GDI_ERROR`, como antes.
+- **Teclado (T9):** `IDirectInputDevice8A::GetDeviceState` del teclado (`GUID_SysKeyboard`) se rellena con `render_keyboard_state`. En PC usa los scancodes de SDL traducidos a códigos DIK; en Vita, los botones (`sceCtrlPeekBufferPositive`) se traducen a las teclas por defecto de Soku.
+
+**Comprobado en PC:** con `T123_PRESS=700-706:29`, la tecla Z queda pulsada en los fotogramas 700–706. En el fotograma 1 200 se ve el **menú principal** (Story Mode, Arcade Mode, Vs Com…). En la misma ejecución sin pulsación, sigue el título.
+
 ## Pendiente (no forma parte de H2)
 
-- Efectos D3DX reales (la función fija basta para el título), Shift-JIS en `MultiByteToWideChar`, `GetGlyphOutlineA` (devuelve `GDI_ERROR`), entrada desde SDL y salida de audio.
+- Efectos D3DX reales (la función fija basta para el título), FreeType en Vita y salida de audio.
 - **Vita:** el VPK compila con un *backend* de render vacío ([render_vita.c](../recomp/vita/render_vita.c)); vitaGL llega con H3.
 
 ## Vita3K con hilos reales

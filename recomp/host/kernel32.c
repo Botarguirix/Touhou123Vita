@@ -2,6 +2,7 @@
  * game's own initialisation need. Portable C (no host Win32 calls), so it can move
  * to the Vita unchanged. Threads are not started yet (CreateThread is recorded). */
 #include "win32.h"
+#include "sjis.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -230,52 +231,35 @@ API(GetCPInfo) {
 }
 API(GetUserDefaultLCID) { ret_stdcall(c, 0x0411 /* ja-JP */, 0); }
 
-static int non_ascii_reported;
-static void note_non_ascii(const char *api) {
-    if (!non_ascii_reported++)
-        trace("%s: non-ASCII text converted as '?': Shift-JIS tables are pending", api);
+/* The game runs on a Japanese system: CP_ACP, CP_OEMCP, CP_THREAD_ACP and 932 are
+   all Shift-JIS (sjis.c, Codex T7, validated against Windows). Other code pages are
+   reported once and converted the same way. */
+static int is_cp932(uint32_t cp) {
+    static int reported;
+    if (cp == 0 || cp == 1 || cp == 3 || cp == 932)
+        return 1;
+    if (!reported++)
+        trace("# code page %u converted as CP932", cp);
+    return 1;
 }
 
 API(MultiByteToWideChar) {
     uint32_t src = ARG(c, 2), dst = ARG(c, 4), cap = ARG(c, 5);
     int32_t len = (int32_t)ARG(c, 3);
-    uint32_t n = len < 0 ? (uint32_t)strlen(STR(src)) + 1 : (uint32_t)len, out = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        uint8_t b = rd8(src + i);
-        uint16_t w = b;
-        if (b >= 0x80) {
-            note_non_ascii("MultiByteToWideChar");
-            if (((b >= 0x81 && b <= 0x9F) || (b >= 0xE0 && b <= 0xFC)) && i + 1 < n)
-                i++;
-            w = '?';
-        }
-        if (cap) {
-            if (out >= cap) { last_error = 122; ret_stdcall(c, 0, 6); return; }
-            wr16(dst + 2 * out, w);
-        }
-        out++;
-    }
-    ret_stdcall(c, out, 6);
+    (void)is_cp932(ARG(c, 0));
+    int n = sjis_to_utf16((const uint8_t *)G(src), len, cap ? (uint16_t *)G(dst) : NULL, (int)cap);
+    if (!n && len) last_error = cap ? 122 /* ERROR_INSUFFICIENT_BUFFER */ : 87;
+    ret_stdcall(c, (uint32_t)n, 6);
 }
 API(WideCharToMultiByte) {
-    uint32_t src = ARG(c, 2), dst = ARG(c, 4), cap = ARG(c, 5);
+    uint32_t src = ARG(c, 2), dst = ARG(c, 4), cap = ARG(c, 5), used = ARG(c, 7);
     int32_t len = (int32_t)ARG(c, 3);
-    uint32_t n = (uint32_t)len, out = 0;
-    if (len < 0)
-        for (n = 0; rd16(src + 2 * n); n++) {}
-    if (len < 0)
-        n++;
-    for (uint32_t i = 0; i < n; i++) {
-        uint16_t w = rd16(src + 2 * i);
-        if (w >= 0x80)
-            note_non_ascii("WideCharToMultiByte");
-        if (cap) {
-            if (out >= cap) { last_error = 122; ret_stdcall(c, 0, 8); return; }
-            wr8(dst + out, w < 0x80 ? (uint8_t)w : '?');
-        }
-        out++;
-    }
-    ret_stdcall(c, out, 8);
+    (void)is_cp932(ARG(c, 0));
+    int defaulted = 0;
+    int n = utf16_to_sjis((const uint16_t *)G(src), len, cap ? (uint8_t *)G(dst) : NULL, (int)cap, &defaulted);
+    if (used) wr32(used, (uint32_t)defaulted);
+    if (!n && len) last_error = cap ? 122 : 87;
+    ret_stdcall(c, (uint32_t)n, 8);
 }
 API(GetStringTypeW) {
     /* CT_CTYPE1 classification for ASCII; other characters are reported as alpha. */

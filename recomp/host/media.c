@@ -2,6 +2,7 @@
  * Input: keyboard state is reported empty until the SDL mapping lands (F2.3).
  * Sound: buffers accept locks and play calls silently; audio output is F2.3. */
 #include "com.h"
+#include "render.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -16,13 +17,19 @@ static ComClass dsbuffer_class = COM_CLASS(IDirectSoundBuffer);
 /* -- DirectInput8 --------------------------------------------------------------------- */
 API(DI_CreateDevice) {
     uint32_t guid = ARG(c, 1);
+    uint32_t kind = rd32(guid) == 0x6F1D2B61u ? 1 /* GUID_SysKeyboard */ : 2 /* mouse */;
     trace("IDirectInput8A::CreateDevice(%08x-...)", rd32(guid));
-    wr32(ARG(c, 2), com_new(&didevice_class, 0, 0));
+    wr32(ARG(c, 2), com_new(&didevice_class, kind, 0));
     ret_stdcall(c, S_OK, 4);
 }
 API(DI_EnumDevices) { ret_stdcall(c, S_OK, 5); } /* no game controllers yet */
+/* Keyboard: the renderer's input (SDL scancodes on PC, buttons on the Vita) mapped to
+   DIK codes by input_map.c (Codex T9). The mouse stays still. */
 API(DID_GetDeviceState) {
-    memset(G(ARG(c, 2)), 0, ARG(c, 1));
+    uint32_t size = ARG(c, 1), out = ARG(c, 2);
+    memset(G(out), 0, size);
+    if (com_index(ARG(c, 0)) == 1 && size >= 256)
+        render_keyboard_state(G(out));
     ret_stdcall(c, S_OK, 3);
 }
 

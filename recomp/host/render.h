@@ -31,6 +31,7 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
 void render_present(void);
 int render_pump_events(void);  /* returns 1 when the user closed the window */
 int render_quit_requested(void);
+void render_keyboard_state(uint8_t dik[256]); /* DirectInput key state, 0x80 = down */
 int render_capture_bmp(const char *path);
 
 #endif

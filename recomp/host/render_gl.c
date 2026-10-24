@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "input_map.h"
 #include "render.h"
 #include "win32.h"
 
@@ -86,6 +87,33 @@ int render_pump_events(void) {
 }
 
 int render_quit_requested(void) { return quit; }
+
+/* T123_PRESS="first-last:scancode[,...]" holds an SDL scancode down during those
+   presented frames, so runs can be scripted without a person at the window. */
+static void scripted_keys(uint8_t dik[256]) {
+    const char *p = getenv("T123_PRESS");
+    while (p && *p) {
+        unsigned long long first, last;
+        int sc, used = 0;
+        if (sscanf(p, "%llu-%llu:%d%n", &first, &last, &sc, &used) != 3)
+            return;
+        if (d3d_frames >= first && d3d_frames <= last && dik_from_sdl_scancode(sc))
+            dik[dik_from_sdl_scancode(sc)] = 0x80;
+        p += used;
+        if (*p == ',') p++;
+    }
+}
+
+void render_keyboard_state(uint8_t dik[256]) {
+    scripted_keys(dik);
+    int count = 0;
+    const Uint8 *keys = SDL_GetKeyboardState(&count);
+    for (int sc = 0; sc < count; sc++)
+        if (keys[sc]) {
+            uint8_t code = dik_from_sdl_scancode(sc);
+            if (code) dik[code] = 0x80;
+        }
+}
 
 static void color4(uint32_t argb, float out[4]) {
     out[0] = ((argb >> 16) & 255) / 255.0f;
