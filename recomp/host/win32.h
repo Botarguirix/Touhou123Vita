@@ -101,7 +101,7 @@ extern const char *guest_exe_path; /* the path the game sees for itself */
 uint32_t handle_new(int type, void *host, uint32_t extra);
 void *handle_get(uint32_t h, int type);
 void handle_close(uint32_t h);
-enum { H_FILE = 1, H_EVENT, H_MUTEX, H_THREAD, H_FIND, H_STD };
+enum { H_FILE = 1, H_EVENT, H_MUTEX, H_THREAD, H_FIND, H_STD, H_RFILE /* read-only, kernel32.c */ };
 
 extern uint32_t last_error;
 
@@ -110,4 +110,4 @@ extern uint32_t last_error;
 extern uint64_t texture_live, texture_peak;
 void texture_census(void);
 void com_summary(void);
-void file_close(FILE *f); /* kernel32.c: keeps idle read-only files for reuse */
+void rfile_close(void *r); /* kernel32.c: keeps idle read-only files for reuse */

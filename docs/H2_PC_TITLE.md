@@ -88,7 +88,9 @@ Medido con el tiempo de host por API y método COM, y con la marca `first busy f
 | `-O2`, pilas de hilo de 1 MiB, *pool* RAM de vitaGL de 8 MiB, búfer de lectura de 32 KiB, reutilización de archivos | 18,9 s | **72 s** | `UnlockRect` 25 s, `ReadFile` 11,7 s, `CreateFileA` 8,7 s |
 | Traza volcada una vez por segundo (antes, un `fflush` por línea, unos 10 ms cada uno) | 15,4 s | **63 s** | `UnlockRect` 30,7 s, `ReadFile` 13,6 s, `SetFilePointer` 7,6 s |
 
-Siguiente cambio, todavía sin medir en la Vita: la compresión de texturas pasa a dos hilos de trabajo, y la textura se lee de la copia sin comprimir hasta que su trabajo termina. Para probar en PC la ruta de la Vita existe `python recomp/build_host.py --packed-textures`.
+| Compresión de texturas en dos hilos de trabajo; la textura se lee de su copia sin comprimir hasta que termina | 13,1 s | **41,9 s** | `ReadFile` 18,9 s, `SetFilePointer` 8,8 s (unos 7 ms por posicionamiento) |
+
+Siguiente cambio, todavía sin medir en la Vita: los archivos de solo lectura ya no pasan por stdio, porque stdio vaciaba y rellenaba su búfer en cada `fseek`. Ahora el posicionamiento solo cambia un número, las lecturas pequeñas salen de un bloque de 32 KiB en caché y las grandes van directas a la tarjeta (`sceIoPread`). Los archivos ociosos se siguen reutilizando. En PC, hasta la pelea: `SetFilePointer` 0 ms y 413 000 `ReadFile` en 210 ms. Para probar en PC la ruta de texturas de la Vita existe `python recomp/build_host.py --packed-textures`.
 
 **Problema abierto:** con compresión asíncrona, 2 de 6 ejecuciones en PC hasta la pelea fallaron con «invalid parameter» del CRT dentro de `free` (0x81ff7c, llamado desde 0x402970), en los fotogramas 2074 y 2286. Las ejecuciones sin compresión (0 de 6) y con compresión síncrona (`T123_PACK_SYNC=1`, 0 de 1) no fallaron. Es una carrera que aún no he localizado. `HeapFree` y `HeapSize` registran ahora cualquier puntero que no sea un bloque vivo, con su cabecera.
 

@@ -319,64 +319,124 @@ API(LCMapStringW) {
 enum { STD_INPUT = 0xFFFFFFF6u, STD_OUTPUT = 0xFFFFFFF5u, STD_ERROR = 0xFFFFFFF4u };
 API(GetStdHandle) { ret_stdcall(c, ARG(c, 0) == STD_INPUT ? 0 : handle_new(H_STD, NULL, ARG(c, 0)), 1); }
 API(SetStdHandle) { ret_stdcall(c, 1, 2); }
-API(GetFileType) { ret_stdcall(c, handle_get(ARG(c, 0), H_FILE) ? 1 : 2 /* CHAR */, 1); }
+API(GetFileType) { ret_stdcall(c, handle_get(ARG(c, 0), H_FILE) || handle_get(ARG(c, 0), H_RFILE) ? 1 : 2 /* CHAR */, 1); }
 API(SetHandleCount) { ret_stdcall(c, ARG(c, 0), 1); }
 
-/* Read-only files are kept open after CloseHandle and handed back on the next open of
-   the same path: the game reopens th123a.dat ~740 times while loading, and each open
-   costs ~10 ms on the Vita's memory card (measured). They also get a larger stdio
-   buffer than newlib's default, which made every ReadFile a card access (44 s). */
-enum { REUSE_SLOTS = 8, READ_BUFFER = 32 * 1024 };
-static struct { char path[256]; FILE *f; int in_use; } reuse[REUSE_SLOTS];
-static unsigned reuse_next;
-static pthread_mutex_t reuse_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Read-only files (the DAT archives) bypass stdio. Measured on the Vita's card:
+     - each open costs ~10 ms and the game reopens th123a.dat over a thousand times,
+       so idle files stay open and are handed back on the next open of the same path;
+     - stdio dropped and refilled its buffer on every fseek (SetFilePointer ~7 ms), so
+       a seek only moves the position here, small reads come from one cached block and
+       large reads go straight to the card. */
+enum { RFILE_SLOTS = 8, RFILE_BLOCK = 32 * 1024 };
+typedef struct {
+    char path[256];
+    int fd, in_use;
+    int64_t size, pos, block_off;
+    uint32_t block_len;
+    uint8_t block[RFILE_BLOCK];
+} RFile;
+static RFile *rfiles[RFILE_SLOTS];
+static unsigned rfile_next;
+static pthread_mutex_t rfile_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static FILE *open_read_only(const char *path) {
-    FILE *f = NULL;
-    pthread_mutex_lock(&reuse_lock);
-    for (unsigned i = 0; i < REUSE_SLOTS && !f; i++)
-        if (reuse[i].f && !reuse[i].in_use && !strcmp(reuse[i].path, path)) {
-            reuse[i].in_use = 1;
-            f = reuse[i].f;
+#ifdef __vita__
+#include <psp2/io/fcntl.h>
+static int rf_open(const char *path) { int fd = sceIoOpen(path, SCE_O_RDONLY, 0); return fd < 0 ? -1 : fd; }
+static void rf_close(int fd) { sceIoClose(fd); }
+static int64_t rf_size(int fd) { return sceIoLseek(fd, 0, SCE_SEEK_END); }
+static int32_t rf_read_at(int fd, void *dst, uint32_t n, int64_t off) { return sceIoPread(fd, dst, n, off); }
+#else
+#include <fcntl.h>
+#include <io.h>
+static int rf_open(const char *path) { return _open(path, _O_RDONLY | _O_BINARY); }
+static void rf_close(int fd) { _close(fd); }
+static int64_t rf_size(int fd) { return _lseeki64(fd, 0, SEEK_END); }
+static int32_t rf_read_at(int fd, void *dst, uint32_t n, int64_t off) {
+    return _lseeki64(fd, off, SEEK_SET) < 0 ? -1 : _read(fd, dst, n);
+}
+#endif
+
+static RFile *rfile_open(const char *path) {
+    RFile *r = NULL;
+    pthread_mutex_lock(&rfile_lock);
+    for (unsigned i = 0; i < RFILE_SLOTS && !r; i++)
+        if (rfiles[i] && !rfiles[i]->in_use && !strcmp(rfiles[i]->path, path)) {
+            r = rfiles[i];
+            r->in_use = 1;
         }
-    pthread_mutex_unlock(&reuse_lock);
-    if (f) {
-        file_seek(f, 0, SEEK_SET);
-        return f;
+    pthread_mutex_unlock(&rfile_lock);
+    if (r) {
+        r->pos = 0; /* the cached block stays valid: the file did not change */
+        return r;
     }
-    if (!(f = fopen(path, "rb")))
+    int fd = rf_open(path);
+    if (fd < 0 || !(r = calloc(1, sizeof *r))) {
+        if (fd >= 0) rf_close(fd);
         return NULL;
-    setvbuf(f, NULL, _IOFBF, READ_BUFFER);
-    if (strlen(path) < sizeof reuse[0].path) {
-        pthread_mutex_lock(&reuse_lock);
-        for (unsigned k = 0; k < REUSE_SLOTS; k++) {
-            unsigned i = (reuse_next + k) % REUSE_SLOTS;
-            if (reuse[i].f && reuse[i].in_use)
+    }
+    snprintf(r->path, sizeof r->path, "%s", path);
+    r->fd = fd;
+    r->size = rf_size(fd);
+    r->block_off = -1;
+    r->in_use = 1;
+    if (strlen(path) < sizeof r->path) {
+        pthread_mutex_lock(&rfile_lock);
+        for (unsigned k = 0; k < RFILE_SLOTS; k++) {
+            unsigned i = (rfile_next + k) % RFILE_SLOTS;
+            if (rfiles[i] && rfiles[i]->in_use)
                 continue;
-            if (reuse[i].f)
-                fclose(reuse[i].f);   /* evict an idle one */
-            snprintf(reuse[i].path, sizeof reuse[i].path, "%s", path);
-            reuse[i].f = f;
-            reuse[i].in_use = 1;
-            reuse_next = i + 1;
+            if (rfiles[i]) { /* evict an idle one */
+                rf_close(rfiles[i]->fd);
+                free(rfiles[i]);
+            }
+            rfiles[i] = r;
+            rfile_next = i + 1;
             break;
         }
-        pthread_mutex_unlock(&reuse_lock);
+        pthread_mutex_unlock(&rfile_lock);
     }
-    return f;
+    return r;
 }
 
-/* Called by handle_close for H_FILE: idle read-only files stay open for reuse. */
-void file_close(FILE *f) {
-    pthread_mutex_lock(&reuse_lock);
-    for (unsigned i = 0; i < REUSE_SLOTS; i++)
-        if (reuse[i].f == f) {
-            reuse[i].in_use = 0;
-            pthread_mutex_unlock(&reuse_lock);
+/* handle_close for H_RFILE: idle files stay open for reuse. */
+void rfile_close(void *p) {
+    RFile *r = p;
+    pthread_mutex_lock(&rfile_lock);
+    for (unsigned i = 0; i < RFILE_SLOTS; i++)
+        if (rfiles[i] == r) {
+            r->in_use = 0;
+            pthread_mutex_unlock(&rfile_lock);
             return;
         }
-    pthread_mutex_unlock(&reuse_lock);
-    fclose(f);
+    pthread_mutex_unlock(&rfile_lock);
+    rf_close(r->fd);
+    free(r);
+}
+
+static uint32_t rfile_read(RFile *r, uint8_t *dst, uint32_t n) {
+    uint32_t done = 0;
+    while (done < n && r->pos < r->size) {
+        int64_t in_block = r->pos - r->block_off;
+        if (r->block_off >= 0 && in_block >= 0 && in_block < r->block_len) {
+            uint32_t k = r->block_len - (uint32_t)in_block;
+            if (k > n - done) k = n - done;
+            memcpy(dst + done, r->block + in_block, k);
+            done += k;
+            r->pos += k;
+        } else if (n - done >= RFILE_BLOCK) {
+            int32_t k = rf_read_at(r->fd, dst + done, n - done, r->pos);
+            if (k <= 0) break;
+            done += (uint32_t)k;
+            r->pos += k;
+        } else {
+            int32_t k = rf_read_at(r->fd, r->block, RFILE_BLOCK, r->pos);
+            if (k <= 0) break;
+            r->block_off = r->pos;
+            r->block_len = (uint32_t)k;
+        }
+    }
+    return done;
 }
 
 API(CreateFileA) {
@@ -386,20 +446,28 @@ API(CreateFileA) {
     uint32_t access = ARG(c, 1), disposition = ARG(c, 4);
     const char *mode = (access & 0x40000000u) ? (disposition == 3 || disposition == 4 ? "r+b" : "w+b")
                                                : "rb";
-    FILE *f = (access & 0x40000000u) ? fopen(path, mode) : open_read_only(path);
-    if (!f && (access & 0x40000000u) && disposition == 4)
-        f = fopen(path, "w+b");
-    uint32_t h = f ? handle_new(H_FILE, f, 0) : 0xFFFFFFFFu;
-    last_error = f ? 0 : 2; /* ERROR_FILE_NOT_FOUND */
+    uint32_t h = 0xFFFFFFFFu;
+    if (!(access & 0x40000000u)) {
+        RFile *r = rfile_open(path);
+        if (r) h = handle_new(H_RFILE, r, 0);
+    } else {
+        FILE *f = fopen(path, mode);
+        if (!f && disposition == 4)
+            f = fopen(path, "w+b");
+        if (f) h = handle_new(H_FILE, f, 0);
+    }
+    last_error = h != 0xFFFFFFFFu ? 0 : 2; /* ERROR_FILE_NOT_FOUND */
     trace("CreateFileA(%s, access=%08x, disposition=%u) = %08x (%s)", name, access, disposition, h, path);
     ret_stdcall(c, h, 7);
 }
 API(ReadFile) {
-    FILE *f = handle_get(ARG(c, 0), H_FILE);
-    uint32_t n = f ? (uint32_t)fread(G(ARG(c, 1)), 1, ARG(c, 2), f) : 0;
+    RFile *r = handle_get(ARG(c, 0), H_RFILE);
+    FILE *f = r ? NULL : handle_get(ARG(c, 0), H_FILE);
+    uint32_t n = r ? rfile_read(r, (uint8_t *)G(ARG(c, 1)), ARG(c, 2))
+               : f ? (uint32_t)fread(G(ARG(c, 1)), 1, ARG(c, 2), f) : 0;
     if (ARG(c, 3))
         wr32(ARG(c, 3), n);
-    ret_stdcall(c, f != NULL, 5);
+    ret_stdcall(c, r || f, 5);
 }
 API(WriteFile) {
     uint32_t h = ARG(c, 0), n = ARG(c, 2);
@@ -413,26 +481,40 @@ API(WriteFile) {
     ret_stdcall(c, 1, 5);
 }
 API(SetFilePointer) {
-    FILE *f = handle_get(ARG(c, 0), H_FILE);
-    int64_t distance = (int32_t)ARG(c, 1);
+    RFile *r = handle_get(ARG(c, 0), H_RFILE);
+    FILE *f = r ? NULL : handle_get(ARG(c, 0), H_FILE);
+    int64_t distance = (int32_t)ARG(c, 1), pos;
     if (ARG(c, 2))
         distance = (int64_t)(((uint64_t)rd32(ARG(c, 2)) << 32) | ARG(c, 1));
-    if (!f || file_seek(f, distance, (int)ARG(c, 3))) {
-        ret_stdcall(c, 0xFFFFFFFFu, 4);
-        return;
+    uint32_t method = ARG(c, 3);
+    if (r) {
+        pos = (method == 0 ? 0 : method == 1 ? r->pos : r->size) + distance;
+        if (pos < 0) { ret_stdcall(c, 0xFFFFFFFFu, 4); return; }
+        r->pos = pos; /* no I/O: the next read decides what to fetch */
+    } else {
+        if (!f || file_seek(f, distance, (int)method)) {
+            ret_stdcall(c, 0xFFFFFFFFu, 4);
+            return;
+        }
+        pos = file_tell(f);
     }
-    int64_t pos = file_tell(f);
     if (ARG(c, 2))
         wr32(ARG(c, 2), (uint32_t)((uint64_t)pos >> 32));
     ret_stdcall(c, (uint32_t)pos, 4);
 }
 API(GetFileSize) {
-    FILE *f = handle_get(ARG(c, 0), H_FILE);
-    if (!f) { ret_stdcall(c, 0xFFFFFFFFu, 2); return; }
-    int64_t here = file_tell(f);
-    file_seek(f, 0, SEEK_END);
-    int64_t size = file_tell(f);
-    file_seek(f, here, SEEK_SET);
+    RFile *r = handle_get(ARG(c, 0), H_RFILE);
+    FILE *f = r ? NULL : handle_get(ARG(c, 0), H_FILE);
+    if (!r && !f) { ret_stdcall(c, 0xFFFFFFFFu, 2); return; }
+    int64_t size;
+    if (r) {
+        size = r->size;
+    } else {
+        int64_t here = file_tell(f);
+        file_seek(f, 0, SEEK_END);
+        size = file_tell(f);
+        file_seek(f, here, SEEK_SET);
+    }
     if (ARG(c, 1))
         wr32(ARG(c, 1), (uint32_t)((uint64_t)size >> 32));
     ret_stdcall(c, (uint32_t)size, 2);
