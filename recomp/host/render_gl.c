@@ -9,6 +9,7 @@
 
 #ifdef __vita__
 #include <psp2/ctrl.h>
+#include <psp2/display.h>
 #include <pthread.h>
 #include <vitaGL.h>
 #else
@@ -56,6 +57,10 @@ static int platform_init(uint32_t width, uint32_t height) {
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
     glViewport(VIEW_X, 0, VIEW_W, VITA_H);
+    /* vitaGL does not clip to the viewport: keep sprites that slide in from outside the
+       640x480 screen off the side bars */
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(VIEW_X, 0, VIEW_W, VITA_H);
     (void)width; (void)height;
     return 0;
 }
@@ -384,9 +389,11 @@ static uint32_t capture_w, capture_h;
 void render_present(void) {
     gl_enter();
 #ifdef __vita__
+    /* vitaGL only runs the frame's draws at the swap, so glReadPixels here returned
+       the cleared target; the capture is copied from the displayed buffer below. */
     capture_w = VITA_W;
     capture_h = VITA_H;
-    int read = d3d_frames % 60 == 0;
+    int read = 0;
 #else
     capture_w = screen_w;
     capture_h = screen_h;
@@ -397,6 +404,18 @@ void render_present(void) {
     if (read && last_frame)
         glReadPixels(0, 0, (GLsizei)capture_w, (GLsizei)capture_h, GL_RGBA, GL_UNSIGNED_BYTE, last_frame);
     platform_swap();
+#ifdef __vita__
+    if (d3d_frames % 60 == 0 && last_frame) { /* once a second: copy what is on screen */
+        SceDisplayFrameBuf fb;
+        memset(&fb, 0, sizeof fb);
+        fb.size = sizeof fb;
+        sceDisplayWaitVblankStart();
+        if (sceDisplayGetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME) >= 0 && fb.base)
+            for (uint32_t y = 0; y < VITA_H; y++) /* stored bottom-up, like GL rows */
+                memcpy(last_frame + (size_t)(VITA_H - 1 - y) * VITA_W * 4,
+                       (const uint8_t *)fb.base + (size_t)y * fb.pitch * 4, VITA_W * 4);
+    }
+#endif
     gl_leave();
 #ifndef __vita__
     /* T123_CAPTURE="n[,n...]" saves frame-<n>.bmp at those presented frames, so a

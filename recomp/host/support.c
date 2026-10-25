@@ -20,12 +20,23 @@ void trace(const char *fmt, ...) {
     va_end(ap);
     static pthread_mutex_t trace_lock = PTHREAD_MUTEX_INITIALIZER;
     pthread_mutex_lock(&trace_lock);
-    if (!trace_file)
+    if (!trace_file) {
         trace_file = fopen(trace_path, "w");
+        if (trace_file)
+            setvbuf(trace_file, NULL, _IOFBF, 64 * 1024);
+    }
     if (trace_file) {
         fputs(line, trace_file);
         fputc('\n', trace_file);
-        fflush(trace_file);
+        /* Flushing every line cost ~10 ms per line on the Vita's card (8.7 s of
+           CreateFileA alone). Milestones and errors ('#') still go out at once, so a
+           crash report keeps them; plain call lines go out at least once a second. */
+        static uint64_t last_flush;
+        uint64_t now = platform_ticks_us();
+        if (line[0] == '#' || now - last_flush > 1000000u) {
+            fflush(trace_file);
+            last_flush = now;
+        }
     }
     platform_log(line);
     pthread_mutex_unlock(&trace_lock);
