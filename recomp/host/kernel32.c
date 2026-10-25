@@ -4,6 +4,7 @@
 #include "win32.h"
 #include "sjis.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -313,6 +314,63 @@ API(SetStdHandle) { ret_stdcall(c, 1, 2); }
 API(GetFileType) { ret_stdcall(c, handle_get(ARG(c, 0), H_FILE) ? 1 : 2 /* CHAR */, 1); }
 API(SetHandleCount) { ret_stdcall(c, ARG(c, 0), 1); }
 
+/* Read-only files are kept open after CloseHandle and handed back on the next open of
+   the same path: the game reopens th123a.dat ~740 times while loading, and each open
+   costs ~10 ms on the Vita's memory card (measured). They also get a larger stdio
+   buffer than newlib's default, which made every ReadFile a card access (44 s). */
+enum { REUSE_SLOTS = 8, READ_BUFFER = 32 * 1024 };
+static struct { char path[256]; FILE *f; int in_use; } reuse[REUSE_SLOTS];
+static unsigned reuse_next;
+static pthread_mutex_t reuse_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static FILE *open_read_only(const char *path) {
+    FILE *f = NULL;
+    pthread_mutex_lock(&reuse_lock);
+    for (unsigned i = 0; i < REUSE_SLOTS && !f; i++)
+        if (reuse[i].f && !reuse[i].in_use && !strcmp(reuse[i].path, path)) {
+            reuse[i].in_use = 1;
+            f = reuse[i].f;
+        }
+    pthread_mutex_unlock(&reuse_lock);
+    if (f) {
+        file_seek(f, 0, SEEK_SET);
+        return f;
+    }
+    if (!(f = fopen(path, "rb")))
+        return NULL;
+    setvbuf(f, NULL, _IOFBF, READ_BUFFER);
+    if (strlen(path) < sizeof reuse[0].path) {
+        pthread_mutex_lock(&reuse_lock);
+        for (unsigned k = 0; k < REUSE_SLOTS; k++) {
+            unsigned i = (reuse_next + k) % REUSE_SLOTS;
+            if (reuse[i].f && reuse[i].in_use)
+                continue;
+            if (reuse[i].f)
+                fclose(reuse[i].f);   /* evict an idle one */
+            snprintf(reuse[i].path, sizeof reuse[i].path, "%s", path);
+            reuse[i].f = f;
+            reuse[i].in_use = 1;
+            reuse_next = i + 1;
+            break;
+        }
+        pthread_mutex_unlock(&reuse_lock);
+    }
+    return f;
+}
+
+/* Called by handle_close for H_FILE: idle read-only files stay open for reuse. */
+void file_close(FILE *f) {
+    pthread_mutex_lock(&reuse_lock);
+    for (unsigned i = 0; i < REUSE_SLOTS; i++)
+        if (reuse[i].f == f) {
+            reuse[i].in_use = 0;
+            pthread_mutex_unlock(&reuse_lock);
+            return;
+        }
+    pthread_mutex_unlock(&reuse_lock);
+    fclose(f);
+}
+
 API(CreateFileA) {
     char path[1200];
     const char *name = STR(ARG(c, 0));
@@ -320,7 +378,7 @@ API(CreateFileA) {
     uint32_t access = ARG(c, 1), disposition = ARG(c, 4);
     const char *mode = (access & 0x40000000u) ? (disposition == 3 || disposition == 4 ? "r+b" : "w+b")
                                                : "rb";
-    FILE *f = fopen(path, mode);
+    FILE *f = (access & 0x40000000u) ? fopen(path, mode) : open_read_only(path);
     if (!f && (access & 0x40000000u) && disposition == 4)
         f = fopen(path, "w+b");
     uint32_t h = f ? handle_new(H_FILE, f, 0) : 0xFFFFFFFFu;

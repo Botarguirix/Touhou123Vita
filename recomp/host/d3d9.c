@@ -46,7 +46,7 @@ void texture_census(void) {
         if (k < nk) kinds[k].n++;
     }
     /* how much would an 8-bit palette (lossless when <= 256 distinct colours) save? */
-    uint64_t total = 0, paletted = 0, drawn = 0, compressed = 0;
+    uint64_t total = 0, paletted = 0, drawn = 0, compressed = 0, us_z1 = 0;
     static uint32_t seen[512];
     static uint8_t used[512];
     for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
@@ -59,8 +59,11 @@ void texture_census(void) {
         uLongf zlen = compressBound((uLong)bytes);
         static uint8_t *zbuf; static uLongf zcap;
         if (zcap < zlen) { free(zbuf); zbuf = malloc(zlen); zcap = zlen; }
+        uint64_t t0 = platform_ticks_us();
         compress2(zbuf, &zlen, t->data, (uLong)bytes, 1);
+        us_z1 += platform_ticks_us() - t0;
         compressed += zlen;
+
 #endif
         unsigned n = 0, ok = 1;
         memset(used, 0, sizeof used);
@@ -72,8 +75,8 @@ void texture_census(void) {
         }
         if (ok) paletted += bytes;
     }
-    trace("# ARGB textures drawn at least once: %llu KiB; zlib level 1 of all: %llu KiB",
-          (unsigned long long)(drawn >> 10), (unsigned long long)(compressed >> 10));
+    trace("# ARGB textures drawn at least once: %llu KiB; zlib level 1 of all: %llu KiB in %llu ms",
+          (unsigned long long)(drawn >> 10), (unsigned long long)(compressed >> 10), (unsigned long long)(us_z1 / 1000));
     trace("# ARGB textures: %llu KiB, of which %llu KiB have <= 256 colours (P8 would need %llu KiB)",
           (unsigned long long)(total >> 10), (unsigned long long)(paletted >> 10),
           (unsigned long long)((total - paletted + paletted / 4) >> 10));

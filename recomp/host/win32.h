@@ -9,6 +9,7 @@
 #define T123_WIN32_H
 
 #include "guest.h"
+#include <stdio.h>
 
 #ifndef _WIN32
 #include <strings.h>
@@ -109,3 +110,4 @@ extern uint32_t last_error;
 extern uint64_t texture_live, texture_peak;
 void texture_census(void);
 void com_summary(void);
+void file_close(FILE *f); /* kernel32.c: keeps idle read-only files for reuse */

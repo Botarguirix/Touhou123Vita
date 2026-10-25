@@ -250,7 +250,7 @@ void handle_close(uint32_t h) {
     if (!s)
         return;
     if (s->type == H_FILE && s->host)
-        fclose(s->host);
+        file_close(s->host);
     memset(s, 0, sizeof *s);
 }
 

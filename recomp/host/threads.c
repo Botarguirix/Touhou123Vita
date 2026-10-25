@@ -195,7 +195,9 @@ API(CreateThread) {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
 #ifdef __vita__
-    pthread_attr_setstacksize(&attr, 2u << 20); /* host stack for nested guest calls */
+    /* host stack for nested guest calls; 2 MiB each left too little for the 11th thread
+       after vitaGL took its pools (EAGAIN on hardware) */
+    pthread_attr_setstacksize(&attr, 1u << 20);
 #else
     pthread_attr_setstacksize(&attr, 8u << 20);
 #endif

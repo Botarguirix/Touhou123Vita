@@ -38,8 +38,8 @@ static void gl_leave(void) { pthread_mutex_unlock(&gl_lock); }
 #define blend_equation glBlendEquation
 
 static int platform_init(uint32_t width, uint32_t height) {
-    /* Texture storage is reserved first, then vitaGL gets fixed pools: 16 MiB of the
-       ~32 MiB user RAM left (the rest is for thread stacks and file buffers), 80 MiB
+    /* Texture storage is reserved first, then vitaGL gets fixed pools: 8 MiB of the
+       ~32 MiB user RAM left (the rest is for ~20 thread stacks and file buffers), 80 MiB
        of CDRAM and 16 MiB of physically contiguous memory. */
     texture_pool_reserve();
     char memory[160];
@@ -48,7 +48,7 @@ static int platform_init(uint32_t width, uint32_t height) {
     /* Explicit pool sizes (the threshold variant derives them from the remaining
        budget). The return value is not a success flag: vitaGL returns whether it had
        to lower the resolution, i.e. GL_FALSE after a normal start, so it is ignored. */
-    vglInitWithCustomSizes(0, VITA_W, VITA_H, 16 << 20, 80 << 20, 16 << 20, 0, SCE_GXM_MULTISAMPLE_NONE);
+    vglInitWithCustomSizes(0, VITA_W, VITA_H, 8 << 20, 80 << 20, 16 << 20, 0, SCE_GXM_MULTISAMPLE_NONE);
     platform_memory_report(memory, sizeof memory);
     trace("# after vitaGL: %s", memory);
     platform_display_taken();
