@@ -37,9 +37,10 @@ def compile_one(src: Path, obj: Path, flags: list[str], deps: list[Path]) -> str
     return f"{src.name}:\n{run.stderr}" if run.returncode else None
 
 
-def build(jobs: int) -> Path:
+def build(jobs: int, packed: bool = False) -> Path:
     gen = ROOT / "artifacts/recomp" / SHA / "gen"
-    out = ROOT / "artifacts/recomp" / SHA / "host"
+    # --packed-textures: the Vita's deflated texture storage, to test it on PC (own objects)
+    out = ROOT / "artifacts/recomp" / SHA / ("host-packed" if packed else "host")
     out.mkdir(parents=True, exist_ok=True)
     if not (gen / "table.c").exists():
         raise SystemExit("run recomp/lift_all.py first")
@@ -49,6 +50,8 @@ def build(jobs: int) -> Path:
     host_flags = ["-std=gnu11", "-O1", "-g", "-frounding-math", "-Wall", "-Wextra",
                   "-Wno-unused-parameter", f"-I{RUNTIME}", f"-I{HOST}",
                   "-IC:/msys64/ucrt64/include/freetype2"]  # glyph.c (Codex T8)
+    if packed:
+        host_flags.append("-DT123_PACKED_TEXTURES")
     tasks = [(src, gen / (src.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for src in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]
     tasks += [(src, out / (src.stem + ".o"), host_flags, header + [HOST / "win32.h"])
@@ -71,8 +74,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    parser.add_argument("--packed-textures", action="store_true", help="store textures deflated, as on the Vita")
     args = parser.parse_args()
-    exe = build(args.jobs)
+    exe = build(args.jobs, args.packed_textures)
     print(f"built {exe}")
     if args.run:
         workdir = ROOT / "artifacts/recomp" / SHA / "run"

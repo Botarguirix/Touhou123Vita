@@ -63,9 +63,17 @@ API(HeapCreate) { ret_stdcall(c, HEAP_HANDLE, 3); }
 API(HeapDestroy) { ret_stdcall(c, 1, 1); }
 API(GetProcessHeap) { ret_stdcall(c, HEAP_HANDLE, 0); }
 API(HeapAlloc) { ret_stdcall(c, heap_alloc(ARG(c, 2), ARG(c, 1) & HEAP_ZERO), 3); }
-API(HeapFree) { heap_free(ARG(c, 2)); ret_stdcall(c, 1, 3); }
+static void check_heap_pointer(const char *api, uint32_t p) {
+    if (p && heap_size(p) == 0xFFFFFFFFu) {
+        uint32_t w[8];
+        for (int k = 0; k < 8; k++) w[k] = rd32(p - 16 + 4 * k);
+        trace("# %s(%08x): not a live heap block; header %08x %08x %08x %08x | %08x %08x %08x %08x", api, p,
+              w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+    }
+}
+API(HeapFree) { check_heap_pointer("HeapFree", ARG(c, 2)); heap_free(ARG(c, 2)); ret_stdcall(c, 1, 3); }
 API(HeapReAlloc) { ret_stdcall(c, heap_realloc(ARG(c, 2), ARG(c, 3), ARG(c, 1) & HEAP_ZERO), 4); }
-API(HeapSize) { ret_stdcall(c, heap_size(ARG(c, 2)), 3); }
+API(HeapSize) { check_heap_pointer("HeapSize", ARG(c, 2)); ret_stdcall(c, heap_size(ARG(c, 2)), 3); }
 API(VirtualAlloc) { ret_stdcall(c, virtual_alloc(ARG(c, 0), ARG(c, 1)), 4); }
 API(VirtualFree) { ret_stdcall(c, 1, 3); }
 

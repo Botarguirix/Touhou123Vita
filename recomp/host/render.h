@@ -11,6 +11,8 @@ typedef struct {
     uint32_t width, height, format, pitch;
     uint8_t *data;   /* level 0 in host memory (deflated on the Vita: see d3d9.c) */
     uint64_t stored; /* bytes held in data */
+    uint8_t *raw;    /* Vita: uncompressed copy while its compression job is pending */
+    uint32_t gen;    /* Vita: generation of the stored contents (compression jobs) */
     uint32_t pixels; /* guest staging copy while locked, else 0 */
     int dirty;
     unsigned gl;

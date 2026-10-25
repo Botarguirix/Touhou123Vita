@@ -143,28 +143,111 @@ static uint32_t texture_new(uint32_t w, uint32_t h, uint32_t format) {
    draws only ~12 MiB of them in the first minute (measured on PC); zlib level 1
    packs all of them in ~16 MiB, so the Vita keeps them deflated and inflates on use. */
 #ifdef T123_PACKED_TEXTURES
-static void texture_store(RenderTexture *t, const uint8_t *src) {
-    uLong bytes = (uLong)t->pitch * t->height;
-    uLongf zlen = compressBound(bytes);
-    uint8_t *tmp = malloc(zlen);
-    uint8_t *packed = NULL;
-    if (tmp && compress2(tmp, &zlen, src, bytes, 1) == Z_OK && (packed = platform_texture_alloc(zlen)))
-        memcpy(packed, tmp, zlen);
+static uint8_t *deflate_texture(const uint8_t *src, uLong bytes, uLongf *zlen) {
+    *zlen = compressBound(bytes);
+    uint8_t *tmp = malloc(*zlen), *packed = NULL;
+    if (tmp && compress2(tmp, zlen, src, bytes, 1) == Z_OK && (packed = platform_texture_alloc(*zlen)))
+        memcpy(packed, tmp, *zlen);
     free(tmp);
+    return packed;
+}
+/* Under texture_lock: replace the stored pixels of t. */
+static void install_packed(RenderTexture *t, uint8_t *packed, uLongf zlen, uint32_t w, uint32_t h) {
     if (!packed)
-        trace("# cannot store texture %ux%u (%u packed bytes)", t->width, t->height, (unsigned)zlen);
-    pthread_mutex_lock(&texture_lock);
+        trace("# cannot store texture %ux%u (%u packed bytes)", w, h, (unsigned)zlen);
     texture_live -= t->stored;
     platform_texture_free(t->data);
     t->data = packed;
     t->stored = packed ? zlen : 0;
     texture_live += t->stored;
     if (texture_live > texture_peak) texture_peak = texture_live;
+}
+
+/* Compressing on the game's thread cost 25-30 s of the Vita's load (UnlockRect), so
+   it runs on two worker threads (the other A9 cores). Until a job is done the texture
+   reads from the job's uncompressed copy (t->raw); the copies in flight are bounded
+   and past that UnlockRect compresses in place as before. A job only installs its
+   result if the texture's generation is unchanged (not rewritten or released). */
+enum { WORKERS = 2, MAX_JOBS = 256, PENDING_LIMIT = 8u << 20 };
+typedef struct { unsigned index; uint32_t gen; uint8_t *raw; uint32_t bytes; } PackJob;
+static PackJob jobs[MAX_JOBS];
+static unsigned job_head, job_tail, pending_bytes;
+static pthread_cond_t job_ready = PTHREAD_COND_INITIALIZER;
+
+static void *pack_worker(void *arg) {
+    (void)arg;
+    for (;;) {
+        pthread_mutex_lock(&texture_lock);
+        while (job_head == job_tail)
+            pthread_cond_wait(&job_ready, &texture_lock);
+        PackJob job = jobs[job_head++ % MAX_JOBS];
+        RenderTexture *t = &textures[job.index];
+        int current = t->gen == job.gen;
+        uint32_t w = t->width, h = t->height;
+        pthread_mutex_unlock(&texture_lock);
+        uLongf zlen = 0;
+        uint8_t *packed = current ? deflate_texture(job.raw, job.bytes, &zlen) : NULL;
+        pthread_mutex_lock(&texture_lock);
+        if (current && t->gen == job.gen) {
+            install_packed(t, packed, zlen, w, h);
+            t->raw = NULL;
+        } else {
+            platform_texture_free(packed);
+        }
+        pending_bytes -= job.bytes;
+        pthread_mutex_unlock(&texture_lock);
+        free(job.raw);
+    }
+    return NULL;
+}
+
+static void texture_store(RenderTexture *t, const uint8_t *src) {
+    static int started;
+    uLong bytes = (uLong)t->pitch * t->height;
+    uint8_t *raw = NULL;
+    pthread_mutex_lock(&texture_lock);
+    if (!started) {
+        started = 1;
+        for (unsigned k = 0; k < WORKERS; k++) {
+            pthread_t id;
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setstacksize(&attr, 128 * 1024);
+            pthread_create(&id, &attr, pack_worker, NULL);
+            pthread_attr_destroy(&attr);
+        }
+    }
+    static uint32_t generations;
+    t->gen = ++generations; /* unique across slot reuse: earlier jobs are now stale */
+    static int sync_only = -1; /* T123_PACK_SYNC=1: compress in place (diagnosis) */
+    if (sync_only < 0) sync_only = getenv("T123_PACK_SYNC") != NULL;
+    if (!sync_only && pending_bytes + bytes <= PENDING_LIMIT && job_tail - job_head < MAX_JOBS && (raw = malloc(bytes))) {
+        memcpy(raw, src, bytes);
+        jobs[job_tail++ % MAX_JOBS] = (PackJob){(unsigned)(t - textures), t->gen, raw, (uint32_t)bytes};
+        pending_bytes += bytes;
+        t->raw = raw;
+        pthread_cond_signal(&job_ready);
+        pthread_mutex_unlock(&texture_lock);
+        return;
+    }
+    t->raw = NULL;
+    uint32_t gen = t->gen;
+    pthread_mutex_unlock(&texture_lock);
+    uLongf zlen = 0;
+    uint8_t *packed = deflate_texture(src, bytes, &zlen);
+    pthread_mutex_lock(&texture_lock);
+    if (t->gen == gen)
+        install_packed(t, packed, zlen, t->width, t->height);
+    else
+        platform_texture_free(packed);
     pthread_mutex_unlock(&texture_lock);
 }
+/* Under texture_lock. */
 static void texture_fetch(RenderTexture *t, uint8_t *dst) {
     uLongf bytes = (uLongf)t->pitch * t->height;
-    if (!t->data || uncompress(dst, &bytes, t->data, (uLong)t->stored) != Z_OK)
+    if (t->raw)
+        memcpy(dst, t->raw, bytes); /* compression still pending: the job's copy is current */
+    else if (!t->data || uncompress(dst, &bytes, t->data, (uLong)t->stored) != Z_OK)
         memset(dst, 0, (size_t)t->pitch * t->height);
 }
 #else
@@ -323,7 +406,7 @@ API(Texture_LockRect) {
     RenderTexture *t = &textures[com_index(ARG(c, 0))];
     if (!t->pixels) { /* guest staging copy for the duration of the lock */
         t->pixels = heap_alloc(t->pitch * t->height, 0);
-        texture_fetch(t, G(t->pixels));
+        render_texture_pixels(t, G(t->pixels));
     }
     uint32_t lock = ARG(c, 2), rect = ARG(c, 3), bits = t->pixels;
     if (rect)

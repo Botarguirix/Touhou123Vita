@@ -78,6 +78,20 @@ En pelea quedan 301 MiB de texturas vivas en PC, porque se precargan todos los p
 - **Resultado:** 3 600 fotogramas y salida limpia. La captura muestra la pantalla de carga («東方Project / 12.3th Project Shrine Maiden / Presented by…»), centrada en 4:3.
 - **Pendiente:** en 60 s todavía no llega al título (1 *draw* por fotograma). En Vita3K, que corre en un PC más rápido, llegaba hacia el fotograma 1 200. Falta medir dónde se va el tiempo de carga: lectura de los DAT, compresión zlib o código traducido.
 
+## Carga en la Vita real (24 oct 2026)
+
+Medido con el tiempo de host por API y método COM, y con la marca `first busy frame` en la traza:
+
+| Ejecución | Primer fotograma | Título | Mayores costes |
+|---|---|---|---|
+| `-O1` | 26 s | no llega en 60 s: `pthread_create` falla (EAGAIN) en 3 hilos de carga | `ReadFile` 44 s, `UnlockRect` 18 s, `CreateFileA` 7 s |
+| `-O2`, pilas de hilo de 1 MiB, *pool* RAM de vitaGL de 8 MiB, búfer de lectura de 32 KiB, reutilización de archivos | 18,9 s | **72 s** | `UnlockRect` 25 s, `ReadFile` 11,7 s, `CreateFileA` 8,7 s |
+| Traza volcada una vez por segundo (antes, un `fflush` por línea, unos 10 ms cada uno) | 15,4 s | **63 s** | `UnlockRect` 30,7 s, `ReadFile` 13,6 s, `SetFilePointer` 7,6 s |
+
+Siguiente cambio, todavía sin medir en la Vita: la compresión de texturas pasa a dos hilos de trabajo, y la textura se lee de la copia sin comprimir hasta que su trabajo termina. Para probar en PC la ruta de la Vita existe `python recomp/build_host.py --packed-textures`.
+
+**Problema abierto:** con compresión asíncrona, 2 de 6 ejecuciones en PC hasta la pelea fallaron con «invalid parameter» del CRT dentro de `free` (0x81ff7c, llamado desde 0x402970), en los fotogramas 2074 y 2286. Las ejecuciones sin compresión (0 de 6) y con compresión síncrona (`T123_PACK_SYNC=1`, 0 de 1) no fallaron. Es una carrera que aún no he localizado. `HeapFree` y `HeapSize` registran ahora cualquier puntero que no sea un bloque vivo, con su cabecera.
+
 ## Pendiente (no forma parte de H2)
 
 - Efectos D3DX reales (la función fija basta para el título), FreeType en Vita y salida de audio.
