@@ -15,11 +15,12 @@ typedef struct ComClass {
     const ComMethod *methods;
     unsigned count;
     GuestFn impl[128];
+    unsigned long long calls[128], us[128]; /* per method, for the trace summary */
     uint32_t vtable; /* guest address, created on first use */
     unsigned id;
 } ComClass;
 
-#define COM_CLASS(iface) {#iface, iface##_methods, iface##_count, {0}, 0, 0}
+#define COM_CLASS(iface) {#iface, iface##_methods, iface##_count, {0}, {0}, {0}, 0, 0}
 
 void com_bind(ComClass *cls, const char *method, GuestFn fn);
 void com_bind_ok(ComClass *cls, const char *method); /* returns S_OK, pops its arguments */

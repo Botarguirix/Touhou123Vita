@@ -274,7 +274,7 @@ void path_to_host(const char *guest_path, char *out, size_t size) {
 }
 
 /* -- imports ------------------------------------------------------------------------------ */
-typedef struct { char name[64]; GuestFn fn; unsigned long long calls; } Fake;
+typedef struct { char name[64]; GuestFn fn; unsigned long long calls, us; } Fake; /* us: host time inside */
 static Fake fakes[1024];
 static unsigned fake_count;
 static unsigned recent[64], recent_pos;
@@ -285,7 +285,9 @@ static void api_dispatch(Cpu *c) {
     fakes[i].calls++;
     import_calls++;
     recent[recent_pos++ % 64] = i;
+    uint64_t t0 = platform_ticks_us();
     fakes[i].fn(c);
+    fakes[i].us += platform_ticks_us() - t0;
 }
 
 void trace_summary(void) {
@@ -293,7 +295,8 @@ void trace_summary(void) {
     trace("# Win32 calls by function:");
     for (unsigned i = 0; i < fake_count; i++)
         if (fakes[i].calls)
-            trace("#   %8llu %s", fakes[i].calls, fakes[i].name);
+            trace("#   %8llu %s (%llu ms)", fakes[i].calls, fakes[i].name, fakes[i].us / 1000);
+    com_summary();
     trace("# last calls (oldest first):");
     unsigned n = recent_pos < 64 ? recent_pos : 64;
     for (unsigned k = 0; k < n; k++)

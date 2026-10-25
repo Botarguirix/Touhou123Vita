@@ -252,6 +252,19 @@ static void upload(RenderTexture *t) {
         return;
     }
     render_texture_pixels(t, src);
+    if (t->format == 21 && t->pitch == t->width * 4) {
+        /* A8R8G8B8 is BGRA in memory: upload as is (nearly every texture the game makes) */
+        free(rgba);
+        if (!t->gl)
+            glGenTextures(1, &t->gl);
+        glBindTexture(GL_TEXTURE_2D, t->gl);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)t->width, (GLsizei)t->height, 0, GL_BGRA, GL_UNSIGNED_BYTE, src);
+        free(src);
+        t->dirty = 0;
+        return;
+    }
     for (uint32_t y = 0; y < t->height; y++) {
         for (uint32_t x = 0; x < t->width; x++) {
             uint8_t *o = rgba + ((size_t)y * t->width + x) * 4;

@@ -14,7 +14,10 @@ static void com_dispatch(Cpu *c) {
     unsigned m = (off % CLASS_SPAN) / METHOD_SPAN;
     import_calls++;
     if (cls->impl[m]) {
+        uint64_t t0 = platform_ticks_us();
         cls->impl[m](c);
+        cls->calls[m]++;
+        cls->us[m] += platform_ticks_us() - t0;
         return;
     }
     char why[160];
@@ -73,4 +76,14 @@ uint32_t com_new(ComClass *cls, uint32_t host_index, uint32_t extra_bytes) {
     wr32(o + 4, 1);
     wr32(o + 8, host_index);
     return o;
+}
+
+/* COM methods that took host time, for the trace summary (load-time profiling). */
+void com_summary(void) {
+    trace("# COM methods (calls, host time):");
+    for (unsigned k = 0; k < class_count; k++)
+        for (unsigned m = 0; m < classes[k]->count; m++)
+            if (classes[k]->us[m] >= 1000)
+                trace("#   %8llu %s::%s (%llu ms)", classes[k]->calls[m], classes[k]->name,
+                      classes[k]->methods[m].name, classes[k]->us[m] / 1000);
 }

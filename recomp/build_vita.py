@@ -52,13 +52,13 @@ def compile_one(task):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
-    parser.add_argument("--opt", default="-O1")
+    parser.add_argument("--opt", default="-O2")  # -O2 build: ~70 min cold, cached in obj-O2
     parser.add_argument("--trace-calls", action="store_true",
                         help="record guest function entries (crash reports name the last ones; slower)")
     args = parser.parse_args()
     gen = ROOT / "artifacts/recomp" / SHA / "gen"
     out = ROOT / "artifacts/recomp" / SHA / "vita"
-    objs = out / "obj"
+    objs = out / ("obj" if args.opt == "-O1" else "obj" + args.opt)  # one cache per level
     objs.mkdir(parents=True, exist_ok=True)
     if not (gen / "table.c").exists():
         raise SystemExit("run recomp/lift_all.py first")

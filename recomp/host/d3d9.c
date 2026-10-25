@@ -285,7 +285,14 @@ API(Present) {
     render_present();
     d3d_frames++;
     if (d3d_frames == 1 || d3d_frames % 60 == 0)
-        trace("# frame %llu: %llu draws so far", d3d_frames, d3d_draws);
+        trace("# frame %llu: %llu draws so far (%llu ms)", d3d_frames, d3d_draws, (unsigned long long)(platform_ticks_us() / 1000));
+    /* loading screens draw one quad per frame; the title draws ~27 */
+    static unsigned long long last_draws, busy_seen;
+    if (!busy_seen && d3d_frames > 60 && d3d_draws - last_draws >= 10) {
+        busy_seen = d3d_frames;
+        trace("# first busy frame (>= 10 draws, title reached): frame %llu at %llu ms", d3d_frames, (unsigned long long)(platform_ticks_us() / 1000));
+    }
+    last_draws = d3d_draws;
     if (frame_limit && d3d_frames >= frame_limit) {
         char why[96];
         snprintf(why, sizeof why, "frame limit reached (%llu frames presented)", d3d_frames);

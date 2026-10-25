@@ -108,3 +108,4 @@ extern uint32_t last_error;
 
 extern uint64_t texture_live, texture_peak;
 void texture_census(void);
+void com_summary(void);

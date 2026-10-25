@@ -10,7 +10,10 @@ void platform_log(const char *line) { (void)line; }
 uint64_t platform_ticks_us(void) {
     struct timespec ts;
     timespec_get(&ts, TIME_UTC);
-    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+    uint64_t now = (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+    static uint64_t start; /* relative to the first call, like the Vita's process time */
+    if (!start) start = now;
+    return now - start;
 }
 
 void platform_finish(const char *summary) { printf("%s\n", summary); }
