@@ -403,6 +403,19 @@ void render_present(void) {
         last_frame = malloc((size_t)capture_w * capture_h * 4);
     if (read && last_frame)
         glReadPixels(0, 0, (GLsizei)capture_w, (GLsizei)capture_h, GL_RGBA, GL_UNSIGNED_BYTE, last_frame);
+#ifdef __vita__
+    /* The side bars of the 960x544 screen are outside the game's 4:3 area: clear them
+       every frame, or each of vitaGL's display buffers keeps whatever was there. */
+    GLfloat clear[4];
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
+    glClearColor(0, 0, 0, 1);
+    glScissor(0, 0, VIEW_X, VITA_H);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glScissor(VIEW_X + VIEW_W, 0, VITA_W - VIEW_X - VIEW_W, VITA_H);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glScissor(VIEW_X, 0, VIEW_W, VITA_H);
+    glClearColor(clear[0], clear[1], clear[2], clear[3]);
+#endif
     platform_swap();
 #ifdef __vita__
     if (d3d_frames % 60 == 0 && last_frame) { /* once a second: copy what is on screen */
