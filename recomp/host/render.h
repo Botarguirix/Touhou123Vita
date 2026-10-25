@@ -18,6 +18,8 @@ typedef struct {
     unsigned gl;
     unsigned next_free; /* d3d9.c slot free list */
     unsigned drawn;     /* frames in which it was bound for a draw (measurement) */
+    unsigned long long used_frame; /* last frame it was drawn in (GPU budget) */
+    uint32_t gpu_bytes;           /* bytes uploaded to the GPU, 0 if not uploaded */
 } RenderTexture;
 
 int render_init(uint32_t width, uint32_t height);

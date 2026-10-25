@@ -143,6 +143,9 @@ void guest_intercept(uint32_t address, GuestFn fn) {
     intercept_count++;
 }
 
+/* The lifted function at an address, ignoring intercepts (for wrappers). */
+GuestFn guest_lifted(uint32_t address) { return search(lifted, lifted_count, address); }
+
 static GuestFn find(uint32_t target) {
     GuestFn fn = intercept_count ? search(intercepts, intercept_count, target) : NULL;
     return fn ? fn : search(lifted, lifted_count, target);

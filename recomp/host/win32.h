@@ -111,3 +111,5 @@ extern uint64_t texture_live, texture_peak;
 void texture_census(void);
 void com_summary(void);
 void rfile_close(void *r); /* kernel32.c: keeps idle read-only files for reuse */
+GuestFn guest_lifted(uint32_t address); /* runtime/guest.c: the translated original, for wrappers */
+void game_checks_init(void); /* game_checks.c */

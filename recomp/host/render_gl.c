@@ -264,83 +264,141 @@ void render_sampler_state(uint32_t sampler, uint32_t type, uint32_t value) {
 
 void render_fvf(uint32_t value) { fvf = value; }
 
+/* Uploaded textures stay on the GPU until the game releases them. In a fight on the
+   Vita that filled vitaGL's memory (sprites vanished, then ~10 FPS), so the Vita keeps
+   a budget and drops the textures drawn longest ago; a dropped texture is uploaded
+   again from its stored copy the next time it is drawn. */
+extern RenderTexture textures[RENDER_MAX_TEXTURES];
+#ifdef __vita__
+static uint64_t gpu_budget = 40u << 20;
+#else
+static uint64_t gpu_budget = UINT64_MAX; /* T123_GPU_BUDGET_MB to test the Vita's eviction */
+#endif
+static uint64_t gpu_bytes, gpu_evictions;
+
+static void gpu_forget(RenderTexture *t) { /* under the GL lock */
+    if (!t->gl) return;
+    glDeleteTextures(1, &t->gl);
+    t->gl = 0;
+    gpu_bytes -= t->gpu_bytes;
+    t->gpu_bytes = 0;
+}
+
+static void gpu_make_room(uint64_t need) {
+#ifndef __vita__
+    static int read_env;
+    if (!read_env++ && getenv("T123_GPU_BUDGET_MB"))
+        gpu_budget = strtoull(getenv("T123_GPU_BUDGET_MB"), NULL, 10) << 20;
+#endif
+    while (gpu_bytes + need > gpu_budget) {
+        RenderTexture *oldest = NULL;
+        for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
+            RenderTexture *t = &textures[i];
+            if (t->gl && t->used_frame < d3d_frames && (!oldest || t->used_frame < oldest->used_frame))
+                oldest = t;
+        }
+        if (!oldest) return; /* everything was drawn this frame: go over budget */
+        gpu_forget(oldest);
+        if (++gpu_evictions % 100 == 1)
+            trace("# GPU texture budget: %llu evictions so far, %llu KiB uploaded",
+                  (unsigned long long)gpu_evictions, (unsigned long long)(gpu_bytes >> 10));
+    }
+}
+
+/* Scratch buffers for the pixels and the conversion: reused (upload runs under the GL
+   lock) instead of two mallocs per upload, which fragmented the Vita's 32 MiB C heap
+   until uploads failed ("texture upload: out of memory"). */
+static uint8_t *scratch(uint8_t **buf, size_t *cap, size_t need) {
+    if (*cap < need) {
+        uint8_t *p = realloc(*buf, need);
+        if (!p) return NULL;
+        *buf = p;
+        *cap = need;
+    }
+    return *buf;
+}
+
 /* D3D formats -> RGBA8 for upload. The pixels come from d3d9.c (inflated on the Vita). */
 static void upload(RenderTexture *t) {
-    size_t bytes = (size_t)t->pitch * t->height;
-    uint8_t *src = malloc(bytes);
-    uint8_t *rgba = malloc((size_t)t->width * t->height * 4);
-    if (!src || !rgba) {
+    static uint8_t *src_buf, *rgba_buf;
+    static size_t src_cap, rgba_cap;
+    size_t bytes = (size_t)t->pitch * t->height, out_bytes = (size_t)t->width * t->height * 4;
+    uint8_t *src = scratch(&src_buf, &src_cap, bytes);
+    if (!src) {
         trace("# texture upload %ux%u: out of memory", t->width, t->height);
-        free(src);
-        free(rgba);
         return;
     }
     render_texture_pixels(t, src);
-    if (t->format == 21 && t->pitch == t->width * 4) {
-        /* A8R8G8B8 is BGRA in memory: upload as is (nearly every texture the game makes) */
-        free(rgba);
-        if (!t->gl)
-            glGenTextures(1, &t->gl);
-        glBindTexture(GL_TEXTURE_2D, t->gl);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)t->width, (GLsizei)t->height, 0, GL_BGRA, GL_UNSIGNED_BYTE, src);
-        free(src);
-        t->dirty = 0;
-        return;
-    }
-    for (uint32_t y = 0; y < t->height; y++) {
-        for (uint32_t x = 0; x < t->width; x++) {
-            uint8_t *o = rgba + ((size_t)y * t->width + x) * 4;
-            const uint8_t *p = src + (size_t)y * t->pitch;
-            uint32_t v;
-            switch (t->format) {
-            case 21: case 22:
-                p += x * 4;
-                o[0] = p[2]; o[1] = p[1]; o[2] = p[0]; o[3] = t->format == 22 ? 255 : p[3];
-                break;
-            case 26: /* A4R4G4B4 */
-                v = p[x * 2] | p[x * 2 + 1] << 8;
-                o[0] = ((v >> 8) & 15) * 17; o[1] = ((v >> 4) & 15) * 17; o[2] = (v & 15) * 17; o[3] = (v >> 12) * 17;
-                break;
-            case 25: case 24: /* A1R5G5B5, X1R5G5B5 */
-                v = p[x * 2] | p[x * 2 + 1] << 8;
-                o[0] = ((v >> 10) & 31) * 255 / 31; o[1] = ((v >> 5) & 31) * 255 / 31; o[2] = (v & 31) * 255 / 31;
-                o[3] = t->format == 24 || (v >> 15) ? 255 : 0;
-                break;
-            case 23: /* R5G6B5 */
-                v = p[x * 2] | p[x * 2 + 1] << 8;
-                o[0] = ((v >> 11) & 31) * 255 / 31; o[1] = ((v >> 5) & 63) * 255 / 63; o[2] = (v & 31) * 255 / 31; o[3] = 255;
-                break;
-            case 28: /* A8 */
-                o[0] = o[1] = o[2] = 0; o[3] = p[x];
-                break;
-            case 50: /* L8 */
-                o[0] = o[1] = o[2] = p[x]; o[3] = 255;
-                break;
-            default:
-                o[0] = 255; o[1] = 0; o[2] = 255; o[3] = 255; /* unknown format: magenta */
-                break;
+    gpu_forget(t);
+    gpu_make_room(out_bytes);
+    const uint8_t *pixels = src;
+    GLenum layout = GL_BGRA;
+    if (!(t->format == 21 && t->pitch == t->width * 4)) { /* A8R8G8B8 is BGRA in memory: as is */
+        uint8_t *rgba = scratch(&rgba_buf, &rgba_cap, out_bytes);
+        if (!rgba) {
+            trace("# texture upload %ux%u: out of memory", t->width, t->height);
+            return;
+        }
+        for (uint32_t y = 0; y < t->height; y++) {
+            for (uint32_t x = 0; x < t->width; x++) {
+                uint8_t *o = rgba + ((size_t)y * t->width + x) * 4;
+                const uint8_t *p = src + (size_t)y * t->pitch;
+                uint32_t v;
+                switch (t->format) {
+                case 21: case 22:
+                    p += x * 4;
+                    o[0] = p[2]; o[1] = p[1]; o[2] = p[0]; o[3] = t->format == 22 ? 255 : p[3];
+                    break;
+                case 26: /* A4R4G4B4 */
+                    v = p[x * 2] | p[x * 2 + 1] << 8;
+                    o[0] = ((v >> 8) & 15) * 17; o[1] = ((v >> 4) & 15) * 17; o[2] = (v & 15) * 17; o[3] = (v >> 12) * 17;
+                    break;
+                case 25: case 24: /* A1R5G5B5, X1R5G5B5 */
+                    v = p[x * 2] | p[x * 2 + 1] << 8;
+                    o[0] = ((v >> 10) & 31) * 255 / 31; o[1] = ((v >> 5) & 31) * 255 / 31; o[2] = (v & 31) * 255 / 31;
+                    o[3] = t->format == 24 || (v >> 15) ? 255 : 0;
+                    break;
+                case 23: /* R5G6B5 */
+                    v = p[x * 2] | p[x * 2 + 1] << 8;
+                    o[0] = ((v >> 11) & 31) * 255 / 31; o[1] = ((v >> 5) & 63) * 255 / 63; o[2] = (v & 31) * 255 / 31; o[3] = 255;
+                    break;
+                case 28: /* A8 */
+                    o[0] = o[1] = o[2] = 0; o[3] = p[x];
+                    break;
+                case 50: /* L8 */
+                    o[0] = o[1] = o[2] = p[x]; o[3] = 255;
+                    break;
+                default:
+                    o[0] = 255; o[1] = 0; o[2] = 255; o[3] = 255; /* unknown format: magenta */
+                    break;
+                }
             }
         }
+        pixels = rgba;
+        layout = GL_RGBA;
     }
-    free(src);
-    if (!t->gl)
-        glGenTextures(1, &t->gl);
+    glGenTextures(1, &t->gl);
     glBindTexture(GL_TEXTURE_2D, t->gl);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)t->width, (GLsizei)t->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-    free(rgba);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)t->width, (GLsizei)t->height, 0, layout, GL_UNSIGNED_BYTE, pixels);
+    GLenum error = glGetError();
+    if (error) {
+        static unsigned reported;
+        if (reported++ < 20)
+            trace("# glTexImage2D %ux%u failed: GL error %04x (%llu KiB uploaded)", t->width, t->height,
+                  (unsigned)error, (unsigned long long)(gpu_bytes >> 10));
+    }
+    t->gpu_bytes = (uint32_t)out_bytes;
+    gpu_bytes += out_bytes;
     t->dirty = 0;
 }
 
 void render_texture_free(RenderTexture *t) {
     if (!t->gl) return;
     gl_enter();
-    glDeleteTextures(1, &t->gl);
+    gpu_forget(t);
     gl_leave();
-    t->gl = 0;
 }
 
 void render_texture(uint32_t stage, RenderTexture *t) {
@@ -382,6 +440,7 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
         if (bound->dirty || !bound->gl)
             upload(bound);
         bound->drawn++;
+        bound->used_frame = d3d_frames;
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, bound->gl);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_linear ? GL_LINEAR : GL_NEAREST);
