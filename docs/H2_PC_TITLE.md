@@ -95,6 +95,16 @@ Medido con el tiempo de host por API y método COM, y con la marca `first busy f
 
 **Objetivo cumplido:** la Vita real llega al título en unos 39 s. Al principio no llegaba nunca. Lo que más pesa ahora es `ReadFile`, que incluye la música en *streaming* y las cargas posteriores al título, y el propio código traducido.
 
+## Primera pelea en la Vita real (25 oct 2026)
+
+El usuario jugó con los botones, sin límite de tiempo, y salió con START + SELECT: título → menú → Vs Com → pelea. Todo se vio correctamente (título a los 29 s, unas 52 FPS durante unos 13 800 fotogramas), pero tras un rato de pelea **desaparecieron sprites y el combate se ralentizó** (los últimos 240 fotogramas tardaron 23,7 s). Causas, según la traza:
+
+- `texture upload 256x256: out of memory`: cada subida pedía dos `malloc`, que fragmentaban el heap de C de 32 MiB hasta fallar. Ahora reutiliza dos búferes que crecen hasta la textura más grande.
+- Las texturas subidas no salían nunca de la GPU, y en pelea el juego rota muchos sprites. Ahora hay un presupuesto de 40 MiB en la GPU y se descartan las texturas dibujadas hace más tiempo; si se vuelven a necesitar, se suben de nuevo desde su copia. En PC se puede probar con `T123_GPU_BUDGET_MB`: con 16 MiB llega a la pelea.
+- El *pool* de texturas comprimidas creció a 53 MiB (7 bloques de CDRAM).
+
+**Carrera rara en PC:** alrededor de 1 de cada 5 ejecuciones hasta la pelea se cortaba con «invalid parameter» del CRT. Se rastreó hasta 0x465370: un objeto busca su acción (`[this+0x13c]`) en su mapa de patrones (`[this+0x160]`), la clave no está y desreferencia `end()`. Se descartaron la atomicidad de `lock xadd` (ya es atómica) y la de `xchg` (solo afecta a la pila). [game_checks.c](../recomp/host/game_checks.c) intercepta esa función y, si vuelve a pasar, registra el objeto, su vtable, la acción y las claves del mapa.
+
 Detalle del lector de solo lectura: los archivos de solo lectura ya no pasan por stdio, porque stdio vaciaba y rellenaba su búfer en cada `fseek`. Ahora el posicionamiento solo cambia un número, las lecturas pequeñas salen de un bloque de 32 KiB en caché y las grandes van directas a la tarjeta (`sceIoPread`). Los archivos ociosos se siguen reutilizando. En PC, hasta la pelea: `SetFilePointer` 0 ms y 413 000 `ReadFile` en 210 ms. Para probar en PC la ruta de texturas de la Vita existe `python recomp/build_host.py --packed-textures`.
 
 **Problema abierto:** con compresión asíncrona, 2 de 6 ejecuciones en PC hasta la pelea fallaron con «invalid parameter» del CRT dentro de `free` (0x81ff7c, llamado desde 0x402970), en los fotogramas 2074 y 2286. Las ejecuciones sin compresión (0 de 6) y con compresión síncrona (`T123_PACK_SYNC=1`, 0 de 1) no fallaron. Es una carrera que aún no he localizado. `HeapFree` y `HeapSize` registran ahora cualquier puntero que no sea un bloque vivo, con su cabecera.
