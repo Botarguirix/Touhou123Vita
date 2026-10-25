@@ -72,6 +72,23 @@ void render_keyboard_state(uint8_t dik[256]) {
     SceCtrlData pad;
     memset(&pad, 0, sizeof pad);
     sceCtrlPeekBufferPositive(0, &pad, 1);
+    /* every change goes to the trace: the idle game left the title on its own on the
+       Vita but not on PC, so check what the pad reports */
+    static uint32_t last = 0xFFFFFFFFu;
+    if (pad.buttons != last) {
+        trace("# vita buttons: %08x (frame %llu)", (unsigned)pad.buttons, d3d_frames);
+        last = pad.buttons;
+    }
+    /* START + SELECT held for 2 s ends the run and writes the trace, capture and result */
+    static uint64_t held_since;
+    uint32_t combo = SCE_CTRL_START | SCE_CTRL_SELECT;
+    if ((pad.buttons & combo) == combo) {
+        uint64_t now = platform_ticks_us();
+        if (!held_since) held_since = now;
+        else if (now - held_since > 2000000u) host_exit(NULL, 0, "START+SELECT pressed");
+    } else {
+        held_since = 0;
+    }
     dik_state_from_vita_buttons(pad.buttons, dik);
 }
 #else
