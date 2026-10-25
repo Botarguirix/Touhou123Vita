@@ -26,7 +26,11 @@ edita solo los archivos que indica la tarea y termina con el informe final.
 | T10 | Pruebas del heap guest | Media | Hecha (24 oct 2026), integrada; sus dos desbordamientos están corregidos en `support.c` |
 | T11 | Diagnóstico del fallo de Vita3K en la carga | — | Cancelada (24 oct 2026): era la textura sin memoria (`memcpy` desde NULL); con las texturas comprimidas Vita3K llega a 3 600 fotogramas |
 
-### Reglas comunes de T7–T11 (fase H2/H3)
+| T12 | Mezclador de audio para DirectSound | Alta, audio | Pendiente |
+| T13 | Informe de trazas (`trace_report.py`) | Media, medición de la carga en Vita | Pendiente |
+| T14 | Recursión infinita al cerrar tras fallar `CreateDevice` | Baja | Pendiente |
+
+### Reglas comunes de T7–T14 (fases H2–H4)
 
 - Claude es dueño de `recomp/`. Estas tareas **crean archivos nuevos** dentro de `recomp/host/` con una interfaz C fija. **No edites** `kernel32.c`, `other.c`, `media.c`, `win32.h` ni ningún archivo existente: Claude conecta tu módulo con la capa Win32 al integrarlo. Si tu módulo necesita algo de otro archivo, explícalo en el informe.
 - El C de `recomp/host/` es C11 (`-std=gnu11 -Wall`), portable a PC (MinGW, `C:\msys64\ucrt64\bin\gcc.exe`) y a Vita (`C:\vitasdk\bin\arm-vita-eabi-gcc.exe`). No uses `_Thread_local`, porque en VitaSDK no es local a cada hilo; tampoco uses APIs de Windows.
@@ -268,3 +272,77 @@ void dik_state_from_vita_buttons(uint32_t buttons, uint8_t state[256]);
 **Archivos que puedes crear:** `docs/VITA3K_LOAD_CRASH.md`.
 
 **Entrega.** Las líneas relevantes del registro, la reproducibilidad, los issues relacionados con su enlace, una conclusión (emulador o nuestro) con su nivel de confianza y el cambio propuesto si lo hay.
+
+---
+
+## T12 — Mezclador de audio para DirectSound
+
+**Objetivo.** Hoy `IDirectSoundBuffer` acepta `Lock`, `Play` y `SetVolume`, pero no suena nada: `GetCurrentPosition` siempre devuelve 0 (ver `recomp/host/media.c`). Hace falta un mezclador en C, sin dependencias, que Claude conectará a SDL2 en PC y a `sceAudioOut` en Vita.
+
+**Interfaz que debes entregar** (`recomp/host/audio_mix.h`):
+
+```c
+#include <stdint.h>
+typedef struct AudioVoice AudioVoice;
+/* Formato del buffer como WAVEFORMATEX: canales 1-2, 8 bits (sin signo) o 16 bits (con signo). */
+AudioVoice *audio_voice_new(const uint8_t *pcm, uint32_t bytes, uint32_t rate, int channels, int bits);
+void audio_voice_free(AudioVoice *v);
+void audio_voice_play(AudioVoice *v, int looping);      /* DSBPLAY_LOOPING */
+void audio_voice_stop(AudioVoice *v);
+void audio_voice_set_position(AudioVoice *v, uint32_t byte_offset);
+void audio_voice_set_volume(AudioVoice *v, int32_t centibels); /* DSBVOLUME: -10000..0 */
+void audio_voice_set_pan(AudioVoice *v, int32_t centibels);    /* DSBPAN: -10000..10000 */
+void audio_voice_set_frequency(AudioVoice *v, uint32_t hz);    /* 0 = la original */
+/* Cursores en bytes del buffer, como GetCurrentPosition: play y write. */
+void audio_voice_position(const AudioVoice *v, uint32_t *play, uint32_t *write);
+int audio_voice_playing(const AudioVoice *v);
+/* Mezcla todas las voces activas en out (estéreo intercalado, int16, out_rate Hz). Hilo seguro:
+   el callback de audio llama a esto mientras el juego toca las voces desde otros hilos. */
+void audio_mix(int16_t *out, uint32_t frames, uint32_t out_rate);
+```
+
+**Pasos.**
+1. Remuestreo lineal de la frecuencia de cada voz a `out_rate`. La conversión de centibelios a ganancia sigue la de DirectSound (`10^(cB/2000)`), y el *pan* atenúa solo el canal contrario. Satura a int16.
+2. Las voces en bucle dan la vuelta al final del buffer; las otras se paran solas. El juego escribe en el buffer mientras suena (streaming de música con `Lock` y `Unlock` por mitades): el mezclador lee siempre del puntero `pcm` que se le dio, sin copiarlo.
+3. Un mutex propio (pthread). No uses `_Thread_local`.
+
+**Archivos que puedes crear:** `recomp/host/audio_mix.h`, `recomp/host/audio_mix.c`, `tests/audio_mix_harness.c`, `tests/test_audio_mix.py`.
+
+**Verificación.** `python -m unittest tests.test_audio_mix -v` pasa. Debe cubrir: un seno de 1 kHz a 22 050 Hz mezclado a 48 000 Hz que conserva la frecuencia (con cruces por cero o FFT simple), volumen -600 cB ≈ 0,5 de amplitud, *pan* extremo, bucle frente a no bucle, cursores que avanzan según los *frames* mezclados, y saturación. Además, compila para ARM.
+
+**Entrega.** Decisiones de remuestreo y ganancia con su justificación, y el resultado literal de las pruebas.
+
+---
+
+## T13 — Informe de trazas (`trace_report.py`)
+
+**Objetivo.** Cada prueba en la Vita produce un `recomp-trace.log`. Hace falta una herramienta que lo resuma igual para PC y para Vita y que compare dos ejecuciones, para medir cuánto mejora la carga entre builds.
+
+**Formato de entrada** (líneas que ya existen; mira una traza real en `artifacts/recomp/<sha>/run/host-trace.log`):
+
+- `# frame N: D draws so far (T ms)` cada 60 fotogramas;
+- `# first busy frame (>= 10 draws, title reached): frame N at T ms`;
+- `# before vitaGL: …`, `# after vitaGL: …`, `# memory: …`, `# frames presented: …; textures live … KiB, peak … KiB`;
+- el resumen `#   <llamadas> <API> (<ms> ms)` y `#   <llamadas> <Clase>::<Método> (<ms> ms)`;
+- `# thread N (start X): …` (fallos de hilos) y `# exit: …`.
+
+**Salida.** En texto (por defecto) y en JSON (`--json`): tiempo hasta el título, *draws* por fotograma por tramos, las 15 APIs y métodos COM con más tiempo, memoria, fallos de hilos y motivo de salida. Con `--compare a.log b.log`, las diferencias. Lee el archivo como bytes y decodifica en Shift-JIS con `errors="replace"`, porque hay títulos en CP932.
+
+**Archivos que puedes crear:** `tools/trace_report.py`, `tests/test_trace_report.py` (con trazas sintéticas pequeñas escritas por la propia prueba; no subas trazas reales).
+
+**Verificación.** `python -m unittest tests.test_trace_report -v` pasa. Ejecuta además la herramienta sobre las trazas reales de `artifacts/recomp/<sha>/run/host-trace.log` y de `vita/run/recomp-trace.log` si existen, y pega la salida en el informe.
+
+---
+
+## T14 — Recursión infinita al cerrar tras fallar `CreateDevice`
+
+**Objetivo.** Cuando `IDirect3D9::CreateDevice` falla, el juego muestra «D3Dデバイスの作成に失敗» y, al cerrarse, la función 0x43a880 (un borrado recursivo de árbol rojo-negro, el destructor de un `std::map`/`std::set` de MSVC) entra en recursión infinita. Recorre memoria a cero y desborda la pila del host. Pasó en Vita3K y en la Vita real (`psp2dmp`). Hay que entender por qué el árbol está mal en ese camino.
+
+**Pasos.**
+1. Encuentra en el PE quién llama a 0x43a880 en el camino de salida tras el error (`MessageBoxA` del error y luego `ExitProcess` o el retorno de `WinMain`): el destructor global, el objeto y la dirección del árbol.
+2. Mira si el árbol se usa antes de construirse (orden de inicialización de globales, `atexit`) o si depende de algo que nuestro host no hace (por ejemplo, `MessageBoxA` devuelve al instante, o `HeapAlloc` devuelve memoria que Windows pondría a cero).
+3. Si puedes, reprodúcelo en PC forzando el fallo. Tienes permiso para añadir **solo en tu rama** una variable `T123_FAIL_CREATEDEVICE` en `recomp/host/d3d9.c`; Claude decidirá si se queda.
+
+**Archivos que puedes crear o editar:** `docs/EXIT_CRASH.md` y, solo para reproducirlo, `recomp/host/d3d9.c`.
+
+**Entrega.** La cadena de llamadas con direcciones, la causa con su nivel de confianza y el arreglo propuesto en el host.
