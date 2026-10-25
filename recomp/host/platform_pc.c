@@ -27,3 +27,5 @@ void platform_memory_report(char *out, size_t size) { snprintf(out, size, "(no m
 
 void *platform_texture_alloc(size_t bytes) { return calloc(1, bytes); }
 void platform_texture_free(void *p) { free(p); }
+
+void platform_texture_shrink(void *p, size_t bytes) { (void)p; (void)bytes; } /* calloc blocks stay whole */

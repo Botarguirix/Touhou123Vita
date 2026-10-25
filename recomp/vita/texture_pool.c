@@ -119,9 +119,25 @@ void *platform_texture_alloc(size_t bytes) {
                   (unsigned)bytes, (unsigned)(live >> 10), (unsigned)(peak >> 10));
     }
     pthread_mutex_unlock(&lock);
-    if (result)
-        memset(result, 0, bytes);
-    return result;
+    return result; /* not zeroed: every caller overwrites it (see win32.h) */
+}
+
+/* Gives the tail of a block back (zlib output is allocated for its worst case and
+   trimmed to the real size). */
+void platform_texture_shrink(void *p, size_t bytes) {
+    if (!p)
+        return;
+    Block *b = (Block *)p - 1;
+    size_t keep = (bytes + sizeof(Block) + ALIGN - 1) & ~(size_t)(ALIGN - 1);
+    pthread_mutex_lock(&lock);
+    if (b->size >= keep + MIN_SPLIT) {
+        Block *rest = (Block *)((uint8_t *)b + keep);
+        rest->size = b->size - keep;
+        live -= rest->size;
+        b->size = keep;
+        insert_free(rest);
+    }
+    pthread_mutex_unlock(&lock);
 }
 
 void platform_texture_free(void *p) {

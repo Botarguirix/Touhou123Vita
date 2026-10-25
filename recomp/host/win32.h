@@ -41,9 +41,11 @@ extern char trace_path[256];
 void platform_log(const char *line);   /* mirrors trace lines (Vita: on-screen log) */
 uint64_t platform_ticks_us(void);      /* monotonic microseconds */
 void platform_sleep_ms(uint32_t ms);
-/* Texture storage (zeroed): host heap on PC, a CDRAM pool on the Vita. */
+/* Texture storage: zeroed calloc on PC (unpacked textures start blank), an unzeroed
+   pool (user RAM + CDRAM chunks) on the Vita, whose callers overwrite every byte. */
 void *platform_texture_alloc(size_t bytes);
 void platform_texture_free(void *p);
+void platform_texture_shrink(void *p, size_t bytes); /* give back the tail of a block */
 #ifdef __vita__
 void texture_pool_reserve(void);      /* before vitaGL takes the remaining memory */
 void platform_display_taken(void);    /* the renderer owns the screen: stop the text log */

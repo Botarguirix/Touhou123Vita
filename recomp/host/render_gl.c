@@ -270,7 +270,7 @@ void render_fvf(uint32_t value) { fvf = value; }
    again from its stored copy the next time it is drawn. */
 extern RenderTexture textures[RENDER_MAX_TEXTURES];
 #ifdef __vita__
-static uint64_t gpu_budget = 40u << 20;
+static uint64_t gpu_budget = 52u << 20; /* of vitaGL's 64 MiB of CDRAM; 40 thrashed in fights */
 #else
 static uint64_t gpu_budget = UINT64_MAX; /* T123_GPU_BUDGET_MB to test the Vita's eviction */
 #endif

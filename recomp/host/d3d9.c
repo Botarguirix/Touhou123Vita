@@ -143,12 +143,18 @@ static uint32_t texture_new(uint32_t w, uint32_t h, uint32_t format) {
    draws only ~12 MiB of them in the first minute (measured on PC); zlib level 1
    packs all of them in ~16 MiB, so the Vita keeps them deflated and inflates on use. */
 #ifdef T123_PACKED_TEXTURES
+/* Straight into texture storage, sized for the worst case and then trimmed: a
+   temporary malloc of up to 2.4 MiB per texture failed in long fights on the Vita
+   (its C heap is 32 MiB). */
 static uint8_t *deflate_texture(const uint8_t *src, uLong bytes, uLongf *zlen) {
     *zlen = compressBound(bytes);
-    uint8_t *tmp = malloc(*zlen), *packed = NULL;
-    if (tmp && compress2(tmp, zlen, src, bytes, 1) == Z_OK && (packed = platform_texture_alloc(*zlen)))
-        memcpy(packed, tmp, *zlen);
-    free(tmp);
+    uint8_t *packed = platform_texture_alloc(*zlen);
+    if (packed && compress2(packed, zlen, src, bytes, 1) != Z_OK) {
+        platform_texture_free(packed);
+        packed = NULL;
+    }
+    if (packed)
+        platform_texture_shrink(packed, *zlen);
     return packed;
 }
 /* Under texture_lock: replace the stored pixels of t. */
@@ -196,7 +202,7 @@ static void *pack_worker(void *arg) {
         }
         pending_bytes -= job.bytes;
         pthread_mutex_unlock(&texture_lock);
-        free(job.raw);
+        platform_texture_free(job.raw);
     }
     return NULL;
 }
@@ -221,7 +227,7 @@ static void texture_store(RenderTexture *t, const uint8_t *src) {
     t->gen = ++generations; /* unique across slot reuse: earlier jobs are now stale */
     static int sync_only = -1; /* T123_PACK_SYNC=1: compress in place (diagnosis) */
     if (sync_only < 0) sync_only = getenv("T123_PACK_SYNC") != NULL;
-    if (!sync_only && pending_bytes + bytes <= PENDING_LIMIT && job_tail - job_head < MAX_JOBS && (raw = malloc(bytes))) {
+    if (!sync_only && pending_bytes + bytes <= PENDING_LIMIT && job_tail - job_head < MAX_JOBS && (raw = platform_texture_alloc(bytes))) {
         memcpy(raw, src, bytes);
         jobs[job_tail++ % MAX_JOBS] = (PackJob){(unsigned)(t - textures), t->gen, raw, (uint32_t)bytes};
         pending_bytes += bytes;
