@@ -48,6 +48,14 @@ Los módulos de Codex ya están conectados a la capa Win32:
 
 **Comprobado en PC:** con `T123_PRESS=700-706:29`, la tecla Z queda pulsada en los fotogramas 700–706. En el fotograma 1 200 se ve el **menú principal** (Story Mode, Arcade Mode, Vs Com…). En la misma ejecución sin pulsación, sigue el título.
 
+## H3: primera imagen en la Vita real (24 oct 2026)
+
+- `render_gl.c` compila en las dos plataformas; en Vita usa vitaGL (instalado con `vdpm`, junto con vitaShaRK, mathneon, taihen y SceShaccCgExt). Los shaders se compilan en la consola con `ur0:data/libshacccg.suprx`.
+- **Error encontrado:** `vglInitWithCustomSizes` no devuelve si tuvo éxito, sino si tuvo que bajar la resolución (`GL_FALSE` tras un arranque normal). Al tratarlo como un fallo, el juego reintentaba `CreateDevice`, el segundo `vglInit` sí fallaba porque vitaGL ya estaba iniciado, y aparecía «D3Dデバイスの作成に失敗».
+- **Memoria (medido en la Vita):** antes de vitaGL quedan libres 32 MiB de RAM, 110 MiB de CDRAM y 26 MiB de memoria física contigua; después, 11, 14 y 10 MiB. vitaGL recibe *pools* fijos: 16 MiB de RAM, 80 MiB de CDRAM y 16 MiB de memoria contigua. El *pool* de texturas comprimidas es de 24 MiB y llega a un máximo de 13,1 MiB en 60 s.
+- **Resultado:** 3 600 fotogramas y salida limpia. La captura muestra la pantalla de carga («東方Project / 12.3th Project Shrine Maiden / Presented by…»), centrada en 4:3.
+- **Pendiente:** en 60 s todavía no llega al título (1 *draw* por fotograma). En Vita3K, que corre en un PC más rápido, llegaba hacia el fotograma 1 200. Falta medir dónde se va el tiempo de carga: lectura de los DAT, compresión zlib o código traducido.
+
 ## Pendiente (no forma parte de H2)
 
 - Efectos D3DX reales (la función fija basta para el título), FreeType en Vita y salida de audio.
