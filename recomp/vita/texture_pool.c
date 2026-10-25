@@ -38,29 +38,82 @@ void texture_pool_reserve(void) {
     pthread_mutex_unlock(&lock);
 }
 
+/* Under lock: address-ordered insert of a free block, merging with touching neighbours. */
+static void insert_free(Block *b) {
+    Block *prev = NULL, *next = free_list;
+    while (next && next < b) { prev = next; next = next->next; }
+    if (next && (uint8_t *)b + b->size == (uint8_t *)next) {
+        b->size += next->size;
+        next = next->next;
+    }
+    b->next = next;
+    if (prev && (uint8_t *)prev + prev->size == (uint8_t *)b) {
+        prev->size += b->size;
+        prev->next = next;
+    } else if (prev) {
+        prev->next = b;
+    } else {
+        free_list = b;
+    }
+}
+
+static void *take(size_t need) {
+    Block **link = &free_list;
+    for (Block *b = free_list; b; link = &b->next, b = b->next) {
+        if (b->size < need)
+            continue;
+        if (b->size - need >= MIN_SPLIT) {
+            Block *rest = (Block *)((uint8_t *)b + need);
+            rest->size = b->size - need;
+            rest->next = b->next;
+            *link = rest;
+            b->size = need;
+        } else {
+            *link = b->next;
+        }
+        live += b->size;
+        if (live > peak) peak = live;
+        return b + 1;
+    }
+    return NULL;
+}
+
+/* The first 24 MiB ran out once the game went past the title (hardware): the pool
+   grows by 4 MiB chunks, from CDRAM first, then from user RAM while 8 MiB stay free
+   for thread stacks and file buffers. */
+enum { CHUNK = 4u << 20, USER_RESERVE = 8u << 20 };
+static int grow(void) {
+    static unsigned chunks;
+    SceKernelFreeMemorySizeInfo info = {sizeof info};
+    sceKernelGetFreeMemorySize(&info);
+    SceKernelMemBlockType types[2] = {SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW};
+    int allowed[2] = {info.size_cdram >= CHUNK, info.size_user >= CHUNK + USER_RESERVE};
+    for (unsigned k = 0; k < 2; k++) {
+        if (!allowed[k])
+            continue;
+        void *base = NULL;
+        SceUID id = sceKernelAllocMemBlock("t123_textures+", types[k], CHUNK, NULL);
+        if (id < 0 || sceKernelGetMemBlockBase(id, &base) < 0)
+            continue;
+        Block *b = base;
+        b->size = CHUNK;
+        insert_free(b);
+        chunks++;
+        trace("# texture pool: +%u MiB from %s (chunk %u, live %u KiB)", CHUNK >> 20,
+              k ? "user RAM" : "CDRAM", chunks, (unsigned)(live >> 10));
+        return 0;
+    }
+    return -1;
+}
+
 void *platform_texture_alloc(size_t bytes) {
     size_t need = (bytes + sizeof(Block) + ALIGN - 1) & ~(size_t)(ALIGN - 1);
     void *result = NULL;
     pthread_mutex_lock(&lock);
     if (pool || pool_init() == 0) {
-        Block **link = &free_list;
-        for (Block *b = free_list; b; link = &b->next, b = b->next) {
-            if (b->size < need)
-                continue;
-            if (b->size - need >= MIN_SPLIT) {
-                Block *rest = (Block *)((uint8_t *)b + need);
-                rest->size = b->size - need;
-                rest->next = b->next;
-                *link = rest;
-                b->size = need;
-            } else {
-                *link = b->next;
-            }
-            live += b->size;
-            if (live > peak) peak = live;
-            result = b + 1;
-            break;
-        }
+        result = take(need);
+        if (!result && need <= CHUNK && grow() == 0)
+            result = take(need);
         if (!result)
             trace("# texture pool exhausted: request %u bytes, live %u KiB, peak %u KiB",
                   (unsigned)bytes, (unsigned)(live >> 10), (unsigned)(peak >> 10));
@@ -77,20 +130,6 @@ void platform_texture_free(void *p) {
     Block *b = (Block *)p - 1;
     pthread_mutex_lock(&lock);
     live -= b->size;
-    Block *prev = NULL, *next = free_list;
-    while (next && next < b) { prev = next; next = next->next; }
-    if (next && (uint8_t *)b + b->size == (uint8_t *)next) {
-        b->size += next->size;
-        next = next->next;
-    }
-    b->next = next;
-    if (prev && (uint8_t *)prev + prev->size == (uint8_t *)b) {
-        prev->size += b->size;
-        prev->next = next;
-    } else if (prev) {
-        prev->next = b;
-    } else {
-        free_list = b;
-    }
+    insert_free(b);
     pthread_mutex_unlock(&lock);
 }
