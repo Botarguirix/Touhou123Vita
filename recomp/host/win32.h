@@ -20,15 +20,24 @@
 /* Guest memory map, identical on PC and Vita. Everything the guest can dereference
  * lies below GUEST_WINDOW (128 MiB), so on the Vita it is one memory block:
  *   0x00110000 stack (2 MiB)      0x00400000 image (th123.exe, to 0x008A4000)
- *   0x00900000 TIB, PEB           0x01000000 heap (96 MiB)
- *   0x07000000 VirtualAlloc (16 MiB)
+ *   0x00900000 TIB, PEB           0x01000000 heap (96 MiB; Vita 80 MiB)
+ *   0x07000000 VirtualAlloc (16 MiB; Vita: 4 MiB at 0x06000000)
+ *   Vita only: 0x06400000-0x08000000 (28 MiB) holds host texture storage. The guest
+ *   heap peaked at ~57 MiB in fights and VirtualAlloc was never used, while the
+ *   compressed-texture pool ran out of memory after a fight (hardware).
  * Fake call targets and module handles sit above the window: they are compared
  * and called, never read. */
 enum {
     GUEST_STACK_BASE = 0x00110000u, GUEST_STACK_SIZE = 0x00200000u,
     GUEST_TIB = 0x00900000u, GUEST_PEB = 0x00901000u,
+#ifdef __vita__
+    GUEST_HEAP_BASE = 0x01000000u, GUEST_HEAP_SIZE = 0x05000000u,
+    GUEST_VIRTUAL_BASE = 0x06000000u, GUEST_VIRTUAL_SIZE = 0x00400000u,
+    HOST_TEXTURE_BASE = 0x06400000u, HOST_TEXTURE_SIZE = 0x01C00000u,
+#else
     GUEST_HEAP_BASE = 0x01000000u, GUEST_HEAP_SIZE = 0x06000000u,
     GUEST_VIRTUAL_BASE = 0x07000000u, GUEST_VIRTUAL_SIZE = 0x01000000u,
+#endif
     GUEST_FAKE_BASE = 0x7F000000u,
     FAKE_MODULE_KERNEL32 = 0x7C800000u, FAKE_MODULE_OTHER = 0x7C900000u,
 };

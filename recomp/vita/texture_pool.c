@@ -32,9 +32,17 @@ static int pool_init(void) {
     return 0;
 }
 
+static void insert_free(Block *b);
+
 void texture_pool_reserve(void) {
     pthread_mutex_lock(&lock);
-    if (!pool) pool_init();
+    if (!pool && pool_init() == 0) {
+        /* the unused top of the guest window (win32.h) joins the pool */
+        Block *b = (Block *)G(HOST_TEXTURE_BASE);
+        b->size = HOST_TEXTURE_SIZE;
+        insert_free(b);
+        trace("# texture pool: +%u MiB from the guest window", HOST_TEXTURE_SIZE >> 20);
+    }
     pthread_mutex_unlock(&lock);
 }
 
