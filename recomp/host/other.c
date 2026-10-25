@@ -257,6 +257,12 @@ API(GetGlyphOutlineA) {
     current_font(dc, &height, &weight);
     GlyphMetrics m;
     uint32_t r = glyph_gray4(height, weight, wide, &m, size && buf ? (uint8_t *)G(buf) : NULL, size && buf ? size : 0);
+    /* GDI reports blank glyphs (spaces) as a 1x1 box with no bits; the game divides
+       the size by the box height (0x411e6a) and its loading thread died on 0x0. */
+    if (r != 0xFFFFFFFFu && (!m.black_box_x || !m.black_box_y)) {
+        m.black_box_x = m.black_box_y = 1;
+        r = 0;
+    }
     if (gm) {
         wr32(gm + 0, m.black_box_x); wr32(gm + 4, m.black_box_y);
         wr32(gm + 8, (uint32_t)m.origin_x); wr32(gm + 12, (uint32_t)m.origin_y);

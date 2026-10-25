@@ -181,10 +181,12 @@ static uint32_t texture_release(uint32_t o) {
     uint32_t n = rd32(o + 4);
     if (n) wr32(o + 4, --n);
     if (!n) {
-        pthread_mutex_lock(&texture_lock);
         unsigned i = com_index(o);
         RenderTexture *t = &textures[i];
+        /* GL lock before the texture lock, never inside it: drawing holds the GL lock
+           and then reads the pixels under the texture lock (a deadlock seen on PC). */
         render_texture_free(t);
+        pthread_mutex_lock(&texture_lock);
         heap_free(t->pixels);
         texture_live -= t->stored;
         platform_texture_free(t->data);

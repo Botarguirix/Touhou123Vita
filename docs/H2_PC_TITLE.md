@@ -48,6 +48,28 @@ Los módulos de Codex ya están conectados a la capa Win32:
 
 **Comprobado en PC:** con `T123_PRESS=700-706:29`, la tecla Z queda pulsada en los fotogramas 700–706. En el fotograma 1 200 se ve el **menú principal** (Story Mode, Arcade Mode, Vs Com…). En la misma ejecución sin pulsación, sigue el título.
 
+## Primera pelea en PC (24 oct 2026)
+
+Ejecución sin intervención manual, con pulsaciones por script:
+
+```powershell
+$z = (1150..1900 | ? { $_ % 60 -eq 10 } | % { "$_-$($_+5):29" }) -join ','
+$env:T123_FRAMES = '2600'
+$env:T123_PRESS = "700-706:29,900-904:81,940-944:81,1000-1006:29,$z"   # Z, ↓, ↓, Z y luego Z cada segundo
+$env:T123_CAPTURE = '1100,1300,1500,1700,1950,2200,2400,2599'           # guarda frame-<n>.bmp
+```
+
+**Recorrido:** título → menú → Vs Com → selección de personaje (Reimu contra Sanae, controlada por la CPU) → **pelea** en el escenario del santuario. La pelea tiene el HUD completo: vida, reloj de clima (黄砂, 梅雨, 極光, 快晴), orbes de espíritu, cartas y contador de combo («4 HIT, Damage 714, Rate 78 %»). La CPU ataca y los golpes hacen daño. Salida limpia en el fotograma 2 600, con unas 120 *draw calls* por fotograma en pelea.
+
+Dos fallos encontrados por el camino:
+
+| Síntoma | Causa | Arreglo |
+|---|---|---|
+| El juego se quedaba congelado en el fotograma ~1 440 (selección de personaje) | El hilo de carga 0x43e5e0 moría con una división entre cero en 0x411e6a. El juego divide los bytes de `GetGlyphOutlineA` entre la altura del glifo, y para un espacio nuestro rasterizador daba una caja de 0×0 | Como GDI, se informa una caja de 1×1 sin bits ([other.c](../recomp/host/other.c)) |
+| Bloqueo mutuo posible entre el hilo que dibuja y el que libera texturas | `upload` toma el cerrojo GL y luego el de texturas; `Release` los tomaba en el orden contrario | `Release` libera la textura GL antes de tomar el cerrojo de texturas ([d3d9.c](../recomp/host/d3d9.c)) |
+
+En pelea quedan 301 MiB de texturas vivas en PC, porque se precargan todos los personajes. En la Vita eso cabe solo comprimido; hay que medirlo allí.
+
 ## H3: primera imagen en la Vita real (24 oct 2026)
 
 - `render_gl.c` compila en las dos plataformas; en Vita usa vitaGL (instalado con `vdpm`, junto con vitaShaRK, mathneon, taihen y SceShaccCgExt). Los shaders se compilan en la consola con `ur0:data/libshacccg.suprx`.

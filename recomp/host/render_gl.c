@@ -385,6 +385,22 @@ void render_present(void) {
         glReadPixels(0, 0, (GLsizei)capture_w, (GLsizei)capture_h, GL_RGBA, GL_UNSIGNED_BYTE, last_frame);
     platform_swap();
     gl_leave();
+#ifndef __vita__
+    /* T123_CAPTURE="n[,n...]" saves frame-<n>.bmp at those presented frames, so a
+       scripted run (T123_PRESS) can be checked screen by screen. */
+    const char *list = getenv("T123_CAPTURE");
+    for (const char *p = list; p && *p; ) {
+        char *end;
+        unsigned long long n = strtoull(p, &end, 10);
+        if (end == p) break;
+        if (n == d3d_frames) {
+            char name[64];
+            snprintf(name, sizeof name, "frame-%llu.bmp", n);
+            render_capture_bmp(name);
+        }
+        p = *end == ',' ? end + 1 : end;
+    }
+#endif
     render_pump_events();
 }
 
