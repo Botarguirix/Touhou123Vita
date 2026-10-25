@@ -1,8 +1,8 @@
 /* Fixed-function OpenGL implementation of render.h, shared by both platforms:
  *   PC    SDL2 window + desktop GL (vsync);
  *   Vita  vitaGL (H3), whose fixed-function emulation compiles its shaders at run
- *         time with ur0:data/libshacccg.suprx. The 640x480 game is scaled to 4:3
- *         in the middle of the 960x544 screen. */
+ *         time with ur0:data/libshacccg.suprx. The 640x480 game fills the 960x544
+ *         screen. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +30,9 @@ static int mag_linear, min_linear;
 
 /* -- platform glue: context, presentation, input ------------------------------------ */
 #ifdef __vita__
-enum { VITA_W = 960, VITA_H = 544, VIEW_W = 725, VIEW_X = (VITA_W - VIEW_W) / 2 };
+/* The 640x480 game is stretched to the whole 16:9 screen (the user's choice); set
+   VIEW_W to 725 for centred 4:3 with black side bars. */
+enum { VITA_W = 960, VITA_H = 544, VIEW_W = 960, VIEW_X = (VITA_W - VIEW_W) / 2 };
 /* vitaGL has no per-thread context, but it is not thread-safe: the device is created
    on one guest thread and two others draw, so every call goes through one lock. */
 static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -406,6 +408,7 @@ void render_present(void) {
 #ifdef __vita__
     /* The side bars of the 960x544 screen are outside the game's 4:3 area: clear them
        every frame, or each of vitaGL's display buffers keeps whatever was there. */
+    if (VIEW_X > 0) {
     GLfloat clear[4];
     glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
     glClearColor(0, 0, 0, 1);
@@ -415,6 +418,7 @@ void render_present(void) {
     glClear(GL_COLOR_BUFFER_BIT);
     glScissor(VIEW_X, 0, VIEW_W, VITA_H);
     glClearColor(clear[0], clear[1], clear[2], clear[3]);
+    }
 #endif
     platform_swap();
 #ifdef __vita__
