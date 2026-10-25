@@ -90,7 +90,12 @@ Medido con el tiempo de host por API y método COM, y con la marca `first busy f
 
 | Compresión de texturas en dos hilos de trabajo; la textura se lee de su copia sin comprimir hasta que termina | 13,1 s | **41,9 s** | `ReadFile` 18,9 s, `SetFilePointer` 8,8 s (unos 7 ms por posicionamiento) |
 
-Siguiente cambio, todavía sin medir en la Vita: los archivos de solo lectura ya no pasan por stdio, porque stdio vaciaba y rellenaba su búfer en cada `fseek`. Ahora el posicionamiento solo cambia un número, las lecturas pequeñas salen de un bloque de 32 KiB en caché y las grandes van directas a la tarjeta (`sceIoPread`). Los archivos ociosos se siguen reutilizando. En PC, hasta la pelea: `SetFilePointer` 0 ms y 413 000 `ReadFile` en 210 ms. Para probar en PC la ruta de texturas de la Vita existe `python recomp/build_host.py --packed-textures`.
+| Lector propio para los archivos de solo lectura (detallado abajo) | 12,1 s | **38,8 s** | `ReadFile` 31 s, pero con 262 000 lecturas (el juego ya avanza después del título). El *pool* de 24 MiB se llenó: cientos de `cannot store texture` |
+| El *pool* crece en bloques de 4 MiB (primero CDRAM, luego RAM), y vitaGL baja a 64 MiB de CDRAM | 12,2 s | **39,1 s** | Sin `cannot store`: máximo de 23,3 MiB, no hizo falta crecer. `ReadFile` 25,6 s |
+
+**Objetivo cumplido:** la Vita real llega al título en unos 39 s. Al principio no llegaba nunca. Lo que más pesa ahora es `ReadFile`, que incluye la música en *streaming* y las cargas posteriores al título, y el propio código traducido.
+
+Detalle del lector de solo lectura: los archivos de solo lectura ya no pasan por stdio, porque stdio vaciaba y rellenaba su búfer en cada `fseek`. Ahora el posicionamiento solo cambia un número, las lecturas pequeñas salen de un bloque de 32 KiB en caché y las grandes van directas a la tarjeta (`sceIoPread`). Los archivos ociosos se siguen reutilizando. En PC, hasta la pelea: `SetFilePointer` 0 ms y 413 000 `ReadFile` en 210 ms. Para probar en PC la ruta de texturas de la Vita existe `python recomp/build_host.py --packed-textures`.
 
 **Problema abierto:** con compresión asíncrona, 2 de 6 ejecuciones en PC hasta la pelea fallaron con «invalid parameter» del CRT dentro de `free` (0x81ff7c, llamado desde 0x402970), en los fotogramas 2074 y 2286. Las ejecuciones sin compresión (0 de 6) y con compresión síncrona (`T123_PACK_SYNC=1`, 0 de 1) no fallaron. Es una carrera que aún no he localizado. `HeapFree` y `HeapSize` registran ahora cualquier puntero que no sea un bloque vivo, con su cabecera.
 
