@@ -221,7 +221,10 @@ API(GetExitCodeThread) {
     wr32(ARG(c, 1), code);
     ret_stdcall(c, t != NULL, 2);
 }
-API(SetThreadPriority) { ret_stdcall(c, 1, 2); }
+API(SetThreadPriority) {
+    trace("SetThreadPriority(%08x, %d) from thread %08x", ARG(c, 0), (int32_t)ARG(c, 1), rd32(c->fs_base + 0x24));
+    ret_stdcall(c, 1, 2);
+}
 API(GetCurrentThreadId) { ret_stdcall(c, rd32(c->fs_base + 0x24), 0); }
 API(Sleep) { platform_sleep_ms(ARG(c, 0)); ret_stdcall(c, 0, 1); }
 
