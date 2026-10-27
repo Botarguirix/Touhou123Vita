@@ -29,7 +29,7 @@ VITA_LIBS = ROOT / "artifacts/vita-libs"  # zlib 1.2.3 built by third_party/vita
 RUNTIME, HOST, VITA = ROOT / "recomp/runtime", ROOT / "recomp/host", ROOT / "recomp/vita"
 LIBS = ["-lvitaGL", "-lvitashark", "-lSceShaccCgExt", "-lmathneon", "-ltaihen_stub", "-lSceShaccCg_stub",
         "-lSceKernelDmacMgr_stub", "-lSceGxm_stub", "-lSceCommonDialog_stub", "-lSceAppUtil_stub",
-        "-lSceSysmodule_stub", "-lSceIme_stub", "-lSceAppMgr_stub", "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
+        "-lSceSysmodule_stub", "-lSceIme_stub", "-lSceAppMgr_stub", "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceAudio_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
         "-lSceProcessmgr_stub", f"-L{VITA_LIBS / 'lib'}", "-lz", "-lstdc++", "-lpthread", "-lm", "-lgcc", "-lpthread"]
 
 
@@ -74,7 +74,7 @@ def main() -> None:
     header = [RUNTIME / "guest.h"]
     tasks = [(s, objs / (s.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for s in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]
-    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "glyph.c")]  # glyph.c: FreeType not in VitaSDK yet (vita/glyph_none.c)
+    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "glyph.c", "audio_out_sdl.c")]  # glyph.c: FreeType not in VitaSDK yet (vita/glyph_none.c)
     tasks += [(s, objs / ("host_" + s.stem + ".o"), host_flags, header + [HOST / "win32.h"])
               for s in host_sources + sorted(VITA.glob("*.c")) + [RUNTIME / "guest.c"]]
     started = time.monotonic()

@@ -1,8 +1,11 @@
 /* DirectInput8 and DirectSound8 objects created through CoCreateInstance.
  * Input: keyboard state is reported empty until the SDL mapping lands (F2.3).
- * Sound: buffers accept locks and play calls silently; audio output is F2.3. */
+ * Sound: buffers are voices of the mixer (audio_mix.c), played by audio_out_*.c. */
+#include "audio_mix.h"
 #include "com.h"
 #include "render.h"
+
+#include <pthread.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -34,9 +37,14 @@ API(DID_GetDeviceState) {
 }
 
 /* -- DirectSound8 -------------------------------------------------------------------- */
-typedef struct { uint32_t bytes, data; } SoundBuffer;
-static SoundBuffer buffers[512];
-static unsigned buffer_count = 1;
+/* Each buffer is a voice of the mixer (audio_mix.c, Codex T12) reading its PCM straight
+   from the guest heap; audio_out_*.c plays the mix. The buffer, its Buffer8 and 3D
+   interfaces share one slot, freed when the last of them is released. */
+typedef struct { uint32_t bytes, data, rate, block; AudioVoice *voice; unsigned objects, next_free; } SoundBuffer;
+enum { MAX_BUFFERS = 1024 };
+static SoundBuffer buffers[MAX_BUFFERS];
+static unsigned buffer_count = 1, free_buffer;
+static pthread_mutex_t sound_lock = PTHREAD_MUTEX_INITIALIZER;
 
 API(DS_GetCaps) {
     uint32_t p = ARG(c, 1), size = rd32(p);
@@ -45,10 +53,29 @@ API(DS_GetCaps) {
     ret_stdcall(c, S_OK, 2);
 }
 API(DS_CreateSoundBuffer) {
-    uint32_t desc = ARG(c, 1), bytes = rd32(desc + 8);
-    unsigned i = buffer_count < 512 ? buffer_count++ : 0;
-    buffers[i].bytes = bytes;
-    buffers[i].data = bytes ? heap_alloc(bytes, 1) : 0;
+    uint32_t desc = ARG(c, 1), bytes = rd32(desc + 8), wfx = rd32(desc + 16);
+    pthread_mutex_lock(&sound_lock);
+    unsigned i = free_buffer;
+    if (i) free_buffer = buffers[i].next_free;
+    else if (buffer_count < MAX_BUFFERS) i = buffer_count++;
+    pthread_mutex_unlock(&sound_lock);
+    if (!i) {
+        trace("# DirectSound: out of buffer slots");
+        ret_stdcall(c, E_FAIL, 4);
+        return;
+    }
+    SoundBuffer *b = &buffers[i];
+    memset(b, 0, sizeof *b);
+    b->bytes = bytes;
+    b->objects = 1;
+    b->data = bytes ? heap_alloc(bytes, 1) : 0; /* 0 bytes: the primary buffer, silent */
+    if (b->data && wfx) {
+        int channels = rd16(wfx + 2), bits = rd16(wfx + 14);
+        b->rate = rd32(wfx + 4);
+        b->block = rd16(wfx + 12);
+        b->voice = audio_voice_new((const uint8_t *)G(b->data), bytes, b->rate, channels, bits);
+        audio_out_start();
+    }
     wr32(ARG(c, 2), com_new(&dsbuffer_class, i, 0));
     ret_stdcall(c, S_OK, 4);
 }
@@ -61,23 +88,56 @@ static ComClass ds3dlistener_class = COM_CLASS(IDirectSound3DListener);
 
 API(DSB_QueryInterface) {
     uint32_t o = ARG(c, 0), iid = ARG(c, 1), out = ARG(c, 2), d1 = rd32(iid), r = 0;
+    unsigned i = com_index(o);
     if (d1 == 0x279AFA85u) {              /* IDirectSoundBuffer */
         wr32(o + 4, rd32(o + 4) + 1);
         r = o;
     } else if (d1 == 0x6825A449u) {       /* IDirectSoundBuffer8: same buffer, extended vtable */
-        r = com_new(&dsbuffer8_class, com_index(o), 0);
+        r = com_new(&dsbuffer8_class, i, 0);
     } else if (d1 == 0x279AFA86u) {       /* IDirectSound3DBuffer */
-        r = com_new(&ds3dbuffer_class, com_index(o), 0);
+        r = com_new(&ds3dbuffer_class, i, 0);
     } else if (d1 == 0x279AFA84u) {       /* IDirectSound3DListener */
-        r = com_new(&ds3dlistener_class, com_index(o), 0);
+        r = com_new(&ds3dlistener_class, i, 0);
+    }
+    if (r && r != o) {
+        pthread_mutex_lock(&sound_lock);
+        buffers[i].objects++;
+        pthread_mutex_unlock(&sound_lock);
     }
     trace("IDirectSoundBuffer::QueryInterface(%08x-...) = %08x", d1, r);
     wr32(out, r);
     ret_stdcall(c, r ? S_OK : E_NOINTERFACE, 3);
 }
+API(DSB_Release) {
+    uint32_t o = ARG(c, 0), n = rd32(o + 4);
+    if (n) wr32(o + 4, --n);
+    if (!n) {
+        unsigned i = com_index(o);
+        SoundBuffer *b = &buffers[i];
+        pthread_mutex_lock(&sound_lock);
+        int last = b->objects && --b->objects == 0;
+        pthread_mutex_unlock(&sound_lock);
+        heap_free(o);
+        if (last) {
+            audio_voice_free(b->voice); /* stops reading the PCM before it is freed */
+            heap_free(b->data);
+            pthread_mutex_lock(&sound_lock);
+            memset(b, 0, sizeof *b);
+            b->next_free = free_buffer;
+            free_buffer = i;
+            pthread_mutex_unlock(&sound_lock);
+        }
+    }
+    ret_stdcall(c, n, 1);
+}
 API(DSB_Lock) {
     SoundBuffer *b = &buffers[com_index(ARG(c, 0))];
     uint32_t off = ARG(c, 1), n = ARG(c, 2), flags = ARG(c, 7);
+    if (flags & 1 /* DSBLOCK_FROMWRITECURSOR */ && b->voice) {
+        uint32_t play, write;
+        audio_voice_position(b->voice, &play, &write);
+        off = write % (b->bytes ? b->bytes : 1);
+    }
     if (flags & 2 /* DSBLOCK_ENTIREBUFFER */) { off = 0; n = b->bytes; }
     uint32_t first = off + n > b->bytes ? b->bytes - off : n;
     wr32(ARG(c, 3), b->data + off);
@@ -86,13 +146,39 @@ API(DSB_Lock) {
     if (ARG(c, 6)) wr32(ARG(c, 6), n > first ? n - first : 0);
     ret_stdcall(c, S_OK, 8);
 }
+API(DSB_Play) {
+    SoundBuffer *b = &buffers[com_index(ARG(c, 0))];
+    audio_voice_play(b->voice, ARG(c, 3) & 1 /* DSBPLAY_LOOPING */);
+    ret_stdcall(c, S_OK, 4);
+}
+API(DSB_Stop) { audio_voice_stop(buffers[com_index(ARG(c, 0))].voice); ret_stdcall(c, S_OK, 1); }
+API(DSB_SetVolume) { audio_voice_set_volume(buffers[com_index(ARG(c, 0))].voice, (int32_t)ARG(c, 1)); ret_stdcall(c, S_OK, 2); }
+API(DSB_SetPan) { audio_voice_set_pan(buffers[com_index(ARG(c, 0))].voice, (int32_t)ARG(c, 1)); ret_stdcall(c, S_OK, 2); }
+API(DSB_SetFrequency) { audio_voice_set_frequency(buffers[com_index(ARG(c, 0))].voice, ARG(c, 1)); ret_stdcall(c, S_OK, 2); }
+API(DSB_SetCurrentPosition) {
+    audio_voice_set_position(buffers[com_index(ARG(c, 0))].voice, ARG(c, 1));
+    ret_stdcall(c, S_OK, 2);
+}
+/* The write cursor runs ahead of the play cursor by one mixing period of the output
+   (~40 ms), so streamed music is refilled where it will not be played in between. */
 API(DSB_GetCurrentPosition) {
-    if (ARG(c, 1)) wr32(ARG(c, 1), 0);
-    if (ARG(c, 2)) wr32(ARG(c, 2), 0);
+    SoundBuffer *b = &buffers[com_index(ARG(c, 0))];
+    uint32_t play = 0, write = 0;
+    if (b->voice) {
+        audio_voice_position(b->voice, &play, &write);
+        if (play >= b->bytes) play = write = 0;
+        uint32_t ahead = b->rate / 25 * (b->block ? b->block : 1);
+        write = b->bytes ? (play + ahead) % b->bytes : 0;
+    }
+    if (ARG(c, 1)) wr32(ARG(c, 1), play);
+    if (ARG(c, 2)) wr32(ARG(c, 2), write);
     ret_stdcall(c, S_OK, 3);
 }
-API(DSB_GetStatus) { wr32(ARG(c, 1), 0); ret_stdcall(c, S_OK, 2); }
-
+API(DSB_GetStatus) {
+    SoundBuffer *b = &buffers[com_index(ARG(c, 0))];
+    wr32(ARG(c, 1), audio_voice_playing(b->voice) ? 1 /* DSBSTATUS_PLAYING */ : 0);
+    ret_stdcall(c, S_OK, 2);
+}
 /* -- CoCreateInstance -------------------------------------------------------------------- */
 static int guid_is(uint32_t g, uint32_t d1) { return rd32(g) == d1; }
 
@@ -128,10 +214,17 @@ void media_init(void) {
         com_bind(b, "Lock", DSB_Lock);
         com_bind(b, "GetCurrentPosition", DSB_GetCurrentPosition);
         com_bind(b, "GetStatus", DSB_GetStatus);
-        const char *buf_ok[] = {"Unlock", "Play", "Stop", "SetVolume", "SetPan", "SetFrequency", "SetCurrentPosition"};
-        for (unsigned i = 0; i < 7; i++) com_bind_ok(b, buf_ok[i]);
+        com_bind(b, "Release", DSB_Release);
+        com_bind(b, "Play", DSB_Play);
+        com_bind(b, "Stop", DSB_Stop);
+        com_bind(b, "SetVolume", DSB_SetVolume);
+        com_bind(b, "SetPan", DSB_SetPan);
+        com_bind(b, "SetFrequency", DSB_SetFrequency);
+        com_bind(b, "SetCurrentPosition", DSB_SetCurrentPosition);
+        com_bind_ok(b, "Unlock");
     }
     /* 3D sound parameters are accepted (positional audio comes with F2.3). */
+    com_bind(&ds3dbuffer_class, "Release", DSB_Release);
     for (unsigned i = 0; i < ds3dbuffer_class.count; i++)
         if (!strncmp(ds3dbuffer_class.methods[i].name, "Set", 3))
             com_bind_ok(&ds3dbuffer_class, ds3dbuffer_class.methods[i].name);
