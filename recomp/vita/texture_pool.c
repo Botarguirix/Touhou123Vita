@@ -90,24 +90,26 @@ static void *take(size_t need) {
    grows by 4 MiB chunks, from CDRAM first, then from user RAM while 8 MiB stay free
    for thread stacks and file buffers. */
 enum { CHUNK = 4u << 20, USER_RESERVE = 8u << 20 };
-static int grow(void) {
+static int grow(size_t need) {
+    /* at least one chunk; a 1024x1024 texture needs more than 4 MiB at once */
+    size_t size = need + sizeof(Block) <= CHUNK ? CHUNK : (need + sizeof(Block) + (256u << 10) - 1) & ~(size_t)((256u << 10) - 1);
     static unsigned chunks;
     SceKernelFreeMemorySizeInfo info = {sizeof info};
     sceKernelGetFreeMemorySize(&info);
     SceKernelMemBlockType types[2] = {SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, SCE_KERNEL_MEMBLOCK_TYPE_USER_RW};
-    int allowed[2] = {info.size_cdram >= CHUNK, info.size_user >= CHUNK + USER_RESERVE};
+    int allowed[2] = {info.size_cdram >= size, info.size_user >= size + USER_RESERVE};
     for (unsigned k = 0; k < 2; k++) {
         if (!allowed[k])
             continue;
         void *base = NULL;
-        SceUID id = sceKernelAllocMemBlock("t123_textures+", types[k], CHUNK, NULL);
+        SceUID id = sceKernelAllocMemBlock("t123_textures+", types[k], size, NULL);
         if (id < 0 || sceKernelGetMemBlockBase(id, &base) < 0)
             continue;
         Block *b = base;
-        b->size = CHUNK;
+        b->size = size;
         insert_free(b);
         chunks++;
-        trace("# texture pool: +%u MiB from %s (chunk %u, live %u KiB)", CHUNK >> 20,
+        trace("# texture pool: +%u KiB from %s (chunk %u, live %u KiB)", (unsigned)(size >> 10),
               k ? "user RAM" : "CDRAM", chunks, (unsigned)(live >> 10));
         return 0;
     }
@@ -120,7 +122,7 @@ void *platform_texture_alloc(size_t bytes) {
     pthread_mutex_lock(&lock);
     if (pool || pool_init() == 0) {
         result = take(need);
-        if (!result && need <= CHUNK && grow() == 0)
+        if (!result && grow(need) == 0)
             result = take(need);
         if (!result)
             trace("# texture pool exhausted: request %u bytes, live %u KiB, peak %u KiB",

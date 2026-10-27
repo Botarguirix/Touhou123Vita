@@ -310,10 +310,11 @@ static void gpu_make_room(uint64_t need) {
    until uploads failed ("texture upload: out of memory"). */
 static uint8_t *scratch(uint8_t **buf, size_t *cap, size_t need) {
     if (*cap < need) {
-        uint8_t *p = realloc(*buf, need);
-        if (!p) return NULL;
-        *buf = p;
-        *cap = need;
+        /* from texture storage, not the C heap: 4 MiB in one piece for a 1024x1024
+           texture failed there on the Vita */
+        platform_texture_free(*buf);
+        *buf = platform_texture_alloc(need);
+        *cap = *buf ? need : 0;
     }
     return *buf;
 }
