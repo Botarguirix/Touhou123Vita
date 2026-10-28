@@ -20,6 +20,7 @@ typedef struct {
     unsigned drawn;     /* frames in which it was bound for a draw (measurement) */
     unsigned long long used_frame; /* last frame it was drawn in (GPU budget) */
     uint32_t gpu_bytes;           /* bytes uploaded to the GPU, 0 if not uploaded */
+    uint8_t half;                 /* uploaded at half resolution (large backgrounds) */
 } RenderTexture;
 
 int render_init(uint32_t width, uint32_t height);

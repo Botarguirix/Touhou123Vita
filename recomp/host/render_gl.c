@@ -372,6 +372,34 @@ static void convert_rows(const RenderTexture *t, const uint8_t *src, uint8_t *rg
 enum { BAND_BYTES = 256 * 1024 };
 static uint8_t band[BAND_BYTES], band_rgba[BAND_BYTES * 2];
 
+/* Large textures (both sides >= 640: backgrounds and scenery, not the 512x512 and
+   smaller sprite sheets) go to the GPU at half resolution on the Vita, a quarter of
+   the memory; the texture coordinates are normalised, so the game does not notice.
+   Each 2x2 block of BGRA pixels becomes its average. */
+#ifdef __vita__
+static int half_res_enabled = 1;
+#else
+static int half_res_enabled = -1; /* T123_HALF_RES=1 to see it on PC */
+#endif
+static int wants_half(const RenderTexture *t) {
+    if (half_res_enabled < 0) half_res_enabled = getenv("T123_HALF_RES") != NULL;
+    return half_res_enabled && t->format == 21 && t->pitch == t->width * 4 && t->width >= 640 && t->height >= 640;
+}
+
+static void upload_band_half(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) {
+    RenderTexture *t = ctx;
+    uint32_t w = t->width / 2, out_rows = (n + 1) / 2;
+    for (uint32_t r = 0; r < out_rows; r++) {
+        const uint8_t *a = rows + (size_t)(2 * r) * t->pitch;
+        const uint8_t *b = 2 * r + 1 < n ? a + t->pitch : a; /* odd last row: reuse it */
+        uint8_t *o = band_rgba + (size_t)r * w * 4;
+        for (uint32_t x = 0; x < w; x++, a += 8, b += 8, o += 4)
+            for (unsigned k = 0; k < 4; k++)
+                o[k] = (uint8_t)((a[k] + a[k + 4] + b[k] + b[k + 4] + 2) >> 2);
+    }
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)(y / 2), (GLsizei)w, (GLsizei)out_rows, GL_BGRA, GL_UNSIGNED_BYTE, band_rgba);
+}
+
 static void upload_band(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) {
     RenderTexture *t = ctx;
     if (t->format == 21 && t->pitch == t->width * 4) { /* A8R8G8B8 is BGRA in memory: as is */
@@ -383,7 +411,9 @@ static void upload_band(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) 
 }
 
 static void upload(RenderTexture *t) {
-    size_t out_bytes = (size_t)t->width * t->height * 4;
+    int half = wants_half(t);
+    uint32_t gw = half ? t->width / 2 : t->width, gh = half ? (t->height + 1) / 2 : t->height;
+    size_t out_bytes = (size_t)gw * gh * 4;
     if (t->pitch > BAND_BYTES || (size_t)t->width * 4 > sizeof band_rgba) {
         trace("# texture upload %ux%u: rows wider than the upload band", t->width, t->height);
         return;
@@ -394,11 +424,14 @@ static void upload(RenderTexture *t) {
     glBindTexture(GL_TEXTURE_2D, t->gl);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)t->width, (GLsizei)t->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    /* band rows: bounded by both buffers (16-bit formats widen to 4 bytes per pixel) */
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)gw, (GLsizei)gh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    /* band rows: bounded by both buffers (16-bit formats widen to 4 bytes per pixel);
+       even, so a half-resolution band starts on a whole output row */
     size_t rows = BAND_BYTES / t->pitch, rgba_rows = sizeof band_rgba / ((size_t)t->width * 4);
     if (rgba_rows < rows) rows = rgba_rows;
-    render_texture_rows(t, band, rows * t->pitch, upload_band, t);
+    if (rows > 1) rows &= ~(size_t)1;
+    render_texture_rows(t, band, rows * t->pitch, half ? upload_band_half : upload_band, t);
+    t->half = (uint8_t)half;
     GLenum error = glGetError();
     if (error) {
         static unsigned reported;
@@ -459,8 +492,9 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
         bound->used_frame = d3d_frames;
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, bound->gl);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_linear ? GL_LINEAR : GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_linear ? GL_LINEAR : GL_NEAREST);
+        int smooth = bound->half; /* a half-resolution texture is scaled back up */
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_linear || smooth ? GL_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_linear || smooth ? GL_LINEAR : GL_NEAREST);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glTexCoordPointer(2, GL_FLOAT, 0, uv);
     } else {
