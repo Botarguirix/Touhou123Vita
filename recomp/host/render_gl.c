@@ -210,7 +210,15 @@ static void color4(uint32_t argb, float out[4]) {
     out[3] = (argb >> 24) / 255.0f;
 }
 
+/* Vita frame skipping: the game's logic advances one step per presented frame, so a
+   lower frame rate would slow the game down. Instead, when a frame took longer than a
+   refresh, the next one is not drawn (its clears and draws are dropped and it is not
+   swapped), never twice in a row: the game keeps its speed and the screen shows at
+   least 30 FPS. */
+static int skip_drawing;
+
 void render_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) {
+    if (skip_drawing) return;
     gl_enter();
     float c[4];
     color4(color, c);
@@ -456,6 +464,7 @@ void render_texture(uint32_t stage, RenderTexture *t) {
 }
 
 void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t stride) {
+    if (skip_drawing) return;
     static const GLenum modes[] = {0, GL_POINTS, GL_LINES, GL_LINE_STRIP, GL_TRIANGLES, GL_TRIANGLE_STRIP, GL_TRIANGLE_FAN};
     uint32_t n = type == 1 ? count : type == 2 ? count * 2 : type == 3 ? count + 1
                : type == 4 ? count * 3 : count + 2;
@@ -515,6 +524,16 @@ static uint8_t *last_frame;
 static uint32_t capture_w, capture_h;
 
 void render_present(void) {
+#ifdef __vita__
+    static uint64_t last_swap, skipped;
+    if (skip_drawing) { /* nothing was drawn: no swap, no wait for the display */
+        skip_drawing = 0;
+        last_swap = platform_ticks_us(); /* measure the next frame on its own */
+        if (++skipped % 600 == 1)
+            trace("# frame skip: %llu frames not drawn so far (frame %llu)", (unsigned long long)skipped, d3d_frames);
+        return;
+    }
+#endif
     gl_enter();
 #ifdef __vita__
     /* vitaGL only runs the frame's draws at the swap, so glReadPixels here returned
@@ -547,6 +566,13 @@ void render_present(void) {
     }
 #endif
     platform_swap();
+#ifdef __vita__
+    {
+        uint64_t now = platform_ticks_us(); /* a frame slower than ~55 FPS: skip drawing the next */
+        if (last_swap && now - last_swap > 18000) skip_drawing = 1;
+        last_swap = now;
+    }
+#endif
 #ifdef __vita__
     if (d3d_frames % 60 == 0 && last_frame) { /* once a second: copy what is on screen */
         SceDisplayFrameBuf fb;
