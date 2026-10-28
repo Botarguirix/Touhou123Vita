@@ -3,6 +3,7 @@
 #ifndef T123_RENDER_H
 #define T123_RENDER_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define RENDER_MAX_TEXTURES 4096
