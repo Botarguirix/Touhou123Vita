@@ -325,96 +325,91 @@ static void gpu_make_room(uint64_t need) {
     }
 }
 
-/* Scratch buffers for the pixels and the conversion: reused (upload runs under the GL
-   lock) instead of two mallocs per upload, which fragmented the Vita's 32 MiB C heap
-   until uploads failed ("texture upload: out of memory"). */
-static uint8_t *scratch(uint8_t **buf, size_t *cap, size_t need) {
-    if (*cap < need) {
-        /* from texture storage, not the C heap: 4 MiB in one piece for a 1024x1024
-           texture failed there on the Vita */
-        platform_texture_free(*buf);
-        *buf = platform_texture_alloc(need);
-        *cap = *buf ? need : 0;
-    }
-    return *buf;
-}
-
-/* D3D formats -> RGBA8 for upload. The pixels come from d3d9.c (inflated on the Vita). */
-static void upload(RenderTexture *t) {
-    static uint8_t *src_buf, *rgba_buf;
-    static size_t src_cap, rgba_cap;
-    size_t bytes = (size_t)t->pitch * t->height, out_bytes = (size_t)t->width * t->height * 4;
-    uint8_t *src = scratch(&src_buf, &src_cap, bytes);
-    if (!src) {
-        trace("# texture upload %ux%u: out of memory", t->width, t->height);
-        return;
-    }
-    render_texture_pixels(t, src);
-    gpu_forget(t);
-    gpu_make_room(out_bytes);
-    const uint8_t *pixels = src;
-    GLenum layout = GL_BGRA;
-    if (!(t->format == 21 && t->pitch == t->width * 4)) { /* A8R8G8B8 is BGRA in memory: as is */
-        uint8_t *rgba = scratch(&rgba_buf, &rgba_cap, out_bytes);
-        if (!rgba) {
-            trace("# texture upload %ux%u: out of memory", t->width, t->height);
-            return;
-        }
-        for (uint32_t y = 0; y < t->height; y++) {
-            for (uint32_t x = 0; x < t->width; x++) {
-                uint8_t *o = rgba + ((size_t)y * t->width + x) * 4;
-                const uint8_t *p = src + (size_t)y * t->pitch;
-                uint32_t v;
-                switch (t->format) {
-                case 21: case 22:
-                    p += x * 4;
-                    o[0] = p[2]; o[1] = p[1]; o[2] = p[0]; o[3] = t->format == 22 ? 255 : p[3];
-                    break;
-                case 26: /* A4R4G4B4 */
-                    v = p[x * 2] | p[x * 2 + 1] << 8;
-                    o[0] = ((v >> 8) & 15) * 17; o[1] = ((v >> 4) & 15) * 17; o[2] = (v & 15) * 17; o[3] = (v >> 12) * 17;
-                    break;
-                case 25: case 24: /* A1R5G5B5, X1R5G5B5 */
-                    v = p[x * 2] | p[x * 2 + 1] << 8;
-                    o[0] = ((v >> 10) & 31) * 255 / 31; o[1] = ((v >> 5) & 31) * 255 / 31; o[2] = (v & 31) * 255 / 31;
-                    o[3] = t->format == 24 || (v >> 15) ? 255 : 0;
-                    break;
-                case 23: /* R5G6B5 */
-                    v = p[x * 2] | p[x * 2 + 1] << 8;
-                    o[0] = ((v >> 11) & 31) * 255 / 31; o[1] = ((v >> 5) & 63) * 255 / 63; o[2] = (v & 31) * 255 / 31; o[3] = 255;
-                    break;
-                case 28: /* A8 */
-                    o[0] = o[1] = o[2] = 0; o[3] = p[x];
-                    break;
-                case 50: /* L8 */
-                    o[0] = o[1] = o[2] = p[x]; o[3] = 255;
-                    break;
-                default:
-                    o[0] = 255; o[1] = 0; o[2] = 255; o[3] = 255; /* unknown format: magenta */
-                    break;
-                }
+/* D3D formats -> RGBA8, n rows. */
+static void convert_rows(const RenderTexture *t, const uint8_t *src, uint8_t *rgba, uint32_t n) {
+    for (uint32_t y = 0; y < n; y++) {
+        for (uint32_t x = 0; x < t->width; x++) {
+            uint8_t *o = rgba + ((size_t)y * t->width + x) * 4;
+            const uint8_t *p = src + (size_t)y * t->pitch;
+            uint32_t v;
+            switch (t->format) {
+            case 21: case 22:
+                p += x * 4;
+                o[0] = p[2]; o[1] = p[1]; o[2] = p[0]; o[3] = t->format == 22 ? 255 : p[3];
+                break;
+            case 26: /* A4R4G4B4 */
+                v = p[x * 2] | p[x * 2 + 1] << 8;
+                o[0] = ((v >> 8) & 15) * 17; o[1] = ((v >> 4) & 15) * 17; o[2] = (v & 15) * 17; o[3] = (v >> 12) * 17;
+                break;
+            case 25: case 24: /* A1R5G5B5, X1R5G5B5 */
+                v = p[x * 2] | p[x * 2 + 1] << 8;
+                o[0] = ((v >> 10) & 31) * 255 / 31; o[1] = ((v >> 5) & 31) * 255 / 31; o[2] = (v & 31) * 255 / 31;
+                o[3] = t->format == 24 || (v >> 15) ? 255 : 0;
+                break;
+            case 23: /* R5G6B5 */
+                v = p[x * 2] | p[x * 2 + 1] << 8;
+                o[0] = ((v >> 11) & 31) * 255 / 31; o[1] = ((v >> 5) & 63) * 255 / 63; o[2] = (v & 31) * 255 / 31; o[3] = 255;
+                break;
+            case 28: /* A8 */
+                o[0] = o[1] = o[2] = 0; o[3] = p[x];
+                break;
+            case 50: /* L8 */
+                o[0] = o[1] = o[2] = p[x]; o[3] = 255;
+                break;
+            default:
+                o[0] = 255; o[1] = 0; o[2] = 255; o[3] = 255; /* unknown format: magenta */
+                break;
             }
         }
-        pixels = rgba;
-        layout = GL_RGBA;
     }
+}
+
+/* Upload in bands: the texture is created empty and filled row band by row band from
+   the stored pixels (inflated a band at a time on the Vita), so no buffer the size of
+   the texture is needed. A whole-texture scratch buffer (4 MiB for 1024x1024) could
+   not be found once memory was fragmented on the Vita, and the game then waited
+   forever for that texture on its loading screen. */
+enum { BAND_BYTES = 256 * 1024 };
+static uint8_t band[BAND_BYTES], band_rgba[BAND_BYTES * 2];
+
+static void upload_band(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) {
+    RenderTexture *t = ctx;
+    if (t->format == 21 && t->pitch == t->width * 4) { /* A8R8G8B8 is BGRA in memory: as is */
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)y, (GLsizei)t->width, (GLsizei)n, GL_BGRA, GL_UNSIGNED_BYTE, rows);
+    } else {
+        convert_rows(t, rows, band_rgba, n);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)y, (GLsizei)t->width, (GLsizei)n, GL_RGBA, GL_UNSIGNED_BYTE, band_rgba);
+    }
+}
+
+static void upload(RenderTexture *t) {
+    size_t out_bytes = (size_t)t->width * t->height * 4;
+    if (t->pitch > BAND_BYTES || (size_t)t->width * 4 > sizeof band_rgba) {
+        trace("# texture upload %ux%u: rows wider than the upload band", t->width, t->height);
+        return;
+    }
+    gpu_forget(t);
+    gpu_make_room(out_bytes);
     glGenTextures(1, &t->gl);
     glBindTexture(GL_TEXTURE_2D, t->gl);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)t->width, (GLsizei)t->height, 0, layout, GL_UNSIGNED_BYTE, pixels);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)t->width, (GLsizei)t->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    /* band rows: bounded by both buffers (16-bit formats widen to 4 bytes per pixel) */
+    size_t rows = BAND_BYTES / t->pitch, rgba_rows = sizeof band_rgba / ((size_t)t->width * 4);
+    if (rgba_rows < rows) rows = rgba_rows;
+    render_texture_rows(t, band, rows * t->pitch, upload_band, t);
     GLenum error = glGetError();
     if (error) {
         static unsigned reported;
         if (reported++ < 20)
-            trace("# glTexImage2D %ux%u failed: GL error %04x (%llu KiB uploaded)", t->width, t->height,
+            trace("# texture upload %ux%u failed: GL error %04x (%llu KiB uploaded)", t->width, t->height,
                   (unsigned)error, (unsigned long long)(gpu_bytes >> 10));
     }
     t->gpu_bytes = (uint32_t)out_bytes;
     gpu_bytes += out_bytes;
     t->dirty = 0;
 }
-
 void render_texture_free(RenderTexture *t) {
     if (!t->gl) return;
     gl_enter();

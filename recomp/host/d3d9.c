@@ -267,6 +267,51 @@ void render_texture_pixels(RenderTexture *t, uint8_t *out) {
     pthread_mutex_unlock(&texture_lock);
 }
 
+/* The stored pixels in bands of whole rows through `buf` (any size of at least one
+   row): the upload no longer needs the whole texture in one piece, which for a
+   1024x1024 texture (4 MiB) failed on the Vita once memory was fragmented. */
+void render_texture_rows(RenderTexture *t, uint8_t *buf, size_t size,
+                         void (*sink)(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n), void *ctx) {
+    uint32_t pitch = t->pitch, rows_per = (uint32_t)(size / pitch);
+    if (!rows_per) return;
+    pthread_mutex_lock(&texture_lock);
+#ifdef T123_PACKED_TEXTURES
+    z_stream z;
+    int inflating = !t->raw && t->data;
+    if (inflating) {
+        memset(&z, 0, sizeof z);
+        z.next_in = t->data;
+        z.avail_in = (uInt)t->stored;
+        inflating = inflateInit(&z) == Z_OK;
+    }
+#endif
+    for (uint32_t y = 0; y < t->height; y += rows_per) {
+        uint32_t n = t->height - y < rows_per ? t->height - y : rows_per;
+        size_t bytes = (size_t)n * pitch;
+#ifdef T123_PACKED_TEXTURES
+        if (t->raw) {
+            memcpy(buf, t->raw + (size_t)y * pitch, bytes);
+        } else if (inflating) {
+            z.next_out = buf;
+            z.avail_out = (uInt)bytes;
+            int r = inflate(&z, Z_SYNC_FLUSH);
+            if (z.avail_out && r != Z_OK && r != Z_STREAM_END)
+                memset(z.next_out, 0, z.avail_out);
+        } else {
+            memset(buf, 0, bytes);
+        }
+#else
+        memcpy(buf, t->data + (size_t)y * pitch, bytes);
+#endif
+        sink(ctx, buf, y, n);
+    }
+#ifdef T123_PACKED_TEXTURES
+    if (inflating)
+        inflateEnd(&z);
+#endif
+    pthread_mutex_unlock(&texture_lock);
+}
+
 /* The game streams textures while loading: a released texture gives back its pixels
    and its slot, or the guest heap runs out during boot. */
 static uint32_t texture_release(uint32_t o) {
