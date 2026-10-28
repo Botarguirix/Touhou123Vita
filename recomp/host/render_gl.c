@@ -270,7 +270,7 @@ void render_fvf(uint32_t value) { fvf = value; }
    again from its stored copy the next time it is drawn. */
 extern RenderTexture textures[RENDER_MAX_TEXTURES];
 #ifdef __vita__
-static uint64_t gpu_budget = 52u << 20; /* of vitaGL's 64 MiB of CDRAM; 40 thrashed in fights */
+static uint64_t gpu_budget = 44u << 20; /* of vitaGL's 64 MiB of CDRAM */
 #else
 static uint64_t gpu_budget = UINT64_MAX; /* T123_GPU_BUDGET_MB to test the Vita's eviction */
 #endif
@@ -284,13 +284,27 @@ static void gpu_forget(RenderTexture *t) { /* under the GL lock */
     t->gpu_bytes = 0;
 }
 
+/* vitaGL frees a deleted texture only once the GPU is done with it, so its real free
+   memory can be far below what the budget suggests: 5300 evictions in a long fight
+   ended in a GPU crash on the Vita (52 MiB budget). Room is also made while vitaGL's
+   own free memory is short. */
+static int gpu_memory_short(uint64_t need) {
+#ifdef __vita__
+    size_t free_now = vglMemFree(VGL_MEM_VRAM) + vglMemFree(VGL_MEM_PHYCONT);
+    return free_now < need + (8u << 20);
+#else
+    (void)need;
+    return 0;
+#endif
+}
+
 static void gpu_make_room(uint64_t need) {
 #ifndef __vita__
     static int read_env;
     if (!read_env++ && getenv("T123_GPU_BUDGET_MB"))
         gpu_budget = strtoull(getenv("T123_GPU_BUDGET_MB"), NULL, 10) << 20;
 #endif
-    while (gpu_bytes + need > gpu_budget) {
+    while (gpu_bytes + need > gpu_budget || (gpu_bytes && gpu_memory_short(need))) {
         RenderTexture *oldest = NULL;
         for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
             RenderTexture *t = &textures[i];
@@ -300,8 +314,14 @@ static void gpu_make_room(uint64_t need) {
         if (!oldest) return; /* everything was drawn this frame: go over budget */
         gpu_forget(oldest);
         if (++gpu_evictions % 100 == 1)
+#ifdef __vita__
+            trace("# GPU texture budget: %llu evictions so far, %llu KiB uploaded, vitaGL free %u KiB VRAM %u KiB phycont",
+                  (unsigned long long)gpu_evictions, (unsigned long long)(gpu_bytes >> 10),
+                  (unsigned)(vglMemFree(VGL_MEM_VRAM) >> 10), (unsigned)(vglMemFree(VGL_MEM_PHYCONT) >> 10));
+#else
             trace("# GPU texture budget: %llu evictions so far, %llu KiB uploaded",
                   (unsigned long long)gpu_evictions, (unsigned long long)(gpu_bytes >> 10));
+#endif
     }
 }
 
