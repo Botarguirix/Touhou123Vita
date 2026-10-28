@@ -63,7 +63,7 @@ def build(jobs: int, packed: bool = False) -> Path:
     exe = out / "th123_host.exe"
     link = subprocess.run([str(GCC), *[str(t[1]) for t in tasks], "-static", "-lSDL2", "-lopengl32", "-lsetupapi", "-limm32", "-lversion", "-lwinmm", "-lole32", "-loleaut32", "-lgdi32", "-luuid", "-luser32", "-ladvapi32", "-lshell32", "-lcfgmgr32",
                            "-lfreetype", "-lbz2", "-lpng16", "-lharfbuzz", "-lusp10", "-lrpcrt4", "-ldwrite", "-lglib-2.0", "-lintl", "-lws2_32", "-lshlwapi", "-latomic", "-lpcre2-8", "-lgraphite2", "-lbrotlidec", "-lbrotlicommon", "-lfreetype", "-lstdc++", "-lgdi32", "-lole32", "-luser32", "-luuid",
-                           "-lz", "-lm", "-lpthread", "-o", str(exe)],
+                           "-lvorbisfile", "-lvorbis", "-logg", "-lz", "-lm", "-lpthread", "-o", str(exe)],
                           env=env(), capture_output=True, text=True)
     if link.returncode:
         raise SystemExit(link.stderr)

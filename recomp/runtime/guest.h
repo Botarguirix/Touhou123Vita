@@ -11,6 +11,7 @@
 
 #include <setjmp.h>
 #include <stdint.h>
+#include <math.h>
 #include <string.h>
 
 #if defined(__x86_64__) || defined(__i386__)
@@ -331,10 +332,28 @@ void x87_set_cw(Cpu *c, uint16_t cw);       /* fldcw */
 static inline uint16_t x87_get_cw(Cpu *c) { return c->fpu.cw; }
 uint16_t x87_get_sw(Cpu *c);                /* fnstsw, with TOP */
 
-x87_t x87_st(Cpu *c, unsigned i);
-void x87_set_st(Cpu *c, unsigned i, x87_t v);
-void x87_push(Cpu *c, x87_t v);
-void x87_pop(Cpu *c);
+/* The register stack accessors are inline: every x87 instruction uses them, and as
+   calls into guest.c they were a large share of the profile. */
+static inline x87_t x87_st(Cpu *c, unsigned i) { return c->fpu.st[(c->fpu.top + i) & 7]; }
+static inline void x87_set_st(Cpu *c, unsigned i, x87_t v) {
+    unsigned p = (c->fpu.top + i) & 7;
+    c->fpu.st[p] = v;
+    c->fpu.tag_empty &= (uint8_t)~(1u << p);
+}
+static inline void x87_push(Cpu *c, x87_t v) {
+    c->fpu.top = (c->fpu.top - 1) & 7;
+    unsigned p = c->fpu.top;
+    if (!(c->fpu.tag_empty & (1u << p))) {
+        c->fpu.sw |= 0x0241; /* stack fault: IE, SF, C1=1 (overflow) */
+        v = (x87_t)NAN;      /* masked response: indefinite */
+    }
+    c->fpu.st[p] = v;
+    c->fpu.tag_empty &= (uint8_t)~(1u << p);
+}
+static inline void x87_pop(Cpu *c) {
+    c->fpu.tag_empty |= (uint8_t)(1u << c->fpu.top);
+    c->fpu.top = (c->fpu.top + 1) & 7;
+}
 
 void x87_fld_m32(Cpu *c, uint32_t a);
 void x87_fld_m64(Cpu *c, uint32_t a);

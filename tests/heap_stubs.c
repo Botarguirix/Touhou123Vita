@@ -8,6 +8,10 @@ const ApiEntry win32_media[]={{NULL,NULL}};
 const ApiEntry win32_kernel32[]={{NULL,NULL}};
 const ApiEntry win32_other[]={{NULL,NULL}};
 void platform_log(const char *line) { (void)line; }
+uint64_t platform_ticks_us(void) { return 0; }
+void com_summary(void) {}
+void rfile_close(void *r) { (void)r; }
+void find_close(void *f) { (void)f; }
 _Noreturn void host_exit(Cpu *c,uint32_t code,const char *why) {
     (void)c;fprintf(stderr,"unexpected host_exit %u: %s\n",code,why);exit(2);
 }

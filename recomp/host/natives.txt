@@ -3,3 +3,9 @@
 # intercept is used even from lifted callers. One hex address per line.
 00820850  memcpy/memmove (MSVC CRT)
 008236b0  memcpy/memmove (MSVC CRT)
+008107a0  ov_open_callbacks (vorbis.c)
+008106a0  ov_clear
+008125c0  ov_info
+00812600  ov_read
+008124d0  ov_time_tell
+008123d0  ov_time_seek
