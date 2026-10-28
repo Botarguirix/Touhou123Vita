@@ -143,18 +143,38 @@ static uint32_t texture_new(uint32_t w, uint32_t h, uint32_t format) {
    draws only ~12 MiB of them in the first minute (measured on PC); zlib level 1
    packs all of them in ~16 MiB, so the Vita keeps them deflated and inflates on use. */
 #ifdef T123_PACKED_TEXTURES
-/* Straight into texture storage, sized for the worst case and then trimmed: a
-   temporary malloc of up to 2.4 MiB per texture failed in long fights on the Vita
-   (its C heap is 32 MiB). */
+/* Deflated into 64 KiB pieces, then copied into one block of the exact size. A block
+   for the worst case (the raw size, up to 4 MiB) could not be found once texture
+   storage was fragmented ("cannot store texture" in long sessions on the Vita), while
+   the result is typically a tenth of it. */
+enum { PIECE = 64 * 1024, MAX_PIECES = 80 };
 static uint8_t *deflate_texture(const uint8_t *src, uLong bytes, uLongf *zlen) {
-    *zlen = compressBound(bytes);
-    uint8_t *packed = platform_texture_alloc(*zlen);
-    if (packed && compress2(packed, zlen, src, bytes, 1) != Z_OK) {
-        platform_texture_free(packed);
-        packed = NULL;
+    uint8_t *pieces[MAX_PIECES];
+    unsigned count = 0;
+    z_stream z;
+    memset(&z, 0, sizeof z);
+    *zlen = 0;
+    if (deflateInit(&z, 1) != Z_OK)
+        return NULL;
+    z.next_in = (Bytef *)src;
+    z.avail_in = (uInt)bytes;
+    int r = Z_OK;
+    while (r == Z_OK && count < MAX_PIECES && (pieces[count] = malloc(PIECE))) {
+        z.next_out = pieces[count++];
+        z.avail_out = PIECE;
+        r = deflate(&z, Z_FINISH);
     }
-    if (packed)
-        platform_texture_shrink(packed, *zlen);
+    uint8_t *packed = NULL;
+    if (r == Z_STREAM_END && (packed = platform_texture_alloc(z.total_out))) {
+        for (unsigned k = 0; k < count; k++) {
+            uLong at = (uLong)k * PIECE, n = z.total_out - at < PIECE ? z.total_out - at : PIECE;
+            memcpy(packed + at, pieces[k], n);
+        }
+    }
+    *zlen = z.total_out;
+    deflateEnd(&z);
+    for (unsigned k = 0; k < count; k++)
+        free(pieces[k]);
     return packed;
 }
 /* Under texture_lock: replace the stored pixels of t. */
