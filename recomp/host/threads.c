@@ -136,6 +136,9 @@ API(CreateMutexA) {
 static void *thread_main(void *arg) {
     Thread *t = arg;
     Cpu *c = &t->cpu;
+#ifndef __vita__
+    profile_register_thread(0x1004 + 4 * t->index);
+#endif
     memset(c, 0, sizeof *c);
     x87_reset(c);
     x87_set_cw(c, 0x027F);

@@ -3,6 +3,7 @@
 #include "guest.h"
 
 #include <fenv.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -346,27 +347,32 @@ void op_cmps(Cpu *c, unsigned size, int rep, uint32_t address) {
  *   PC=64: computed in x87_t; on hosts without an 80-bit type this degrades to 53 bits.
  * The extended exponent range of x87 registers is not modelled.
  */
-static const int rc_to_fenv[4] = {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO};
 
 #define RC(c) (((c)->fpu.cw >> 10) & 3)
 #define PC(c) (((c)->fpu.cw >> 8) & 3)
 
-/* Runs `expr` under the guest rounding mode; the fast path avoids touching the host FPU. */
+static const int rc_to_fenv[4] = {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO};
+
+/* Runs xpr (arithmetic, square root) under the guest rounding mode. The host FPU of
+   each guest thread is left in the guest's last RC (c->fpu.host_rc) and only switched
+   when it changes: saving, setting and restoring it around every operation was most
+   of the fight logic thread's time (profile on PC). Conversions and integer rounding
+   below give the same result whatever the host mode is. */
 #define WITH_RC(c, decl, expr)                                       \
     do {                                                            \
         int rc_ = RC(c);                                            \
-        if (rc_ == 0) {                                             \
-            decl = (expr);                                          \
-        } else {                                                    \
-            int saved_ = fegetround();                              \
+        if ((c)->fpu.host_rc != rc_) {                              \
             fesetround(rc_to_fenv[rc_]);                            \
-            decl = (expr);                                          \
-            fesetround(saved_);                                     \
+            (c)->fpu.host_rc = (uint8_t)rc_;                        \
         }                                                           \
+        decl = (expr);                                              \
     } while (0)
+
+_Static_assert(sizeof(X87) == sizeof(x87_t) * 9, "host_rc must stay in the padding of X87");
 
 void x87_reset(Cpu *c) {
     memset(&c->fpu, 0, sizeof c->fpu);
+    fesetround(FE_TONEAREST); /* host_rc = 0 */
     c->fpu.cw = 0x037F;
     c->fpu.tag_empty = 0xFF;
 }
@@ -402,16 +408,82 @@ void x87_pop(Cpu *c) {
     c->fpu.top = (c->fpu.top + 1) & 7;
 }
 
+/* Conversions and integer rounding under a directed RC do not touch the host FPU:
+   switching its mode per operation (fegetround/fesetround) was most of the game logic
+   thread's time in fights (profile on PC), because the CRT's float->int, floor and
+   ceil sequences load a directed RC around each fistp/frndint. Whatever mode the
+   host is in, a cast lands on one of the two representable neighbours of the exact
+   value; both are derived from it and the guest's RC picks one (ties to even). */
+/* Beyond the largest finite value: infinity or the largest finite, by RC and sign
+   (as the x87 does with overflow masked). */
+#define OVERFLOW_RC(rc, v, maxv)                                                   \
+    ((rc) == 0 ? ((v) > 0 ? INFINITY : -INFINITY)                                 \
+     : (rc) == 3 ? ((v) > 0 ? (maxv) : -(maxv))                                   \
+     : (rc) == 2 ? ((v) > 0 ? INFINITY : -(maxv))                                 \
+                 : ((v) > 0 ? (maxv) : -INFINITY))
+
 static float to_float_rc(Cpu *c, x87_t v) {
-    volatile float r;
-    WITH_RC(c, r, (float)v);
-    return r;
+    if (RC(c) == 0 && c->fpu.host_rc == 0) return (float)v; /* the common case: a plain cast */
+    if (isfinite(v) && fabsl(v) > (x87_t)FLT_MAX) {
+        /* between FLT_MAX and the halfway point to the next binade, nearest still rounds down */
+        x87_t limit = (x87_t)FLT_MAX + ldexpl(1.0L, 127 - 24);
+        if (RC(c) != 0 || fabsl(v) >= limit) return (float)OVERFLOW_RC(RC(c), v, FLT_MAX);
+    }
+    float r0 = (float)v;
+    if (isnan(v) || isinf(v) || (x87_t)r0 == v) return r0;
+    float lo = (x87_t)r0 < v ? r0 : nextafterf(r0, -INFINITY);
+    float hi = (x87_t)r0 < v ? nextafterf(r0, INFINITY) : r0;
+    switch (RC(c)) {
+    case 1: return lo;
+    case 2: return hi;
+    case 3: return v < 0 ? hi : lo;
+    default: {
+        x87_t dl = v - (x87_t)lo, dh = (x87_t)hi - v;
+        if (dl != dh) return dl < dh ? lo : hi;
+        uint32_t bits;
+        memcpy(&bits, &lo, 4);
+        return bits & 1 ? hi : lo; /* tie: even significand */
+    }
+    }
 }
 
 static double to_double_rc(Cpu *c, x87_t v) {
-    volatile double r;
-    WITH_RC(c, r, (double)v);
-    return r;
+    if (RC(c) == 0 && c->fpu.host_rc == 0) return (double)v;
+    if (isfinite(v) && fabsl(v) > (x87_t)DBL_MAX) {
+        x87_t limit = (x87_t)DBL_MAX + ldexpl(1.0L, 1023 - 53);
+        if (RC(c) != 0 || fabsl(v) >= limit) return OVERFLOW_RC(RC(c), v, DBL_MAX);
+    }
+    double r0 = (double)v;
+    if (isnan(v) || isinf(v) || (x87_t)r0 == v) return r0;
+    double lo = (x87_t)r0 < v ? r0 : nextafter(r0, -INFINITY);
+    double hi = (x87_t)r0 < v ? nextafter(r0, INFINITY) : r0;
+    switch (RC(c)) {
+    case 1: return lo;
+    case 2: return hi;
+    case 3: return v < 0 ? hi : lo;
+    default: {
+        x87_t dl = v - (x87_t)lo, dh = (x87_t)hi - v;
+        if (dl != dh) return dl < dh ? lo : hi;
+        uint64_t bits;
+        memcpy(&bits, &lo, 8);
+        return bits & 1 ? hi : lo;
+    }
+    }
+}
+
+static x87_t rint_rc(Cpu *c, x87_t v) {
+    switch (RC(c)) {
+    case 1: return floorl(v);
+    case 2: return ceill(v);
+    case 3: return truncl(v);
+    default: {
+        if (isnan(v) || isinf(v)) return v;
+        x87_t f = floorl(v), d = v - f, r;
+        if (d != 0.5L) r = d < 0.5L ? f : f + 1;
+        else r = fmodl(f, 2.0L) == 0 ? f : f + 1; /* tie: even */
+        return r == 0 ? copysignl(0.0L, v) : r; /* -0.3 rounds to -0, as on the x87 */
+    }
+    }
 }
 
 /* PC=24 rounds the significand to 24 bits but keeps the extended exponent of the
@@ -553,7 +625,7 @@ void x87_fist(Cpu *c, uint32_t a, unsigned size, int pop, int truncate) {
     if (truncate)
         r = truncl(v);
     else
-        WITH_RC(c, r, nearbyintl(v));
+        r = rint_rc(c, v);
     int64_t lo = size == 2 ? INT16_MIN : size == 4 ? INT32_MIN : INT64_MIN;
     int64_t hi = size == 2 ? INT16_MAX : size == 4 ? INT32_MAX : INT64_MAX;
     int64_t out;
@@ -640,7 +712,7 @@ void x87_unary(Cpu *c, int which) {
         else { volatile double t; WITH_RC(c, t, sqrt((double)a)); r = PC(c) == 0 ? round24(c, t) : t; }
         break;
     }
-    case 3: { volatile x87_t t; WITH_RC(c, t, nearbyintl(a)); r = t; break; }
+    case 3: r = rint_rc(c, a); break;
     case 4: r = x87_round_pc(c, sinl(a)); break;
     case 5: r = x87_round_pc(c, cosl(a)); break;
     case 6: x87_compare(c, 0, 0, 0); return; /* ftst */

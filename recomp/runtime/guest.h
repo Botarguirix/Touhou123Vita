@@ -33,6 +33,8 @@ typedef struct {
     uint16_t sw;   /* status word without TOP; C0 bit 8, C1 9, C2 10, C3 14 */
     uint8_t top;
     uint8_t tag_empty; /* bitmask of empty physical registers */
+    uint8_t host_rc;   /* RC the host FPU of this thread is set to (guest.c); it fits in
+                          the padding, so the layout seen by generated code is unchanged */
 } X87;
 
 typedef struct Cpu {

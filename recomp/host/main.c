@@ -50,6 +50,9 @@ static uint64_t started;
 static pthread_t main_thread;
 
 static int finish(void) {
+#ifndef __vita__
+    profile_write();
+#endif
     uint64_t elapsed_ms = (platform_ticks_us() - started) / 1000u;
     if (d3d_frames) {
         trace("# frames presented: %llu, draws: %llu; textures live %llu KiB, peak %llu KiB", d3d_frames, d3d_draws,
@@ -165,6 +168,10 @@ int main(int argc, char **argv) {
 
     jmp_buf fault;
     guest_fault_trap = &fault;
+#ifndef __vita__
+    profile_start();
+    profile_register_thread(0x1004);
+#endif
     started = platform_ticks_us();
     main_thread = pthread_self();
     if (setjmp(finished) == 0) {
