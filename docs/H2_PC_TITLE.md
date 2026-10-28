@@ -105,6 +105,26 @@ El usuario jugó con los botones, sin límite de tiempo, y salió con START + SE
 
 **Carrera rara en PC:** alrededor de 1 de cada 5 ejecuciones hasta la pelea se cortaba con «invalid parameter» del CRT. Se rastreó hasta 0x465370: un objeto busca su acción (`[this+0x13c]`) en su mapa de patrones (`[this+0x160]`), la clave no está y desreferencia `end()`. Se descartaron la atomicidad de `lock xadd` (ya es atómica) y la de `xchg` (solo afecta a la pila). [game_checks.c](../recomp/host/game_checks.c) intercepta esa función y, si vuelve a pasar, registra el objeto, su vtable, la acción y las claves del mapa.
 
+## Estabilidad y velocidad en la Vita (28 oct 2026)
+
+Partidas largas jugadas a mano, con el *overclock* de VitaShell al máximo.
+
+| Cambio | Pelea (FPS por tramos) | Problemas |
+|---|---|---|
+| Audio integrado (T12) y respaldo para las acciones 807/820 | 31–57 | Fondos que faltaban al volver de la pelea: *pool* lleno |
+| 28 MiB de la ventana guest al *pool* de texturas | 31–57 | — |
+| Texturas de 1024×1024: el *pool* crece al tamaño necesario y los búferes de subida salen del *pool* | 33–54 | 5 300 descartes de GPU y un `GPUCRASH` |
+| El descarte de GPU mira la memoria libre real de vitaGL; presupuesto de 44 MiB | 35–56 | Se quedó en la pantalla de carga: no había 4 MiB seguidos para subir una textura de 1024×1024 |
+| Subida por franjas (`glTexSubImage2D` con búferes fijos) y `FindFirstFileA` | — | — |
+| Fondos (lados ≥ 640) a media resolución en la GPU | 44–58 | 7 400 descartes, 5 `cannot store` |
+| Compresión en trozos de 64 KiB y luego un bloque exacto | **50–59** | 0 `cannot store`, 3 300 descartes, sin cierres en 55 000 fotogramas |
+
+En PC, el perfilador de muestreo (`T123_PROFILE=1`) mostró que el hilo de la lógica de pelea pasaba la mayor parte del tiempo cambiando el modo de redondeo de la FPU real. Ahora:
+- Las conversiones y el redondeo a entero de x87 no dependen del modo del host.
+- El modo del host se guarda por hilo y solo cambia cuando el juego cambia de RC.
+
+Las pruebas contra la FPU real siguen pasando. En PC, ese hilo trabaja unas 3 veces menos.
+
 Detalle del lector de solo lectura: los archivos de solo lectura ya no pasan por stdio, porque stdio vaciaba y rellenaba su búfer en cada `fseek`. Ahora el posicionamiento solo cambia un número, las lecturas pequeñas salen de un bloque de 32 KiB en caché y las grandes van directas a la tarjeta (`sceIoPread`). Los archivos ociosos se siguen reutilizando. En PC, hasta la pelea: `SetFilePointer` 0 ms y 413 000 `ReadFile` en 210 ms. Para probar en PC la ruta de texturas de la Vita existe `python recomp/build_host.py --packed-textures`.
 
 **Problema abierto:** con compresión asíncrona, 2 de 6 ejecuciones en PC hasta la pelea fallaron con «invalid parameter» del CRT dentro de `free` (0x81ff7c, llamado desde 0x402970), en los fotogramas 2074 y 2286. Las ejecuciones sin compresión (0 de 6) y con compresión síncrona (`T123_PACK_SYNC=1`, 0 de 1) no fallaron. Es una carrera que aún no he localizado. `HeapFree` y `HeapSize` registran ahora cualquier puntero que no sea un bloque vivo, con su cabecera.
