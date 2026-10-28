@@ -128,3 +128,4 @@ void audio_out_start(void); /* audio_out_sdl.c (PC) / vita/audio_out_vita.c: pla
 #ifndef __vita__
 void profile_start(void); void profile_register_thread(uint32_t guest_id); void profile_write(void); /* profile_pc.c */
 #endif
+void find_close(void *f); /* kernel32.c: FindFirstFileA state */

@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
 
@@ -532,6 +534,77 @@ API(GetFileAttributesA) {
     trace("GetFileAttributesA(%s) = %08x", STR(ARG(c, 0)), r);
     ret_stdcall(c, r, 1);
 }
+/* FindFirstFileA / FindNextFileA: directory listing with * and ? (case-insensitive),
+   used by the replay and profile menus. WIN32_FIND_DATAA: attributes at 0, size at
+   28 (high) and 32 (low), name at 44. */
+typedef struct { DIR *dir; char dir_path[1024], pattern[260]; } FindState;
+
+static int wild_match(const char *p, const char *s) {
+    for (; *p; p++, s++) {
+        if (*p == '*') {
+            while (p[1] == '*') p++;
+            if (!p[1]) return 1;
+            for (; *s; s++)
+                if (wild_match(p + 1, s)) return 1;
+            return 0;
+        }
+        if (!*s || (*p != '?' && tolower((unsigned char)*p) != tolower((unsigned char)*s))) return 0;
+    }
+    return !*s;
+}
+
+static int find_next(FindState *f, uint32_t out) {
+    struct dirent *e;
+    while (f->dir && (e = readdir(f->dir))) {
+        if (!wild_match(f->pattern, e->d_name)) continue;
+        char full[1300];
+        struct stat st;
+        snprintf(full, sizeof full, "%s/%s", f->dir_path, e->d_name);
+        int is_dir = stat(full, &st) == 0 && (st.st_mode & S_IFDIR);
+        memset(G(out), 0, 320);
+        wr32(out, is_dir ? 0x10 : 0x80);
+        wr32(out + 32, is_dir ? 0 : (uint32_t)st.st_size);
+        snprintf(STR(out + 44), 260, "%s", e->d_name);
+        return 1;
+    }
+    return 0;
+}
+
+API(FindFirstFileA) {
+    char path[1200];
+    path_to_host(STR(ARG(c, 0)), path, sizeof path);
+    FindState *f = calloc(1, sizeof *f);
+    char *slash = strrchr(path, '/');
+    snprintf(f->pattern, sizeof f->pattern, "%s", slash ? slash + 1 : path);
+    if (slash) { *slash = 0; snprintf(f->dir_path, sizeof f->dir_path, "%s", path); }
+    else snprintf(f->dir_path, sizeof f->dir_path, ".");
+    f->dir = opendir(f->dir_path);
+    uint32_t h = 0xFFFFFFFFu;
+    if (find_next(f, ARG(c, 1))) {
+        h = handle_new(H_FIND, f, 0);
+    } else {
+        if (f->dir) closedir(f->dir);
+        free(f);
+        last_error = 2; /* ERROR_FILE_NOT_FOUND */
+    }
+    trace("FindFirstFileA(%s) = %08x", STR(ARG(c, 0)), h);
+    ret_stdcall(c, h, 2);
+}
+API(FindNextFileA) {
+    FindState *f = handle_get(ARG(c, 0), H_FIND);
+    int ok = f && find_next(f, ARG(c, 1));
+    if (!ok) last_error = 18; /* ERROR_NO_MORE_FILES */
+    ret_stdcall(c, (uint32_t)ok, 2);
+}
+API(FindClose) { handle_close(ARG(c, 0)); ret_stdcall(c, 1, 1); }
+
+/* handle_close for H_FIND */
+void find_close(void *p) {
+    FindState *f = p;
+    if (f->dir) closedir(f->dir);
+    free(f);
+}
+
 API(CreateDirectoryA) {
     char path[1200];
     path_to_host(STR(ARG(c, 0)), path, sizeof path);
@@ -654,6 +727,7 @@ const ApiEntry win32_kernel32[] = {
     E(MultiByteToWideChar), E(WideCharToMultiByte), E(GetStringTypeW), E(LCMapStringW),
     E(GetStdHandle), E(SetStdHandle), E(GetFileType), E(SetHandleCount), E(CreateFileA), E(ReadFile),
     E(WriteFile), E(SetFilePointer), E(GetFileSize), E(FlushFileBuffers), E(GetFileAttributesA),
+    E(FindFirstFileA), E(FindNextFileA), E(FindClose),
     E(CreateDirectoryA), E(DeleteFileA), E(SetCurrentDirectoryA), E(GetCurrentDirectoryA), E(lstrlenA),
     E(GetPrivateProfileIntA), E(GetPrivateProfileStringA),
     E(GetConsoleCP), E(GetConsoleOutputCP), E(GetConsoleMode), E(RaiseException), E(UnhandledExceptionFilter),

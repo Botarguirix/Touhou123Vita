@@ -264,6 +264,8 @@ void handle_close(uint32_t h) {
         fclose(s->host);
     if (s->type == H_RFILE && s->host)
         rfile_close(s->host);
+    if (s->type == H_FIND && s->host)
+        find_close(s->host);
     memset(s, 0, sizeof *s);
 }
 
