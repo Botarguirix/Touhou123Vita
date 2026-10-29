@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -84,7 +85,13 @@ def main() -> None:
         raise SystemExit("\n".join(errors))
     compile_seconds = time.monotonic() - started
 
-    elf, velf, self_, sfo = out / "t123.elf", out / "t123.velf", out / "eboot.bin", out / "param.sfo"
+    # T123_LINK_DIR: write the ELF, eboot and VPK there and copy the VPK back. On one
+    # machine ld and vita-elf-create failed with "No space left on device" / "I/O error"
+    # on every C: path (66 GB free) and worked on another drive.
+    link_dir = os.environ.get("T123_LINK_DIR")
+    work = Path(link_dir) if link_dir else out
+    work.mkdir(parents=True, exist_ok=True)
+    elf, velf, self_, sfo = work / "t123.elf", work / "t123.velf", work / "eboot.bin", work / "param.sfo"
     run([CC, "-Wl,-q", "-Wl,-z,nocopyreloc", *[t[1] for t in tasks], *LIBS, "-o", elf])
     run([BIN / "vita-elf-create.exe", elf, velf])
     run([BIN / "vita-make-fself.exe", "-c", velf, self_])
@@ -101,8 +108,10 @@ def main() -> None:
             "-a", f"{sce_sys / 'livearea/contents/bg.png'}=sce_sys/livearea/contents/bg.png",
             "-a", f"{sce_sys / 'livearea/contents/startup.png'}=sce_sys/livearea/contents/startup.png",
             "-a", f"{sce_sys / 'livearea/contents/template.xml'}=sce_sys/livearea/contents/template.xml",
-            vpk]
+            work / vpk.name]
     run(pack)
+    if work != out:
+        shutil.copyfile(work / vpk.name, vpk)
     text_size = run([BIN / "arm-vita-eabi-size.exe", elf]).stdout.strip().splitlines()[-1].split()
     print(f"compiled {len(tasks)} objects in {compile_seconds:.0f} s")
     print(f"ELF text={int(text_size[0]) // 1024} KiB data={int(text_size[1]) // 1024} KiB "
