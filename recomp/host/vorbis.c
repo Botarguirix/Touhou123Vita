@@ -15,6 +15,7 @@
 #include "win32.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vorbis/vorbisfile.h>
@@ -32,6 +33,7 @@ typedef struct {
 } Stream;
 
 static Stream streams[MAX_STREAMS];
+static uint64_t decode_us, decoded_bytes; /* for vorbis_stats (heartbeat) */
 static pthread_mutex_t streams_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static Stream *find_stream(uint32_t vf) {
@@ -100,6 +102,9 @@ static void native_open(Cpu *c) {
         trace("# vorbis: ov_open_callbacks(%08x) failed %d", vf, r);
         s->vf = 0;
     }
+    unsigned live = 0;
+    for (unsigned i = 0; i < MAX_STREAMS; i++) live += streams[i].vf != 0;
+    trace("# vorbis: open %08x -> %d, %u streams open", vf, r, live);
     ret_eax(c, (uint32_t)r);
 }
 
@@ -131,8 +136,11 @@ static void native_read(Cpu *c) {
     if (!s) { ret_eax(c, (uint32_t)OV_EINVAL); return; }
     s->cpu = c;
     int bitstream = 0;
+    uint64_t t0 = platform_ticks_us();
     long r = ov_read(&s->file, (char *)G(arg(c, 1)), (int)arg(c, 2), (int)arg(c, 3), (int)arg(c, 4),
                      (int)arg(c, 5), &bitstream);
+    decode_us += platform_ticks_us() - t0;
+    if (r > 0) decoded_bytes += (uint64_t)r;
     if (arg(c, 6)) wr32(arg(c, 6), (uint32_t)bitstream);
     ret_eax(c, (uint32_t)r);
 }
@@ -153,9 +161,29 @@ static void native_time_seek(Cpu *c) {
     ret_eax(c, (uint32_t)ov_time_seek(&s->file, t));
 }
 
+/* Decode time and PCM bytes since the last call. */
+void vorbis_stats(uint64_t *us, uint64_t *bytes) {
+    *us = decode_us; *bytes = decoded_bytes;
+    decode_us = decoded_bytes = 0;
+}
+
 void vorbis_init(void) {
-    const char *off = getenv("T123_GUEST_VORBIS"); /* 1 = keep the translated decoder */
-    if (off && *off == '1') return;
+    /* Keep the translated decoder: T123_GUEST_VORBIS=1, or on the Vita a file
+       guest-vorbis.txt next to th123.exe (for comparing by ear). */
+    const char *off = getenv("T123_GUEST_VORBIS");
+    FILE *flag = fopen(
+#ifdef __vita__
+        "ux0:data/touhou123vita/guest-vorbis.txt"
+#else
+        "guest-vorbis.txt"
+#endif
+        , "rb");
+    if (flag) fclose(flag);
+    if ((off && *off == '1') || flag) {
+        trace("# vorbis: translated decoder (native one switched off)");
+        return;
+    }
+    trace("# vorbis: native libvorbis");
     guest_intercept(0x008107a0u, native_open);
     guest_intercept(0x008106a0u, native_clear);
     guest_intercept(0x008125c0u, native_info);

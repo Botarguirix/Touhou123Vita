@@ -523,7 +523,27 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
 static uint8_t *last_frame;
 static uint32_t capture_w, capture_h;
 
+/* Every 10 s: game steps, frames drawn and music decode cost, so a run that freezes
+   (and never writes its exit report) still shows where it was going. */
+static void heartbeat(int drawn) {
+    static uint64_t next, steps, draws;
+    uint64_t now = platform_ticks_us();
+    steps++;
+    draws += drawn != 0;
+    if (!next) next = now + 10000000;
+    if (now < next) return;
+    uint64_t us, bytes;
+    vorbis_stats(&us, &bytes);
+    trace("# heartbeat: frame %llu, %llu steps and %llu frames drawn in the last 10 s, "
+          "music decode %llu ms for %llu KiB", (unsigned long long)d3d_frames,
+          (unsigned long long)steps, (unsigned long long)draws, (unsigned long long)(us / 1000),
+          (unsigned long long)(bytes >> 10));
+    steps = draws = 0;
+    next = now + 10000000;
+}
+
 void render_present(void) {
+    heartbeat(!skip_drawing);
 #ifdef __vita__
     static uint64_t last_swap, skipped;
     if (skip_drawing) { /* nothing was drawn: no swap, no wait for the display */
