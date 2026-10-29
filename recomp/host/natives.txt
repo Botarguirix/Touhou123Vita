@@ -9,3 +9,4 @@
 00812600  ov_read
 008124d0  ov_time_tell
 008123d0  ov_time_seek
+0041c080  resource factory (th123e.c)

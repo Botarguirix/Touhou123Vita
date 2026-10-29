@@ -140,6 +140,7 @@ int main(int argc, char **argv) {
     crt_native_init();
     game_checks_init();
     vorbis_init();
+    th123e_init();
     d3d9_init();
     media_init();
     const char *frames = getenv("T123_FRAMES"); /* 0 = run until the window closes */
