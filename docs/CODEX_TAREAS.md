@@ -29,6 +29,7 @@ edita solo los archivos que indica la tarea y termina con el informe final.
 | T12 | Mezclador de audio para DirectSound | Alta, audio | Pendiente |
 | T13 | Informe de trazas (`trace_report.py`) | Media, medición de la carga en Vita | Pendiente |
 | T14 | Recursión infinita al cerrar tras fallar `CreateDevice` | Baja | Pendiente |
+| T15 | Análisis de la traducción al inglés `th123e` (v1.1a) | Alta | Pendiente |
 
 ### Reglas comunes de T7–T14 (fases H2–H4)
 
@@ -346,3 +347,27 @@ void audio_mix(int16_t *out, uint32_t frames, uint32_t out_rate);
 **Archivos que puedes crear o editar:** `docs/EXIT_CRASH.md` y, solo para reproducirlo, `recomp/host/d3d9.c`.
 
 **Entrega.** La cadena de llamadas con direcciones, la causa con su nivel de confianza y el arreglo propuesto en el host.
+
+
+---
+
+## T15 — Análisis de la traducción al inglés `th123e` (v1.1a)
+
+**Objetivo.** El usuario tiene la traducción no oficial al inglés v1.1a (2011-10-19, para la 1.10a) en el paquete «Soku»: `F:\Download\Touhou\TOUHOU 123\Touhou 12.3 - Hisoutensoku\Soku\` (`th123e.exe` 8 KiB, `th123e.dll` 243 200 bytes, `th123e.dat` 2 073 690 bytes). `th123e.exe` arranca el juego suspendido e inyecta `th123e.dll` (`CreateRemoteThread`). El DLL parchea código en memoria (`VirtualProtect`), registra una fuente propia (`AddFontMemResourceEx`, `CreateFontW`, `GetGlyphOutlineW`) y lee `th123e.dat`. En nuestra recompilación estática los parches en memoria del código no tienen efecto, así que hay que reproducir su comportamiento en la capa del host. Esta tarea **solo analiza**: decide el diseño, pero no lo implementa.
+
+**Pasos.**
+1. **Copia de trabajo.** Copia los tres archivos a `artifacts/th123e/` (ignorado por git) y trabaja sobre la copia. No ejecutes nada del paquete.
+2. **Formato de `th123e.dat`.** Documenta cabecera, índice, cifrado o compresión y una lista de los recursos que contiene, con nombre, tipo y tamaño. ¿Usa el mismo formato y los mismos nombres que `th123a/b/c.dat`, de modo que cada entrada sustituye a un recurso del juego? Escribe un lector que liste las entradas.
+3. **Parches del DLL.** Desensambla `th123e.dll` (MinGW, i386) y enumera cada escritura sobre la imagen de `th123.exe` 1.10a (SHA-256 `f0db9366…a16731e`): dirección, bytes originales y nuevos, y a qué función del DLL desvía. Clasifícalas:
+   - (a) búsqueda o apertura de recursos: dónde engancha para dar prioridad a `th123e.dat`;
+   - (b) texto y fuentes: cambio a W/Unicode, anchos o espaciado;
+   - (c) correcciones de diseño, como el recorte del lado izquierdo del texto;
+   - (d) otras.
+   Para cada una indica si se podría hacer desde el host: interceptar una función del juego, servir otro recurso o cambiar un valor en GDI.
+4. **Propuesta.** Explica cómo lo haría la capa del host. Por ejemplo, interceptar la función de apertura de recursos del juego y servir primero desde `th123e.dat`, y usar la fuente libre de T8 para el texto en inglés. Estima qué parte del parche quedaría cubierta y qué no.
+
+**Archivos que puedes crear:** `tools/th123e_dat.py`, `tests/test_th123e_dat.py` (se salta si falta `artifacts/th123e/th123e.dat`), `docs/TH123E_ANALYSIS.md`. No subas ni el DAT, ni el DLL, ni nada extraído: solo nombres, direcciones, conteos y conclusiones.
+
+**Verificación.** `python -m unittest tests.test_th123e_dat -v` pasa. `python tools/th123e_dat.py artifacts/th123e/th123e.dat` lista las entradas y escribe el informe en `artifacts/th123e/index.json`.
+
+**Entrega.** El formato del DAT, la tabla de parches con direcciones y clasificación, y la propuesta de implementación con su nivel de confianza.

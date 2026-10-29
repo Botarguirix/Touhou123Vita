@@ -108,9 +108,13 @@ static unsigned lifted_count;
 static GuestEntry intercepts[2048]; /* kept sorted by address */
 static unsigned intercept_count;
 
+static void call_put(uint32_t address, GuestFn fn, int replace);
+
 void guest_register(const GuestEntry *table, unsigned count) {
     lifted = table;
     lifted_count = count;
+    for (unsigned i = 0; i < count; i++)
+        call_put(table[i].address, table[i].fn, 0); /* an earlier intercept keeps priority */
 }
 
 static GuestFn search(const GuestEntry *table, unsigned count, uint32_t target) {
@@ -133,6 +137,7 @@ void guest_intercept(uint32_t address, GuestFn fn) {
         i++;
     if (i < intercept_count && intercepts[i].address == address) {
         intercepts[i].fn = fn; /* replace */
+        call_put(address, fn, 1);
         return;
     }
     if (intercept_count == sizeof intercepts / sizeof intercepts[0]) {
@@ -142,14 +147,46 @@ void guest_intercept(uint32_t address, GuestFn fn) {
     memmove(&intercepts[i + 1], &intercepts[i], (intercept_count - i) * sizeof intercepts[0]);
     intercepts[i] = (GuestEntry){address, fn};
     intercept_count++;
+    call_put(address, fn, 1);
 }
 
 /* The lifted function at an address, ignoring intercepts (for wrappers). */
 GuestFn guest_lifted(uint32_t address) { return search(lifted, lifted_count, address); }
 
+/* Call targets resolved through one open-addressing hash table: the game is C++ and
+   calls through vtables constantly, and two binary searches per indirect call (the
+   intercepts, then the 6400 lifted functions) were ~7% of the fight logic thread on
+   PC. An intercept replaces the lifted entry for its address. Entries are added while
+   the game runs (COM classes intercept their methods on first use, from any thread):
+   the function is stored before the address, and lookups read the address first. */
+enum { CALL_SLOTS = 1u << 15 };
+static GuestEntry call_table[CALL_SLOTS];
+
+static unsigned call_slot(uint32_t address) { return (address * 2654435761u) >> (32 - 15); }
+
+static void call_put(uint32_t address, GuestFn fn, int replace) {
+    for (unsigned i = call_slot(address), n = 0; n < CALL_SLOTS; i = (i + 1) & (CALL_SLOTS - 1), n++) {
+        uint32_t at = __atomic_load_n(&call_table[i].address, __ATOMIC_ACQUIRE);
+        if (at == address) {
+            if (replace) __atomic_store_n(&call_table[i].fn, fn, __ATOMIC_RELEASE);
+            return;
+        }
+        if (!at) {
+            __atomic_store_n(&call_table[i].fn, fn, __ATOMIC_RELEASE);
+            __atomic_store_n(&call_table[i].address, address, __ATOMIC_RELEASE);
+            return;
+        }
+    }
+    fprintf(stderr, "guest: call table full\n");
+    exit(3);
+}
+
 static GuestFn find(uint32_t target) {
-    GuestFn fn = intercept_count ? search(intercepts, intercept_count, target) : NULL;
-    return fn ? fn : search(lifted, lifted_count, target);
+    for (unsigned i = call_slot(target);; i = (i + 1) & (CALL_SLOTS - 1)) {
+        uint32_t at = __atomic_load_n(&call_table[i].address, __ATOMIC_ACQUIRE);
+        if (at == target) return __atomic_load_n(&call_table[i].fn, __ATOMIC_ACQUIRE);
+        if (!at) return NULL;
+    }
 }
 
 #ifdef __vita__
@@ -384,29 +421,6 @@ uint16_t x87_get_sw(Cpu *c) {
 }
 
 static inline unsigned phys(Cpu *c, unsigned i) { return (c->fpu.top + i) & 7; }
-
-x87_t x87_st(Cpu *c, unsigned i) { return c->fpu.st[phys(c, i)]; }
-void x87_set_st(Cpu *c, unsigned i, x87_t v) {
-    unsigned p = phys(c, i);
-    c->fpu.st[p] = v;
-    c->fpu.tag_empty &= (uint8_t)~(1u << p);
-}
-
-void x87_push(Cpu *c, x87_t v) {
-    c->fpu.top = (c->fpu.top - 1) & 7;
-    unsigned p = c->fpu.top;
-    if (!(c->fpu.tag_empty & (1u << p))) {
-        c->fpu.sw |= 0x0241; /* stack fault: IE, SF, C1=1 (overflow) */
-        v = (x87_t)NAN;      /* masked response: indefinite */
-    }
-    c->fpu.st[p] = v;
-    c->fpu.tag_empty &= (uint8_t)~(1u << p);
-}
-
-void x87_pop(Cpu *c) {
-    c->fpu.tag_empty |= (uint8_t)(1u << c->fpu.top);
-    c->fpu.top = (c->fpu.top + 1) & 7;
-}
 
 /* Conversions and integer rounding under a directed RC do not touch the host FPU:
    switching its mode per operation (fegetround/fesetround) was most of the game logic

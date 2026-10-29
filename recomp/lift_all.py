@@ -129,6 +129,7 @@ def main() -> None:
         "traps": {"game": sum(1 for va in lifter.traps if region(va) == "game"),
                   "library": sum(1 for va in lifter.traps if region(va) == "library")},
         "faults_total": len(result.faults),
+        "dead_flag_instructions": result.dead_flags,
         "faults_game": sum(by_mnemonic["game"].values()),
         "faults_library": sum(by_mnemonic["library"].values()),
         "fault_mnemonics_game": dict(by_mnemonic["game"].most_common()),

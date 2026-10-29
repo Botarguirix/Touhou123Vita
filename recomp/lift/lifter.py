@@ -9,6 +9,7 @@ DC/DE forms makes mnemonic-based decoding unsafe.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -69,6 +70,7 @@ class LiftResult:
     source: str
     functions: list[int]
     faults: dict[int, str] = field(default_factory=dict)  # address -> instruction text
+    dead_flags: int = 0  # instructions emitted without their (unread) flags
 
 
 class Lifter:
@@ -78,6 +80,7 @@ class Lifter:
         self.entries = entries
         self.lifted: set[int] = set()
         self.traps: set[int] = set()
+        self.eliminate_dead_flags = True
 
     # -- operands -------------------------------------------------------------------------
     def reg(self, ins, reg_id) -> str:
@@ -470,6 +473,130 @@ class Lifter:
                 return f"x87_comi(c, {rm}, 1);"
         raise Unsupported(f"x87 {op:02X} {0xC0 | reg << 3 | rm:02X}")
 
+    # -- flag liveness ---------------------------------------------------------------------------
+    # Arithmetic writes CF ZF SF OF PF into the Cpu on every instruction, and the C
+    # compiler cannot drop those stores (Cpu is memory and calls are everywhere).
+    # Within a function, flags that no later instruction reads are dead: such add/sub,
+    # logic, inc/dec, cmp and test are emitted without flags. Conservative edges: at
+    # ret, indirect jumps, tail calls and unresolved jumps every flag is live; a call
+    # clobbers them; a shift/rotate by cl may leave them unchanged, so it kills none.
+    FLAG_BITS = {
+        "cf": (X.X86_EFLAGS_MODIFY_CF | X.X86_EFLAGS_RESET_CF | X.X86_EFLAGS_SET_CF | X.X86_EFLAGS_UNDEFINED_CF,
+               X.X86_EFLAGS_TEST_CF),
+        "zf": (X.X86_EFLAGS_MODIFY_ZF | X.X86_EFLAGS_RESET_ZF | X.X86_EFLAGS_SET_ZF | X.X86_EFLAGS_UNDEFINED_ZF,
+               X.X86_EFLAGS_TEST_ZF),
+        "sf": (X.X86_EFLAGS_MODIFY_SF | X.X86_EFLAGS_RESET_SF | X.X86_EFLAGS_SET_SF | X.X86_EFLAGS_UNDEFINED_SF,
+               X.X86_EFLAGS_TEST_SF),
+        "of": (X.X86_EFLAGS_MODIFY_OF | X.X86_EFLAGS_RESET_OF | X.X86_EFLAGS_SET_OF | X.X86_EFLAGS_UNDEFINED_OF,
+               X.X86_EFLAGS_TEST_OF),
+        "pf": (X.X86_EFLAGS_MODIFY_PF | X.X86_EFLAGS_RESET_PF | X.X86_EFLAGS_SET_PF | X.X86_EFLAGS_UNDEFINED_PF,
+               X.X86_EFLAGS_TEST_PF),
+    }
+    ALL_FLAGS = frozenset(FLAG_BITS)
+    READS_ALL = ("pushfd", "pushf", "lahf")
+    SIMPLE_DEAD = ("add", "sub", "and", "or", "xor", "cmp", "test", "inc", "dec")
+
+    def flag_effects(self, ins) -> tuple[frozenset, frozenset]:
+        """(read, killed) flag sets of one instruction."""
+        base = ins.mnemonic.split()[-1]
+        if base in self.READS_ALL:
+            return self.ALL_FLAGS, frozenset()
+        # Capstone does not report these reads (checked): rcl/rcr/cmc/salc read CF and
+        # into reads OF. Missing rcl/rcr cost a crash in the CRT's 64-bit arithmetic.
+        extra = {"rcl": {"cf"}, "rcr": {"cf"}, "cmc": {"cf"}, "salc": {"cf"}, "into": {"of"},
+                 "daa": {"cf"}, "das": {"cf"}, "aaa": {"cf"}, "aas": {"cf"}}.get(base, set())
+        if ins.group(X.X86_GRP_CALL):
+            return frozenset(), self.ALL_FLAGS
+        if any(op.type == X.X86_OP_REG and ins.reg_name(op.reg).startswith("xmm") for op in ins.operands):
+            # SSE: Capstone reports cmpltsd & co. as EFLAGS writers; only the comis family is.
+            if base in ("comisd", "comiss", "ucomisd", "ucomiss"):
+                return frozenset(), self.ALL_FLAGS
+            return frozenset(), frozenset()
+        if ins.group(X.X86_GRP_FPU) or base.startswith("f"):
+            # Capstone's eflags shares a union with fpu_flags for x87 instructions, so it
+            # cannot be trusted there (fchs looked like an EFLAGS writer and killed a cmp;
+            # some fstp/fldl2e are not even in the FPU group and claimed to write CF).
+            if base.startswith("fcmov"):
+                return self.ALL_FLAGS, frozenset()
+            if base in ("fcomi", "fcomip", "fucomi", "fucomip"):
+                return frozenset(), self.ALL_FLAGS
+            return frozenset(), frozenset()
+        eflags = getattr(ins, "eflags", 0) or 0
+        read = frozenset(f for f, (_, test) in self.FLAG_BITS.items() if eflags & test) | extra
+        kill = frozenset(f for f, (mod, _) in self.FLAG_BITS.items() if eflags & mod)
+        if base in SHIFTS or base in ("shld", "shrd"):
+            if any(op.type == X.X86_OP_REG for op in ins.operands[1:]) or \
+               (len(ins.operands) > 1 and ins.operands[-1].type == X.X86_OP_IMM and ins.operands[-1].imm & 31 == 0):
+                kill = frozenset()
+        return read, kill
+
+    def dead_flag_insns(self, fn: Function) -> set:
+        """Addresses whose written flags are never read (see above)."""
+        info, succ, live_out_all = {}, {}, set()
+        for va in fn.insns:
+            ins = self.d._decode_detail(va)
+            info[va] = (ins, *self.flag_effects(ins))
+            base = ins.mnemonic.split()[-1]
+            nxt = va + ins.size
+            s = []
+            terminal = base in ("ret", "retf", "iretd") or base.startswith(("int3", "hlt", "ud2"))
+            if base == "jmp" or ins.group(X.X86_GRP_JUMP):
+                op = ins.operands[0] if ins.operands else None
+                if op is not None and op.type == X.X86_OP_IMM and op.imm in fn.insns:
+                    s.append(op.imm)
+                else:
+                    live_out_all.add(va)  # indirect, table or tail call
+                if base != "jmp":
+                    s.append(nxt)
+            elif not terminal:
+                s.append(nxt)
+            if terminal or va in fn.dynamic_tailcalls or va in fn.unresolved_jumps:
+                live_out_all.add(va)
+            for t in s:
+                if t not in fn.insns:
+                    live_out_all.add(va)
+            succ[va] = [t for t in s if t in fn.insns]
+        live_in = {va: frozenset() for va in fn.insns}
+        changed = True
+        while changed:
+            changed = False
+            for va in sorted(fn.insns, reverse=True):
+                ins, read, kill = info[va]
+                out = self.ALL_FLAGS if va in live_out_all else frozenset().union(*(live_in[t] for t in succ[va]))
+                new = read | (out - kill)
+                if new != live_in[va]:
+                    live_in[va] = new
+                    changed = True
+        dead = set()
+        for va, (ins, read, kill) in info.items():
+            if ins.mnemonic.split()[-1] not in self.SIMPLE_DEAD or len(ins.mnemonic.split()) > 1:
+                continue
+            out = self.ALL_FLAGS if va in live_out_all else frozenset().union(*(live_in[t] for t in succ[va]))
+            if kill and not (out & kill):
+                dead.add(va)
+        return dead
+
+    @staticmethod
+    def dead_flags_applies(entry: int) -> bool:
+        """T123_DEAD_FLAGS_RANGE=lo-hi (hex) limits the pass to those functions (bisecting)."""
+        spec = os.environ.get("T123_DEAD_FLAGS_RANGE")
+        if not spec:
+            return True
+        lo, hi = (int(v, 16) for v in spec.split("-"))
+        return lo <= entry < hi
+
+    def lift_plain(self, ins) -> str:
+        """The instruction without its flags (it is in dead_flag_insns)."""
+        base, ops = ins.mnemonic.split()[-1], ins.operands
+        t = CTYPE[ops[0].size]
+        if base in ("cmp", "test"):
+            return ";"
+        if base in ("inc", "dec"):
+            return self.rmw(ins, ops[0], lambda x: f"({t})({x} {'+' if base == 'inc' else '-'} 1u)")
+        op = {"add": "+", "sub": "-", "and": "&", "or": "|", "xor": "^"}[base]
+        src = self.read(ins, ops[1], ops[0].size)
+        return self.rmw(ins, ops[0], lambda x: f"({t})({x} {op} {src})")
+
     # -- functions ---------------------------------------------------------------------------
     def lift_function(self, fn: Function, result: LiftResult) -> str:
         lines = [f"void {fn_name(fn.entry)}(Cpu *c) {{", f"    T123_ENTER(0x{fn.entry:08x}u);"]
@@ -477,11 +604,13 @@ class Lifter:
             lines.append(f"    guest_fault(c, 0x{fn.entry:08x}u, \"entry does not decode\");")
         addresses = sorted(fn.insns)
         lines.append(f"    goto L_{fn.entry:08x};")
+        dead = self.dead_flag_insns(fn) if self.eliminate_dead_flags and self.dead_flags_applies(fn.entry) else set()
+        result.dead_flags += len(dead)
         for i, va in enumerate(addresses):
             ins = self.d._decode_detail(va)
             text = f"{ins.mnemonic} {ins.op_str}".strip()
             try:
-                body = self.lift_insn(fn, ins)
+                body = self.lift_plain(ins) if va in dead else self.lift_insn(fn, ins)
             except Unsupported as exc:
                 result.faults[va] = f"{text} ({exc})"
                 body = f'guest_fault(c, 0x{va:08x}u, "unsupported: {text}");'

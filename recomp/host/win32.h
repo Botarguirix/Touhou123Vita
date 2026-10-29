@@ -124,6 +124,9 @@ void com_summary(void);
 void rfile_close(void *r); /* kernel32.c: keeps idle read-only files for reuse */
 GuestFn guest_lifted(uint32_t address); /* runtime/guest.c: the translated original, for wrappers */
 void game_checks_init(void); /* game_checks.c */
+void vorbis_init(void);      /* vorbis.c: native vorbisfile */
+void vorbis_stats(uint64_t *us, uint64_t *bytes);
+void th123e_init(void);      /* th123e.c: English patch resources */
 void audio_out_start(void); /* audio_out_sdl.c (PC) / vita/audio_out_vita.c: plays audio_mix */
 #ifndef __vita__
 void profile_start(void); void profile_register_thread(uint32_t guest_id); void profile_write(void); /* profile_pc.c */
