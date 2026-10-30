@@ -89,7 +89,32 @@ static void set_action_checked(Cpu *c) {
     set_action_original(c);
 }
 
+/* 0x444620 pops the front of the std::list at 0x89a884 (head node [0x89a888], size
+   [0x89a88c]) until its size comes down to the byte at 0x89a456. On the Vita, after a
+   few fights, the size said there were nodes left in an empty list and the checked
+   iterator stopped the game (dump: f_00444620 -> 0x81ff70). The size is set to the real
+   node count before the original runs; why they disagree is still open. */
+static GuestFn trim_list_original;
+
+static void trim_list_checked(Cpu *c) {
+    uint32_t head = rd32(0x89a888u), size = rd32(0x89a88cu), n = 0;
+    if (head) {
+        for (uint32_t node = rd32(head + 4); node && node != head && n < 100000; node = rd32(node + 4))
+            n++;
+        if (n != size) {
+            static unsigned reported;
+            if (reported++ < 10)
+                trace("# list 0x89a884: size %u but %u nodes, thread %08x", size, n, rd32(c->fs_base + 0x24));
+            wr32(0x89a88cu, n);
+        }
+    }
+    trim_list_original(c);
+}
+
 void game_checks_init(void) {
+    trim_list_original = guest_lifted(0x00444620u);
+    if (trim_list_original)
+        guest_intercept(0x00444620u, trim_list_checked);
     set_action_original = guest_lifted(0x00465370u);
     if (set_action_original)
         guest_intercept(0x00465370u, set_action_checked);
