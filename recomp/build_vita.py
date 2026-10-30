@@ -103,6 +103,16 @@ def main() -> None:
     extra = []
     if art.is_dir():
         shutil.copytree(art, sce_sys, dirs_exist_ok=True)
+        # the Vita refuses to install a VPK whose sce_sys PNGs are not 8-bit indexed
+        # (0x8010113D); Pillow writes a palette of <= 16 colours with 4 bits, so the
+        # palette is padded to 256 entries
+        from PIL import Image
+        for png in sce_sys.rglob("*.png"):
+            with Image.open(png) as im:
+                q = im.convert("RGB").quantize(256)
+            palette = q.getpalette()
+            q.putpalette(palette + [0] * (768 - len(palette)))
+            q.save(png)
         if (sce_sys / "pic0.png").exists():
             extra = ["-a", f"{sce_sys / 'pic0.png'}=sce_sys/pic0.png"]
     font = ROOT / "assets/font.rgba"
