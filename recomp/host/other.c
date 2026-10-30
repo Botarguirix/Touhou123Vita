@@ -170,11 +170,12 @@ static int glyphs_ready(void) {
     if (state) return state > 0;
     char path[1200];
     const char *name = "NotoSansMonoCJKjp-Regular.otf", *env = getenv("T123_FONT");
-    const char *candidates[3] = {env, "%s/%s", "%s/../local/fonts/%s"};
+    const char *candidates[4] = {env, "%s/%s", "%s/../local/fonts/%s", "app0:assets/%s"}; /* last: the VPK's copy */
     state = -1;
-    for (unsigned k = 0; k < 3 && state < 0; k++) {
+    for (unsigned k = 0; k < 4 && state < 0; k++) {
         if (!candidates[k]) continue;
         if (k == 0) snprintf(path, sizeof path, "%s", env);
+        else if (k == 3) snprintf(path, sizeof path, candidates[k], name);
         else snprintf(path, sizeof path, candidates[k], host_data_dir, name);
         if (glyph_init(path) == 0) state = 1;
     }

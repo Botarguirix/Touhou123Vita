@@ -25,13 +25,13 @@ SHA = "f0db93660ceb8635a1921e0ba4686fcfbd5c492311dee6ef7061b7bada16731e"
 VITASDK = Path(os.environ.get("VITASDK", r"C:\vitasdk"))
 BIN = VITASDK / "bin"
 CC = BIN / "arm-vita-eabi-gcc.exe"
-TITLE_ID, TITLE = "THSV12302", "Touhou123Vita Recomp"
+TITLE_ID, TITLE = "THSV12302", "Touhou12.3Vita Hisoutensoku"
 VITA_LIBS = ROOT / "artifacts/vita-libs"  # zlib 1.2.3 built by third_party/vita-libs/build.ps1 (T4)
 RUNTIME, HOST, VITA = ROOT / "recomp/runtime", ROOT / "recomp/host", ROOT / "recomp/vita"
 LIBS = ["-lvitaGL", "-lvitashark", "-lSceShaccCgExt", "-lmathneon", "-ltaihen_stub", "-lSceShaccCg_stub",
         "-lSceKernelDmacMgr_stub", "-lSceGxm_stub", "-lSceCommonDialog_stub", "-lSceAppUtil_stub",
         "-lSceSysmodule_stub", "-lSceIme_stub", "-lSceAppMgr_stub", "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceAudio_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
-        "-lSceProcessmgr_stub", f"-L{VITA_LIBS / 'lib'}", "-lvorbisfile", "-lvorbis", "-logg", "-lpng", "-lz", "-lstdc++", "-lpthread", "-lm", "-lgcc", "-lpthread"]
+        "-lSceProcessmgr_stub", f"-L{VITA_LIBS / 'lib'}", "-lvorbisfile", "-lvorbis", "-logg", "-lfreetype", "-lpng", "-lz", "-lstdc++", "-lpthread", "-lm", "-lgcc", "-lpthread"]
 
 
 def run(cmd, **kw):
@@ -75,9 +75,10 @@ def main() -> None:
     header = [RUNTIME / "guest.h"]
     tasks = [(s, objs / (s.stem + ".o"), gen_flags, header + [gen / "lifted.h"])
              for s in sorted(gen.glob("unit_*.c")) + [gen / "table.c"]]
-    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "glyph.c", "audio_out_sdl.c", "profile_pc.c")]  # glyph.c: FreeType not in VitaSDK yet (vita/glyph_none.c)
+    host_sources = [s for s in sorted(HOST.glob("*.c")) if s.name not in ("platform_pc.c", "audio_out_sdl.c", "profile_pc.c")]
     tasks += [(s, objs / ("host_" + s.stem + ".o"), host_flags, header + [HOST / "win32.h"])
-              for s in host_sources + sorted(VITA.glob("*.c")) + [RUNTIME / "guest.c"]]
+              for s in host_sources + sorted(s for s in VITA.glob("*.c") if s.name != "glyph_none.c")
+              + [RUNTIME / "guest.c"]]
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         errors = [e for e in pool.map(compile_one, tasks) if e]
@@ -118,6 +119,13 @@ def main() -> None:
     font = ROOT / "assets/font.rgba"
     if not font.exists():
         run([sys.executable, ROOT / "tools/font.py", ROOT / "assets"])
+    # the game's GDI text (dialogue, card descriptions, results) is drawn by
+    # recomp/host/glyph.c from Noto Sans Mono CJK (SIL OFL, local/fonts)
+    noto = ROOT / "local/fonts/NotoSansMonoCJKjp-Regular.otf"
+    glyph_font = []
+    if noto.exists():
+        glyph_font = ["-a", f"{noto}=assets/{noto.name}",
+                      "-a", f"{ROOT / 'local/fonts/NotoCJK-OFL.txt'}=assets/NotoCJK-OFL.txt"]
     vpk = out / "T123Recomp.vpk"
     pack = [BIN / "vita-pack-vpk.exe", "-s", sfo, "-b", self_,
             "-a", f"{font}=assets/font.rgba",
@@ -125,7 +133,7 @@ def main() -> None:
             "-a", f"{sce_sys / 'livearea/contents/bg.png'}=sce_sys/livearea/contents/bg.png",
             "-a", f"{sce_sys / 'livearea/contents/startup.png'}=sce_sys/livearea/contents/startup.png",
             "-a", f"{sce_sys / 'livearea/contents/template.xml'}=sce_sys/livearea/contents/template.xml",
-            *extra, work / vpk.name]
+            *extra, *glyph_font, work / vpk.name]
     run(pack)
     if work != out:
         shutil.copyfile(work / vpk.name, vpk)
