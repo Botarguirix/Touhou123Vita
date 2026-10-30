@@ -98,6 +98,13 @@ def main() -> None:
     run([BIN / "vita-mksfoex.exe", "-s", "APP_VER=00.01", "-s", f"TITLE_ID={TITLE_ID}", TITLE, sfo])
     sce_sys = out / "sce_sys"
     run([sys.executable, ROOT / "tools/make_livearea_assets.py", sce_sys])
+    # Codex's art (artifacts/livearea-art/ready, not in git) replaces the placeholders
+    art = ROOT / "artifacts/livearea-art/ready/sce_sys"
+    extra = []
+    if art.is_dir():
+        shutil.copytree(art, sce_sys, dirs_exist_ok=True)
+        if (sce_sys / "pic0.png").exists():
+            extra = ["-a", f"{sce_sys / 'pic0.png'}=sce_sys/pic0.png"]
     font = ROOT / "assets/font.rgba"
     if not font.exists():
         run([sys.executable, ROOT / "tools/font.py", ROOT / "assets"])
@@ -108,7 +115,7 @@ def main() -> None:
             "-a", f"{sce_sys / 'livearea/contents/bg.png'}=sce_sys/livearea/contents/bg.png",
             "-a", f"{sce_sys / 'livearea/contents/startup.png'}=sce_sys/livearea/contents/startup.png",
             "-a", f"{sce_sys / 'livearea/contents/template.xml'}=sce_sys/livearea/contents/template.xml",
-            work / vpk.name]
+            *extra, work / vpk.name]
     run(pack)
     if work != out:
         shutil.copyfile(work / vpk.name, vpk)

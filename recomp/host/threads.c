@@ -204,6 +204,10 @@ API(CreateThread) {
 #else
     pthread_attr_setstacksize(&attr, 8u << 20);
 #endif
+    /* nobody joins a guest thread (waits use t->done): a joinable one kept its 1 MiB
+       stack after returning, and the loading threads of each fight used up the Vita's
+       memory until CreateThread failed (black screen after a few fights) */
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     int err = pthread_create(&t->host, &attr, thread_main, t);
     pthread_attr_destroy(&attr);
     if (err) {
