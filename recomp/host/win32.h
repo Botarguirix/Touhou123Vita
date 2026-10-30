@@ -44,6 +44,7 @@ enum {
 _Static_assert(GUEST_VIRTUAL_BASE + GUEST_VIRTUAL_SIZE <= GUEST_WINDOW, "guest map exceeds the window");
 
 uint32_t heap_used(void);
+uint32_t heap_live_bytes(void);
 uint32_t virtual_used(void);
 extern char trace_path[256];
 /* Platform hooks (platform_pc.c / recomp/vita/platform_vita.c). */

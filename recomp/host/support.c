@@ -198,6 +198,7 @@ uint32_t heap_realloc(uint32_t p, uint32_t size, int zero) {
 }
 
 uint32_t heap_used(void) { return heap_top - GUEST_HEAP_BASE; }
+uint32_t heap_live_bytes(void) { return heap_live; }
 
 uint32_t guest_strdup(const char *s) {
     uint32_t p = heap_alloc((uint32_t)strlen(s) + 1, 0);

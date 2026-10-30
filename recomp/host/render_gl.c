@@ -534,10 +534,14 @@ static void heartbeat(int drawn) {
     if (now < next) return;
     uint64_t us, bytes;
     vorbis_stats(&us, &bytes);
+    char memory[128];
+    platform_memory_report(memory, sizeof memory);
     trace("# heartbeat: frame %llu, %llu steps and %llu frames drawn in the last 10 s, "
-          "music decode %llu ms for %llu KiB", (unsigned long long)d3d_frames,
+          "music decode %llu ms for %llu KiB; guest heap %u KiB live of %u KiB, "
+          "textures %llu KiB on the GPU, %llu KiB stored, %s", (unsigned long long)d3d_frames,
           (unsigned long long)steps, (unsigned long long)draws, (unsigned long long)(us / 1000),
-          (unsigned long long)(bytes >> 10));
+          (unsigned long long)(bytes >> 10), heap_live_bytes() >> 10, heap_used() >> 10,
+          (unsigned long long)(gpu_bytes >> 10), (unsigned long long)(texture_live >> 10), memory);
     steps = draws = 0;
     next = now + 10000000;
 }
