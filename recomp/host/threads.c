@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef __vita__
+#include <psp2/kernel/threadmgr.h>
+#endif
 
 /* Guest layout for secondary threads: TIBs after the main TIB/PEB, stacks in the free
    range below the heap. */
@@ -30,7 +33,8 @@ typedef struct {
     uint32_t start, param, exit_code, tib;
     unsigned index;
     pthread_t host;
-    Cpu cpu;             /* not _Thread_local: shared by all threads on the Vita */
+    int uid, priority;   /* Vita thread and its pending Win32 priority (SetThreadPriority) */
+    Cpu cpu;            /* not _Thread_local: shared by all threads on the Vita */
 } Thread;
 
 static pthread_mutex_t table_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -133,10 +137,29 @@ API(CreateMutexA) {
 }
 
 /* -- threads ------------------------------------------------------------------------- */
+#ifdef __vita__
+/* The game raises its music streaming threads to TIME_CRITICAL (15) and drops the
+   loaders to IDLE (-15). The Vita scheduler is strictly by priority, so ignoring that
+   let the loading threads starve the music refill, and the looping stream buffer
+   replayed stale chunks (robotic first music). Lower Vita numbers run first. */
+static void apply_priority(Thread *t) {
+    int win = t->priority, delta = win >= 15 ? -40 : win <= -15 ? 24 : -4 * win;
+    int p = 160 + delta; /* 160: the user default (SCE_KERNEL_DEFAULT_PRIORITY_USER) */
+    p = p < 64 ? 64 : p > 191 ? 191 : p;
+    int r = sceKernelChangeThreadPriority(t->uid, p);
+    trace("# thread %u: Win32 priority %d -> Vita %d (%08x)", t->index, win, p, (unsigned)r);
+}
+#endif
+
 static void *thread_main(void *arg) {
     Thread *t = arg;
     Cpu *c = &t->cpu;
-#ifndef __vita__
+#ifdef __vita__
+    pthread_mutex_lock(&table_lock);
+    t->uid = sceKernelGetThreadId();
+    if (t->priority) apply_priority(t);
+    pthread_mutex_unlock(&table_lock);
+#else
     profile_register_thread(0x1004 + 4 * t->index);
 #endif
     memset(c, 0, sizeof *c);
@@ -230,6 +253,15 @@ API(GetExitCodeThread) {
 }
 API(SetThreadPriority) {
     trace("SetThreadPriority(%08x, %d) from thread %08x", ARG(c, 0), (int32_t)ARG(c, 1), rd32(c->fs_base + 0x24));
+#ifdef __vita__
+    Thread *t = handle_get(ARG(c, 0), H_THREAD);
+    if (t) {
+        pthread_mutex_lock(&table_lock);
+        t->priority = (int32_t)ARG(c, 1);
+        if (t->uid) apply_priority(t);
+        pthread_mutex_unlock(&table_lock);
+    }
+#endif
     ret_stdcall(c, 1, 2);
 }
 API(GetCurrentThreadId) { ret_stdcall(c, rd32(c->fs_base + 0x24), 0); }

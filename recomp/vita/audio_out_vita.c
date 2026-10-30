@@ -2,6 +2,7 @@
  * 1024-frame periods to the main audio port; sceAudioOutOutput blocks until the port
  * can take the next one, which paces the mixing. */
 #include <psp2/audioout.h>
+#include <psp2/kernel/threadmgr.h>
 #include <pthread.h>
 
 #include "../host/audio_mix.h"
@@ -12,6 +13,9 @@ enum { OUT_RATE = 48000, PERIOD = 1024 };
 static void *audio_thread(void *arg) {
     int port = (int)(intptr_t)arg;
     static int16_t mix[2][PERIOD * 2];
+    /* above the game's threads (threads.c maps TIME_CRITICAL to 120): a late period
+       is an audible gap */
+    sceKernelChangeThreadPriority(0, 96);
     for (unsigned k = 0;; k ^= 1) {
         audio_mix(mix[k], PERIOD, OUT_RATE);
         sceAudioOutOutput(port, mix[k]);
