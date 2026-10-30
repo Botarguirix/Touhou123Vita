@@ -432,7 +432,28 @@ static void upload(RenderTexture *t) {
     glBindTexture(GL_TEXTURE_2D, t->gl);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    /* When vitaGL cannot allocate the storage, glTexSubImage2D writes through a NULL
+       pointer (a crash in write_rgba8888 in Story mode): evict and retry, and if there
+       is still no room leave the texture empty for this frame. */
+    while (glGetError()) {}
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)gw, (GLsizei)gh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    for (unsigned attempt = 0; glGetError() != GL_NO_ERROR; attempt++) {
+        RenderTexture *oldest = NULL;
+        for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
+            RenderTexture *o = &textures[i];
+            if (o != t && o->gl && (!oldest || o->used_frame < oldest->used_frame))
+                oldest = o;
+        }
+        if (!oldest || attempt == 64) {
+            trace("# texture upload %ux%u: no GPU memory, skipped", t->width, t->height);
+            glDeleteTextures(1, &t->gl);
+            t->gl = 0;
+            return;
+        }
+        gpu_forget(oldest);
+        glBindTexture(GL_TEXTURE_2D, t->gl);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)gw, (GLsizei)gh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    }
     /* band rows: bounded by both buffers (16-bit formats widen to 4 bytes per pixel);
        even, so a half-resolution band starts on a whole output row */
     size_t rows = BAND_BYTES / t->pitch, rgba_rows = sizeof band_rgba / ((size_t)t->width * 4);
