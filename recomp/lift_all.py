@@ -107,15 +107,19 @@ def main() -> None:
         (gen / "coverage.json").write_text(json.dumps(coverage, indent=1), encoding="utf-8")
         print(json.dumps(coverage["build"], indent=1))
         return
-    for old in gen.glob("unit_*.c"):
-        old.unlink()
-
     started = time.monotonic()
     lifter = Lifter(Discovery(image), set(entries))
     files, result = lifter.lift_units(
         entries, progress=lambda i, n: print(f"  lifting {i}/{n}", flush=True))
+    # unchanged units keep their mtime, so the builds recompile only what changed
+    # (a full -O2 Vita build is ~70 min)
+    for old in gen.glob("unit_*.c"):
+        if old.name not in files:
+            old.unlink()
     for name, text in files.items():
-        (gen / name).write_text(text, encoding="utf-8")
+        path = gen / name
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            path.write_text(text, encoding="utf-8")
     lift_seconds = time.monotonic() - started
 
     by_mnemonic: dict[str, Counter] = {"game": Counter(), "library": Counter()}

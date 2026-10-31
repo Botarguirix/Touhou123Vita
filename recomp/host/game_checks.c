@@ -89,6 +89,28 @@ static void set_action_checked(Cpu *c) {
     set_action_original(c);
 }
 
+/* 0x489610 (thiscall, action as its only argument) looks an action up in the same
+   pattern map ([this+0x160]) and returns a field of the pattern. On PC (Sanae's story,
+   after beating Reimu) the CPU's card effect at 0x74cae0 asked it for action 807, which
+   the object does not have, and the checked iterator stopped the game. Same fallback
+   as set_action_checked: the nearest action below. */
+static GuestFn pattern_field_original;
+
+static void pattern_field_checked(Cpu *c) {
+    uint32_t self = c->ecx.d, map = rd32(self + 0x160), arg = c->esp.d + 4;
+    int32_t action = (int16_t)rd16(arg);
+    if (map && !map_has(map, action)) {
+        int32_t fallback = map_key_below(map, action);
+        static unsigned reported;
+        if (reported++ < 10)
+            trace("# pattern 0x489610: object %08x (vtable %08x) action %d not in its map, using %d"
+                  " - requested from %08x", self, rd32(self), action, fallback, rd32(c->esp.d));
+        if (fallback >= 0)
+            wr16(arg, (uint16_t)fallback);
+    }
+    pattern_field_original(c);
+}
+
 /* 0x444620 pops the front of the std::list at 0x89a884 (head node [0x89a888], size
    [0x89a88c]) until its size comes down to the byte at 0x89a456. On the Vita, after a
    few fights, the size said there were nodes left in an empty list and the checked
@@ -112,6 +134,9 @@ static void trim_list_checked(Cpu *c) {
 }
 
 void game_checks_init(void) {
+    pattern_field_original = guest_lifted(0x00489610u);
+    if (pattern_field_original)
+        guest_intercept(0x00489610u, pattern_field_checked);
     trim_list_original = guest_lifted(0x00444620u);
     if (trim_list_original)
         guest_intercept(0x00444620u, trim_list_checked);

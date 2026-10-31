@@ -146,7 +146,11 @@ static void apply_priority(Thread *t) {
     int win = t->priority, delta = win >= 15 ? -40 : win <= -15 ? 24 : -4 * win;
     int p = 160 + delta; /* 160: the user default (SCE_KERNEL_DEFAULT_PRIORITY_USER) */
     p = p < 64 ? 64 : p > 191 ? 191 : p;
-    int r = sceKernelChangeThreadPriority(t->uid, p);
+    /* 120 came back 0x80028021 (illegal priority) on hardware: the application's
+       range is narrower than 64..191, so step towards the default until one is taken */
+    int r;
+    while ((r = sceKernelChangeThreadPriority(t->uid, p)) == (int)0x80028021 && p != 160)
+        p += p < 160 ? 4 : -4;
     trace("# thread %u: Win32 priority %d -> Vita %d (%08x)", t->index, win, p, (unsigned)r);
 }
 #endif

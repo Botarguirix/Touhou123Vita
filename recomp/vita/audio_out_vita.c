@@ -15,7 +15,10 @@ static void *audio_thread(void *arg) {
     static int16_t mix[2][PERIOD * 2];
     /* above the game's threads (threads.c maps TIME_CRITICAL to 120): a late period
        is an audible gap */
-    sceKernelChangeThreadPriority(0, 96);
+    int p = 96, r;
+    while ((r = sceKernelChangeThreadPriority(0, p)) < 0 && p < 160)
+        p += 4;
+    trace("# audio: thread priority %d (%08x)", p, (unsigned)r);
     for (unsigned k = 0;; k ^= 1) {
         audio_mix(mix[k], PERIOD, OUT_RATE);
         sceAudioOutOutput(port, mix[k]);
