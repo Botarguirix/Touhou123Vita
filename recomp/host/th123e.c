@@ -251,7 +251,12 @@ static void factory(Cpu *c) {
     const Entry *e = lookup(text);
     if (n > 4 && !strcmp(text + n - 4, ".pat"))
         trace("# resource %s (%s), thread %08x", text, e ? "th123e" : "dat", rd32(c->fs_base + 0x24));
-    if (!e) { factory_original(c); return; }
+    if (!e) {
+        factory_original(c);
+        if (strstr(text, "select/character") && !strstr(text, "name_"))
+            trace("# resource %s -> handle %08x size %u", text, c->eax.d, size_out ? rd32(size_out) : 0);
+        return;
+    }
     /* CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, NORMAL, NULL) */
     uint32_t open_args[7] = {cache_path_guest, 0x80000000u, 1, 0, 3, 0x80, 0};
     uint32_t handle = call_import(c, IAT_CREATE_FILE_A, 7, open_args);

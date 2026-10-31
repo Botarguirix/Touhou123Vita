@@ -375,6 +375,10 @@ static void fill_caps(uint32_t p) {
     wr32(p + 0, 1);                                   /* DeviceType HAL */
     for (uint32_t off = 8; off <= 84; off += 4)       /* capability bit fields: all */
         wr32(p + off, 0xFFFFFFFFu);
+    /* TextureCaps without SQUAREONLY (0x20) and POW2 (0x2): with them the game made a
+       32x128 portrait 128x128 and spaced the character select strip by the texture
+       width, so only every fourth portrait was on screen */
+    wr32(p + 60, 0xFFFFFFFFu & ~0x22u);
     wr32(p + 88, 4096); wr32(p + 92, 4096);           /* MaxTextureWidth/Height */
     wr32(p + 100, 8192); wr32(p + 104, 8192);
     wr32(p + 108, 16);
@@ -433,6 +437,24 @@ API(SetSamplerState) { render_sampler_state(ARG(c, 1), ARG(c, 2), ARG(c, 3)); re
 API(SetFVF) { render_fvf(ARG(c, 1)); ret_stdcall(c, S_OK, 2); }
 API(DrawPrimitiveUP) {
     d3d_draws++;
+    /* T123_DRAWLOG=n: every draw of presented frame n, vertices as x,y u,v colour
+       (assumes the XYZRHW|DIFFUSE|TEX1 layout for 28-byte strides) */
+    static long long drawlog = -2;
+    if (drawlog == -2) drawlog = getenv("T123_DRAWLOG") ? atoll(getenv("T123_DRAWLOG")) : -1;
+    if ((long long)d3d_frames == drawlog) {
+        uint32_t type = ARG(c, 1), count = ARG(c, 2), data = ARG(c, 3), stride = ARG(c, 4);
+        char line[600];
+        int n = snprintf(line, sizeof line, "# draw type %u count %u stride %u:", type, count, stride);
+        unsigned verts = type == 5 || type == 6 ? count + 2 : type == 4 ? count * 3 : count;
+        for (unsigned v = 0; v < verts && v < 6 && n < (int)sizeof line - 80; v++) {
+            uint32_t p = data + v * stride;
+            n += snprintf(line + n, sizeof line - n, " (%.0f,%.0f", *(float *)G(p), *(float *)G(p + 4));
+            if (stride == 28)
+                n += snprintf(line + n, sizeof line - n, " %.3f,%.3f %08x", *(float *)G(p + 20), *(float *)G(p + 24), rd32(p + 16));
+            n += snprintf(line + n, sizeof line - n, ")");
+        }
+        trace("%s", line);
+    }
     render_draw_up(ARG(c, 1), ARG(c, 2), ARG(c, 3), ARG(c, 4));
     ret_stdcall(c, S_OK, 5);
 }
