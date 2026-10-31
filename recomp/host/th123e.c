@@ -249,6 +249,8 @@ static void factory(Cpu *c) {
     for (; n + 1 < sizeof text && rd8(name + n); n++) text[n] = (char)rd8(name + n);
     text[n] = 0;
     const Entry *e = lookup(text);
+    if (n > 4 && !strcmp(text + n - 4, ".pat"))
+        trace("# resource %s (%s), thread %08x", text, e ? "th123e" : "dat", rd32(c->fs_base + 0x24));
     if (!e) { factory_original(c); return; }
     /* CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, NORMAL, NULL) */
     uint32_t open_args[7] = {cache_path_guest, 0x80000000u, 1, 0, 3, 0x80, 0};

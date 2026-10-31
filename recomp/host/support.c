@@ -276,8 +276,9 @@ const char *guest_exe_path = "C:\\th123\\th123.exe";
 
 void path_to_host(const char *guest_path, char *out, size_t size) {
     const char *p = guest_path;
-    static const char prefix[] = "C:\\th123\\";
-    if (!_strnicmp(p, prefix, sizeof prefix - 1))
+    /* the game joins its directory with '/' too ("C:\th123/configex123.ini") */
+    static const char prefix[] = "C:\\th123";
+    if (!_strnicmp(p, prefix, sizeof prefix - 1) && (p[8] == '\\' || p[8] == '/' || !p[8]))
         p += sizeof prefix - 1;
     else if (p[0] && p[1] == ':')
         p += 2; /* other absolute paths are kept under the data directory */
