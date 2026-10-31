@@ -54,7 +54,13 @@ static int finish(void) {
     profile_write();
 #endif
     uint64_t elapsed_ms = (platform_ticks_us() - started) / 1000u;
+    /* vitaGL only works on the thread that owns the context: a fatal error on a loading
+       thread used to fault here (dumps with garbage registers) before anything was logged */
+#ifdef __vita__
+    if (d3d_frames && pthread_equal(pthread_self(), main_thread)) {
+#else
     if (d3d_frames) {
+#endif
         trace("# frames presented: %llu, draws: %llu; textures live %llu KiB, peak %llu KiB", d3d_frames, d3d_draws,
               (unsigned long long)(texture_live >> 10), (unsigned long long)(texture_peak >> 10));
         texture_census();
