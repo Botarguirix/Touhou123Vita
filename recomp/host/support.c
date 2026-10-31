@@ -373,7 +373,18 @@ int imports_init(void) {
             if (!thunk)
                 break;
             char name[64];
-            if (thunk & 0x80000000u)
+            /* WS2_32 is imported by ordinal; the ones th123.exe uses get their names */
+            static const struct { unsigned ordinal; const char *name; } ws2[] = {
+                {2, "bind"}, {3, "closesocket"}, {8, "htonl"}, {9, "htons"}, {11, "inet_addr"},
+                {15, "ntohs"}, {17, "recvfrom"}, {20, "sendto"}, {22, "shutdown"}, {23, "socket"},
+                {52, "gethostbyname"}, {111, "WSAGetLastError"}, {115, "WSAStartup"}, {116, "WSACleanup"}};
+            const char *named = NULL;
+            if (thunk & 0x80000000u && !strcasecmp(STR(base + rd32(d + 12)), "WS2_32.dll"))
+                for (unsigned k = 0; k < sizeof ws2 / sizeof ws2[0]; k++)
+                    if (ws2[k].ordinal == (thunk & 0xFFFF)) named = ws2[k].name;
+            if (named)
+                snprintf(name, sizeof name, "%s", named);
+            else if (thunk & 0x80000000u)
                 snprintf(name, sizeof name, "%s#%u", STR(base + rd32(d + 12)), thunk & 0xFFFF);
             else
                 snprintf(name, sizeof name, "%s", STR(base + thunk + 2));

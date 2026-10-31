@@ -289,6 +289,27 @@ API(WSAStartup) {
     ret_stdcall(c, 0, 2);
 }
 API(WSACleanup) { ret_stdcall(c, 0, 0); }
+/* Until SceNet lands every socket call fails with WSAENETDOWN, so the network menu
+   reports an error instead of the process stopping on an unimplemented import. */
+API(WSAGetLastError) { ret_stdcall(c, 10050 /* WSAENETDOWN */, 0); }
+API(socket) { trace("socket(): networking is not available yet"); ret_stdcall(c, 0xFFFFFFFFu, 3); }
+API(bind) { ret_stdcall(c, 0xFFFFFFFFu, 3); }
+API(closesocket) { ret_stdcall(c, 0, 1); }
+API(shutdown) { ret_stdcall(c, 0, 2); }
+API(sendto) { ret_stdcall(c, 0xFFFFFFFFu, 6); }
+API(recvfrom) { ret_stdcall(c, 0xFFFFFFFFu, 6); }
+API(gethostbyname) { ret_stdcall(c, 0, 1); }
+static uint16_t swap16(uint16_t v) { return (uint16_t)(v >> 8 | v << 8); }
+API(htons) { ret_stdcall(c, swap16((uint16_t)ARG(c, 0)), 1); }
+API(ntohs) { ret_stdcall(c, swap16((uint16_t)ARG(c, 0)), 1); }
+API(htonl) { uint32_t v = ARG(c, 0); ret_stdcall(c, v >> 24 | (v >> 8 & 0xFF00) | (v << 8 & 0xFF0000) | v << 24, 1); }
+API(inet_addr) {
+    unsigned a, b, d, e;
+    char tail;
+    uint32_t r = sscanf(STR(ARG(c, 0)), "%u.%u.%u.%u%c", &a, &b, &d, &e, &tail) == 4 && (a | b | d | e) < 256
+        ? a | b << 8 | d << 16 | e << 24 : 0xFFFFFFFFu; /* network order, INADDR_NONE */
+    ret_stdcall(c, r, 1);
+}
 
 
 /* -- IMAGEHLP ---------------------------------------------------------------------------- */
@@ -310,7 +331,8 @@ const ApiEntry win32_other[] = {
     E(GetGlyphOutlineA),
     E(ImmGetContext), E(ImmReleaseContext), E(ImmGetCompositionStringA), E(ImmSetCandidateWindow),
     E(CoInitialize), E(CoUninitialize),
-    E(WSAStartup), E(WSACleanup),
+    E(WSAStartup), E(WSACleanup), E(WSAGetLastError), E(socket), E(bind), E(closesocket),
+    E(shutdown), E(sendto), E(recvfrom), E(gethostbyname), E(htons), E(ntohs), E(htonl), E(inet_addr),
     E(MakeSureDirectoryPathExists),
     {NULL, NULL},
 };
