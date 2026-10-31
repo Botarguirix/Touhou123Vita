@@ -253,8 +253,29 @@ static void factory(Cpu *c) {
         trace("# resource %s (%s), thread %08x", text, e ? "th123e" : "dat", rd32(c->fs_base + 0x24));
     if (!e) {
         factory_original(c);
-        if (strstr(text, "select/character") && !strstr(text, "name_"))
+        if ((strstr(text, "select/character") && !strstr(text, "name_")) || strstr(text, ".pal"))
             trace("# resource %s -> handle %08x size %u", text, c->eax.d, size_out ? rd32(size_out) : 0);
+        /* debug: how many of a palette's 256 colours have the A1R5G5B5 alpha bit */
+        uint32_t handle = c->eax.d, saved = c->eax.d;
+        if (strstr(text, ".pal") && handle && handle != 0xffffffffu && rd32(size_out) == 513) {
+            uint32_t offset = rd32(offset_out), buf = heap_alloc(520, 0), got = heap_alloc(4, 0);
+            uint32_t read_args[5] = {handle, buf, 513, got, 0};
+            call_import(c, 0x00857098u /* ReadFile */, 5, read_args);
+            uint32_t seek_args[4] = {handle, offset, 0, 0};
+            call_import(c, IAT_SET_FILE_POINTER, 4, seek_args);
+            uint8_t key = (uint8_t)((offset >> 1) | 0x23);
+            unsigned opaque = 0, zero = 0;
+            for (unsigned k = 0; k < 256; k++) {
+                uint16_t v = (uint16_t)((rd8(buf + 1 + 2 * k) ^ key) | (rd8(buf + 2 + 2 * k) ^ key) << 8);
+                opaque += v >> 15;
+                zero += v == 0;
+            }
+            trace("# palette %s: bpp byte %u, %u of 256 colours with alpha bit, %u zero (read %u)", text,
+                  rd8(buf) ^ key, opaque, zero, rd32(got));
+            heap_free(buf);
+            heap_free(got);
+            c->eax.d = saved;
+        }
         return;
     }
     /* CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, NORMAL, NULL) */

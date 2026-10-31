@@ -491,8 +491,10 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
                : type == 4 ? count * 3 : count + 2;
     if (type < 1 || type > 6 || !n || n > 65536)
         return;
-    int rhw = (fvf & 0x00E) == 0x004;
-    uint32_t off = (fvf & 0x00E) == 0x002 ? 12 : rhw ? 16 : 12;
+    /* XYZW (0x4002) comes only from the effect passes (Utsuho's pshaderEx0), whose
+       vertex shader takes screen pixels, so it is drawn like XYZRHW */
+    int rhw = (fvf & 0x400E) == 0x004 || (fvf & 0x400E) == 0x4002;
+    uint32_t off = rhw ? 16 : 12;
     if (fvf & 0x010) off += 12;
     uint32_t diffuse = fvf & 0x040 ? off : 0xFFFFFFFFu;
     if (fvf & 0x040) off += 4;

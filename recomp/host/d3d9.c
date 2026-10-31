@@ -425,16 +425,46 @@ API(Clear) {
     render_clear(ARG(c, 3), ARG(c, 4), *(float *)G(c->esp.d + 4 + 4 * 5), ARG(c, 6));
     ret_stdcall(c, S_OK, 7);
 }
-API(SetRenderState) { render_state(ARG(c, 1), ARG(c, 2)); ret_stdcall(c, S_OK, 3); }
+static int drawlog_active(void) {
+    static long long frame = -2;
+    if (frame == -2) frame = getenv("T123_DRAWLOG") ? atoll(getenv("T123_DRAWLOG")) : -1;
+    return (long long)d3d_frames == frame;
+}
+API(SetRenderState) {
+    if (drawlog_active()) trace("#   rs %u = %08x", ARG(c, 1), ARG(c, 2));
+    render_state(ARG(c, 1), ARG(c, 2));
+    ret_stdcall(c, S_OK, 3);
+}
 API(GetRenderState) { wr32(ARG(c, 2), render_get_state(ARG(c, 1))); ret_stdcall(c, S_OK, 3); }
+static uint32_t drawlog_texture; /* texture bound to stage 0, for T123_DRAWLOG */
 API(SetTexture) {
     uint32_t t = ARG(c, 2);
+    if (ARG(c, 1) == 0) drawlog_texture = t;
+    if (drawlog_active() && ARG(c, 1) != 0)
+        trace("#   texture stage %u = %08x (%ux%u fmt %u)", ARG(c, 1), t, t ? textures[com_index(t)].width : 0,
+              t ? textures[com_index(t)].height : 0, t ? textures[com_index(t)].format : 0);
     render_texture(ARG(c, 1), t ? &textures[com_index(t)] : NULL);
     ret_stdcall(c, S_OK, 3);
 }
-API(SetTextureStageState) { render_stage_state(ARG(c, 1), ARG(c, 2), ARG(c, 3)); ret_stdcall(c, S_OK, 4); }
+API(SetTextureStageState) {
+    if (drawlog_active()) trace("#   tss %u %u = %08x", ARG(c, 1), ARG(c, 2), ARG(c, 3));
+    if (getenv("T123_DRAWLOG")) { /* each distinct combination once */
+        static uint32_t seen[256][3];
+        static unsigned seen_n;
+        unsigned k = 0;
+        while (k < seen_n && !(seen[k][0] == ARG(c, 1) && seen[k][1] == ARG(c, 2) && seen[k][2] == ARG(c, 3))) k++;
+        if (k == seen_n && seen_n < 256) {
+            seen[seen_n][0] = ARG(c, 1); seen[seen_n][1] = ARG(c, 2); seen[seen_n][2] = ARG(c, 3); seen_n++;
+            trace("# tss first use: stage %u type %u = %08x (frame %llu)", ARG(c, 1), ARG(c, 2), ARG(c, 3), d3d_frames);
+        }
+    }
+    render_stage_state(ARG(c, 1), ARG(c, 2), ARG(c, 3)); ret_stdcall(c, S_OK, 4); }
 API(SetSamplerState) { render_sampler_state(ARG(c, 1), ARG(c, 2), ARG(c, 3)); ret_stdcall(c, S_OK, 4); }
-API(SetFVF) { render_fvf(ARG(c, 1)); ret_stdcall(c, S_OK, 2); }
+API(SetFVF) {
+    if (drawlog_active()) trace("#   fvf %08x", ARG(c, 1));
+    render_fvf(ARG(c, 1));
+    ret_stdcall(c, S_OK, 2);
+}
 API(DrawPrimitiveUP) {
     d3d_draws++;
     /* T123_DRAWLOG=n: every draw of presented frame n, vertices as x,y u,v colour
@@ -444,16 +474,40 @@ API(DrawPrimitiveUP) {
     if ((long long)d3d_frames == drawlog) {
         uint32_t type = ARG(c, 1), count = ARG(c, 2), data = ARG(c, 3), stride = ARG(c, 4);
         char line[600];
-        int n = snprintf(line, sizeof line, "# draw type %u count %u stride %u:", type, count, stride);
+        const RenderTexture *bound = drawlog_texture ? &textures[com_index(drawlog_texture)] : NULL;
+        int n = snprintf(line, sizeof line, "# draw type %u count %u stride %u tex %ux%u fmt %u:", type, count,
+                         stride, bound ? bound->width : 0, bound ? bound->height : 0, bound ? bound->format : 0);
         unsigned verts = type == 5 || type == 6 ? count + 2 : type == 4 ? count * 3 : count;
         for (unsigned v = 0; v < verts && v < 6 && n < (int)sizeof line - 80; v++) {
             uint32_t p = data + v * stride;
             n += snprintf(line + n, sizeof line - n, " (%.0f,%.0f", *(float *)G(p), *(float *)G(p + 4));
             if (stride == 28)
-                n += snprintf(line + n, sizeof line - n, " %.3f,%.3f %08x", *(float *)G(p + 20), *(float *)G(p + 24), rd32(p + 16));
+                n += snprintf(line + n, sizeof line - n, " z%.3f w%.3f %.3f,%.3f %08x", *(float *)G(p + 8),
+                              *(float *)G(p + 12),*(float *)G(p + 20), *(float *)G(p + 24), rd32(p + 16));
             n += snprintf(line + n, sizeof line - n, ")");
         }
         trace("%s", line);
+        if (bound && bound->format == 25 && bound->height <= 512) {
+            static uint8_t px[512 * 1024 * 4];
+            if ((size_t)bound->pitch * bound->height <= sizeof px) {
+                render_texture_pixels((RenderTexture *)bound, px);
+                unsigned opaque = 0, cols = 0;
+                for (uint32_t x = 0; x < bound->width; x++) {
+                    unsigned here = 0;
+                    for (uint32_t y = 0; y < bound->height; y++)
+                        here += px[(size_t)y * bound->pitch + x * 2 + 1] >> 7;
+                    opaque += here;
+                    cols += here != 0;
+                }
+                static const uint32_t rs[] = {7, 14, 15, 19, 20, 22, 23, 24, 25, 27, 137, 168, 171, 174, 206, 207, 208, 209};
+                char st[400];
+                int k = 0;
+                for (unsigned i = 0; i < sizeof rs / sizeof *rs; i++)
+                    k += snprintf(st + k, sizeof st - k, " %u=%x", rs[i], render_get_state(rs[i]));
+                trace("#   states%s", st);
+                trace("#   texture pitch %u: %u opaque pixels in %u of %u columns, dirty %d", bound->pitch, opaque,
+                      cols, bound->width, bound->dirty);            }
+        }
     }
     render_draw_up(ARG(c, 1), ARG(c, 2), ARG(c, 3), ARG(c, 4));
     ret_stdcall(c, S_OK, 5);
@@ -520,7 +574,19 @@ API(Texture_UnlockRect) {
 }
 
 /* -- ID3DXEffect: parameters are recorded, passes draw with the fixed pipeline ---------- */
-API(Effect_Begin) { if (ARG(c, 1)) wr32(ARG(c, 1), 1); ret_stdcall(c, S_OK, 3); }
+API(Effect_Begin) {
+    if (drawlog_active()) trace("#   effect %08x Begin", ARG(c, 0));
+    if (ARG(c, 1)) wr32(ARG(c, 1), 1);
+    ret_stdcall(c, S_OK, 3);
+}
+static void effect_log(Cpu *c, const char *what, unsigned args) {
+    if (drawlog_active()) trace("#   effect %08x %s(%08x, %08x)", ARG(c, 0), what, ARG(c, 1), ARG(c, 2));
+    ret_stdcall(c, S_OK, args);
+}
+API(Effect_SetTexture) { effect_log(c, "SetTexture", 3); }
+API(Effect_BeginPass) { effect_log(c, "BeginPass", 2); }
+API(Effect_EndPass) { effect_log(c, "EndPass", 1); }
+API(Effect_SetTechnique) { effect_log(c, "SetTechnique", 2); }
 
 /* -- D3DX imports ------------------------------------------------------------------------ */
 API(D3DXCreateTexture) {
@@ -530,8 +596,7 @@ API(D3DXCreateTexture) {
     ret_stdcall(c, t ? S_OK : E_FAIL, 8);
 }
 API(D3DXCreateEffect) {
-    trace("D3DXCreateEffect(size=%u)", ARG(c, 2));
-    wr32(ARG(c, 7), com_new(&effect_class, 0, 0));
+    trace("D3DXCreateEffect(size=%u)", ARG(c, 2));    wr32(ARG(c, 7), com_new(&effect_class, 0, 0));
     if (ARG(c, 8)) wr32(ARG(c, 8), 0);
     ret_stdcall(c, S_OK, 9);
 }
@@ -583,9 +648,12 @@ static void bind_all(void) {
     com_bind(&surface_class, "GetDesc", Surface_GetDesc);
     com_bind(&surface_class, "Release", Surface_Release);
     com_bind(&effect_class, "Begin", Effect_Begin);
-    const char *effect_ok[] = {"SetFloat", "SetVector", "SetInt", "SetBool", "SetTexture", "SetMatrix",
-                               "BeginPass", "CommitChanges", "EndPass", "End", "OnLostDevice",
-                               "OnResetDevice", "SetTechnique"};
+    com_bind(&effect_class, "SetTexture", Effect_SetTexture);
+    com_bind(&effect_class, "BeginPass", Effect_BeginPass);
+    com_bind(&effect_class, "EndPass", Effect_EndPass);
+    com_bind(&effect_class, "SetTechnique", Effect_SetTechnique);
+    const char *effect_ok[] = {"SetFloat", "SetVector", "SetInt", "SetBool", "SetMatrix",
+                               "CommitChanges", "End", "OnLostDevice", "OnResetDevice"};
     for (unsigned i = 0; i < sizeof effect_ok / sizeof *effect_ok; i++)
         com_bind_ok(&effect_class, effect_ok[i]);
 }
