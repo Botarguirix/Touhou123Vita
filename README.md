@@ -1,5 +1,5 @@
 # Touhou123Vita — alpha 0.1.1
-
+**ULTRA IA VIBECODED!**
 **Touhou 12.3: Hisoutensoku for PS Vita / para PS Vita** · Static recompilation / Recompilación estática (x86 → C → ARM).
 
 [Español](#español) · [English](#english) · [Download VPK / Descargar VPK](https://github.com/Botarguirix/Touhou123Vita/releases/tag/v0.1.1-alpha)
@@ -118,7 +118,7 @@ El VPK 0.1.1 se publicó a partir del paquete local existente: pasó las comprob
 ## English
 
 ### Anti-piracy notice
-
+**ULTRA IA VIBECODED!**
 **This project does NOT condone, promote or facilitate piracy. You must obtain and use your own legally purchased copy of Touhou 12.3: Hisoutensoku.** Obtain the game through sales channels authorized by its creators. This repository provides no links to unauthorized game copies, EXE/DAT files or patches containing game content. Do not request or share those files here.
 
 This fan project is not affiliated with **Team Shanghai Alice, Twilight Frontier or Sony**. The published VPK contains code translated from the original executable; **it does not include the Windows EXE or game DAT files** and cannot run by itself. All game rights belong to their respective owners. Owning a copy does not grant permission to redistribute its files.
