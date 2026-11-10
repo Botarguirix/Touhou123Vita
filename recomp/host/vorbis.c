@@ -29,8 +29,10 @@ typedef struct {
     uint32_t bounce;             /* guest buffer for read callbacks */
     uint32_t info;               /* guest vorbis_info copy */
     Cpu *cpu;                    /* caller of the current ov_* call */
+    uint64_t silent_bytes;       /* nosound.txt: PCM "delivered" so far (silence) */
     OggVorbis_File file;
 } Stream;
+static int silent_mode;          /* nosound.txt: the headers are parsed but nothing is decoded */
 
 static Stream streams[MAX_STREAMS];
 static uint64_t decode_us, decoded_bytes; /* for vorbis_stats (heartbeat) */
@@ -131,23 +133,59 @@ static void native_info(Cpu *c) {
     ret_eax(c, s->info);
 }
 
+/* libvorbis works in float, and the tail of a track or a fade produces denormal values
+   (a core dump from the Vita showed the music thread dying on a VFP `vmul.f32` inside
+   ov_read's float-to-16-bit loop, right after leaving the profile screen). With
+   flush-to-zero set, denormals read as zero (inaudible in music) and the unit does not
+   have to handle them. It is set only around the decoder calls: the guest's own double
+   arithmetic keeps its exact behaviour. */
+#ifdef __vita__
+static inline uint32_t fz_enter(void) {
+    uint32_t old;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(old));
+    __asm__ volatile("vmsr fpscr, %0" : : "r"(old | (1u << 24)));
+    return old;
+}
+static inline void fz_leave(uint32_t old) { __asm__ volatile("vmsr fpscr, %0" : : "r"(old)); }
+#else
+static inline uint32_t fz_enter(void) { return 0; }
+static inline void fz_leave(uint32_t old) { (void)old; }
+#endif
+
 static void native_read(Cpu *c) {
     Stream *s = find_stream(arg(c, 0));
     if (!s) { ret_eax(c, (uint32_t)OV_EINVAL); return; }
     s->cpu = c;
+    if (silent_mode) { /* silence of the size asked for, without decoding */
+        uint32_t len = arg(c, 2);
+        memset(G(arg(c, 1)), 0, len);
+        s->silent_bytes += len;
+        if (arg(c, 6)) wr32(arg(c, 6), 0);
+        ret_eax(c, len);
+        return;
+    }
     int bitstream = 0;
     uint64_t t0 = platform_ticks_us();
+    uint32_t fp = fz_enter();
     long r = ov_read(&s->file, (char *)G(arg(c, 1)), (int)arg(c, 2), (int)arg(c, 3), (int)arg(c, 4),
                      (int)arg(c, 5), &bitstream);
+    fz_leave(fp);
     decode_us += platform_ticks_us() - t0;
     if (r > 0) decoded_bytes += (uint64_t)r;
     if (arg(c, 6)) wr32(arg(c, 6), (uint32_t)bitstream);
     ret_eax(c, (uint32_t)r);
 }
 
+static double silent_rate(Stream *s) { /* bytes of 16-bit PCM per second of this stream */
+    vorbis_info *vi = ov_info(&s->file, -1);
+    return vi ? (double)vi->rate * vi->channels * 2.0 : 44100.0 * 2 * 2;
+}
+
 static void native_time_tell(Cpu *c) {
     Stream *s = find_stream(arg(c, 0));
-    x87_push(c, s ? ov_time_tell(&s->file) : (double)OV_EINVAL);
+    double t = (double)OV_EINVAL;
+    if (s) t = silent_mode ? (double)s->silent_bytes / silent_rate(s) : ov_time_tell(&s->file);
+    x87_push(c, t);
     c->esp.d += 4;
 }
 
@@ -158,7 +196,16 @@ static void native_time_seek(Cpu *c) {
     uint64_t bits = rd64(c->esp.d + 8);
     memcpy(&t, &bits, sizeof t);
     s->cpu = c;
-    ret_eax(c, (uint32_t)ov_time_seek(&s->file, t));
+    if (silent_mode) { /* the position is only a number */
+        double rate = silent_rate(s);
+        s->silent_bytes = t > 0 ? (uint64_t)(t * rate) & ~(uint64_t)3 : 0;
+        ret_eax(c, 0);
+        return;
+    }
+    uint32_t fp = fz_enter();
+    int seek_result = ov_time_seek(&s->file, t);
+    fz_leave(fp);
+    ret_eax(c, (uint32_t)seek_result);
 }
 
 /* Decode time and PCM bytes since the last call. */
@@ -168,22 +215,34 @@ void vorbis_stats(uint64_t *us, uint64_t *bytes) {
 }
 
 void vorbis_init(void) {
-    /* Keep the translated decoder: T123_GUEST_VORBIS=1, or on the Vita a file
-       guest-vorbis.txt next to th123.exe (for comparing by ear). */
-    const char *off = getenv("T123_GUEST_VORBIS");
-    FILE *flag = fopen(
+    /* Native libvorbis is the default on both platforms. On the Vita guest-vorbis.txt in
+       the data directory switches to the game's translated decoder (more CPU); on PC
+       T123_GUEST_VORBIS=1 or a guest-vorbis.txt does. */
+    if (host_nosound()) { /* no music at all: only the headers are read */
+        silent_mode = 1;
+        trace("# vorbis: silent (nosound.txt): headers only, no decoding");
+        goto register_native;
+    }
 #ifdef __vita__
-        "ux0:data/touhou123vita/guest-vorbis.txt"
+    /* native libvorbis is the default again (the music sounded better and costs less CPU);
+       guest-vorbis.txt switches to the game's translated decoder */
+    FILE *guest = fopen("ux0:data/touhou123vita/guest-vorbis.txt", "rb");
+    if (guest) fclose(guest);
+    if (guest) {
+        trace("# vorbis: translated decoder (guest-vorbis.txt)");
+        return;
+    }
 #else
-        "guest-vorbis.txt"
-#endif
-        , "rb");
+    const char *off = getenv("T123_GUEST_VORBIS");
+    FILE *flag = fopen("guest-vorbis.txt", "rb");
     if (flag) fclose(flag);
     if ((off && *off == '1') || flag) {
         trace("# vorbis: translated decoder (native one switched off)");
         return;
     }
+#endif
     trace("# vorbis: native libvorbis");
+register_native:
     guest_intercept(0x008107a0u, native_open);
     guest_intercept(0x008106a0u, native_clear);
     guest_intercept(0x008125c0u, native_info);

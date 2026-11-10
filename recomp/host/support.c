@@ -33,7 +33,17 @@ void trace(const char *fmt, ...) {
            crash report keeps them; plain call lines go out at least once a second. */
         static uint64_t last_flush;
         uint64_t now = platform_ticks_us();
-        if (line[0] == '#' || now - last_flush > 1000000u) {
+        /* flush.txt in the data directory: every line goes out at once (to find where a hang is) */
+        static int every = -1;
+        if (every < 0) {
+            char p[300];
+            snprintf(p, sizeof p, "%.*s", (int)(strrchr(trace_path, '/') ? strrchr(trace_path, '/') - trace_path + 1 : 0), trace_path);
+            strncat(p, "flush.txt", sizeof p - strlen(p) - 1);
+            FILE *t = fopen(p, "rb");
+            every = t != NULL;
+            if (t) fclose(t);
+        }
+        if (every || line[0] == '#' || now - last_flush > 1000000u) {
             fflush(trace_file);
             last_flush = now;
         }
@@ -298,7 +308,16 @@ static unsigned recent[64], recent_pos;
 
 /* Every fake address dispatches here: count, remember, then run the implementation. */
 static void api_dispatch(Cpu *c) {
-    unsigned i = (guest_current_target - GUEST_FAKE_BASE) / 16;
+    static int stats = -1;
+    if (stats < 0) stats = host_stats();
+    unsigned i = (c->current_target - GUEST_FAKE_BASE) / 16;
+    if (!stats) { /* no timer reads: on the Vita each is a system call, ~22 000 calls a second */
+        uint32_t prev = c->cur_fn; /* the sampling profiler charges host time to the import */
+        c->cur_fn = c->current_target;
+        fakes[i].fn(c);
+        c->cur_fn = prev;
+        return;
+    }
     fakes[i].calls++;
     import_calls++;
     recent[recent_pos++ % 64] = i;
@@ -321,7 +340,7 @@ void trace_summary(void) {
 }
 
 static void unimplemented(Cpu *c) {
-    const char *name = api_name(guest_current_target);
+    const char *name = api_name(c->current_target);
     char why[160];
     snprintf(why, sizeof why, "import %s is not implemented", name ? name : "?");
     host_exit(c, 0xDEAD, why);

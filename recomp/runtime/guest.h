@@ -9,6 +9,7 @@
 #ifndef T123_GUEST_H
 #define T123_GUEST_H
 
+#include <float.h>
 #include <setjmp.h>
 #include <stdint.h>
 #include <math.h>
@@ -44,6 +45,13 @@ typedef struct Cpu {
     uint8_t id_flag; /* EFLAGS.ID, toggled by the CRT to probe for cpuid */
     uint32_t fs_base;
     X87 fpu;
+    /* Address of the call being dispatched (read by the fake-import and COM dispatchers).
+       It lives here, not in GuestThread: on the Vita guest_thread() is pthread_once +
+       pthread_getspecific, and guest_call stored it on every indirect call. */
+    uint32_t current_target;
+    /* Last guest function entered (one store per call; read by the sampling profiler
+       of recomp/host/vprof.c when prof.txt exists, ignored otherwise). */
+    volatile uint32_t cur_fn;
 } Cpu;
 
 /* Fixed Windows user-mode selectors, for code that stores segment registers. */
@@ -70,13 +78,12 @@ extern _Thread_local GuestThread guest_thread_state;
 #endif
 #define guest_trace_ring (guest_thread()->trace_ring)
 #define guest_trace_pos (guest_thread()->trace_pos)
-#define guest_current_target (guest_thread()->current_target)
 #define guest_fault_trap (guest_thread()->fault_trap)
 #define guest_fault_text (guest_thread()->fault_text)
 #ifdef T123_TRACE_CALLS
 #define T123_ENTER(a) (guest_trace_ring[guest_trace_pos++ & 63] = (a))
 #else
-#define T123_ENTER(a) ((void)0)
+#define T123_ENTER(a) (c->cur_fn = (a))
 #endif
 
 /* -- memory ------------------------------------------------------------------------ */
@@ -330,7 +337,9 @@ enum { X87_ADD, X87_SUB, X87_SUBR, X87_MUL, X87_DIV, X87_DIVR };
 void x87_reset(Cpu *c);                     /* fninit: CW 0x037F, empty stack */
 void x87_set_cw(Cpu *c, uint16_t cw);       /* fldcw */
 static inline uint16_t x87_get_cw(Cpu *c) { return c->fpu.cw; }
-uint16_t x87_get_sw(Cpu *c);                /* fnstsw, with TOP */
+static inline uint16_t x87_get_sw(Cpu *c) { /* fnstsw, with TOP */
+    return (uint16_t)((c->fpu.sw & ~0x3800) | ((c->fpu.top & 7) << 11));
+}
 
 /* The register stack accessors are inline: every x87 instruction uses them, and as
    calls into guest.c they were a large share of the profile. */
@@ -355,20 +364,95 @@ static inline void x87_pop(Cpu *c) {
     c->fpu.top = (c->fpu.top + 1) & 7;
 }
 
-void x87_fld_m32(Cpu *c, uint32_t a);
-void x87_fld_m64(Cpu *c, uint32_t a);
+/* Hot x87 instructions are inline, with a fast path for the state the game is nearly
+   always in: rounding to nearest (RC=0) with the host FPU in the same mode, and for
+   arithmetic 24-bit precision (PC=0, what D3D9 sets). Every other state goes to the
+   complete out-of-line version (*_slow in guest.c), so the results are the same as
+   before; only the call, the mode tests and libm calls are gone from the common case.
+   The calls were ~30 % of the active time of the fight thread (PC profile). */
+#define X87_NEAREST(c)    (((c)->fpu.cw & 0x0C00) == 0 && (c)->fpu.host_rc == 0)
+#define X87_NEAREST_24(c) (((c)->fpu.cw & 0x0F00) == 0 && (c)->fpu.host_rc == 0)
+
+static inline x87_t x87_m32(uint32_t a) { float f; memcpy(&f, G(a), 4); return f; }
+static inline x87_t x87_m64(uint32_t a) { double d; memcpy(&d, G(a), 8); return d; }
+static inline void x87_fld_m32(Cpu *c, uint32_t a) { x87_push(c, x87_m32(a)); }
+static inline void x87_fld_m64(Cpu *c, uint32_t a) { x87_push(c, x87_m64(a)); }
+static inline void x87_fild(Cpu *c, int64_t v) { x87_push(c, (x87_t)v); }
+void x87_fld_const_slow(Cpu *c, int which);
+static inline void x87_fld_const(Cpu *c, int which) { /* 0 zero, 1 one, 2 pi, 3 l2e, 4 l2t, 5 lg2, 6 ln2 */
+    if (which == 0) x87_push(c, 0.0);
+    else if (which == 1) x87_push(c, 1.0);
+    else x87_fld_const_slow(c, which);
+}
 void x87_fld_m80(Cpu *c, uint32_t a);
-void x87_fild(Cpu *c, int64_t v);
-void x87_fld_const(Cpu *c, int which);      /* 0 zero, 1 one, 2 pi, 3 l2e, 4 l2t, 5 lg2, 6 ln2 */
 void x87_fld_st(Cpu *c, unsigned i);
+void x87_fst_m32_slow(Cpu *c, uint32_t a, int pop);
+void x87_fst_m64_slow(Cpu *c, uint32_t a, int pop);
+static inline void x87_fst_m32_inl(Cpu *c, uint32_t a, int pop) {
+    if (__builtin_expect(X87_NEAREST(c), 1)) {
+        float f = (float)x87_st(c, 0); /* what to_float_rc gives under RC=0 */
+        memcpy(G(a), &f, 4);
+        if (pop) x87_pop(c);
+    } else {
+        x87_fst_m32_slow(c, a, pop);
+    }
+}
+static inline void x87_fst_m64_inl(Cpu *c, uint32_t a, int pop) {
+    if (__builtin_expect(X87_NEAREST(c), 1)) {
+        double d = (double)x87_st(c, 0);
+        memcpy(G(a), &d, 8);
+        if (pop) x87_pop(c);
+    } else {
+        x87_fst_m64_slow(c, a, pop);
+    }
+}
+void x87_fst_m80(Cpu *c, uint32_t a, int pop);
+static inline void x87_fst_st(Cpu *c, unsigned i, int pop) {
+    x87_set_st(c, i, x87_st(c, 0));
+    if (pop) x87_pop(c);
+}
+void x87_fist(Cpu *c, uint32_t a, unsigned size, int pop, int truncate);
+void x87_arith_slow(Cpu *c, int op, unsigned dst, x87_t src, int pop);
+double x87_round24_slow(Cpu *c, double v);
+/* st(dst) = st(dst) op src */
+static inline void x87_arith_inl(Cpu *c, int op, unsigned dst, x87_t src, int pop) {
+    if (__builtin_expect(X87_NEAREST_24(c), 1)) {
+        double da = (double)x87_st(c, dst), db = (double)src, r;
+        switch (op) {
+        case X87_ADD: r = da + db; break;
+        case X87_SUB: r = da - db; break;
+        case X87_SUBR: r = db - da; break;
+        case X87_MUL: r = da * db; break;
+        case X87_DIV: r = da / db; break;
+        default: r = db / da; break;
+        }
+        /* round to 24 bits keeping the extended exponent: inside the normal float range,
+           or zero/infinity/NaN, that is a plain conversion to float under RC=0 */
+        double av = fabs(r);
+        if (__builtin_expect((av >= (double)FLT_MIN && av <= (double)FLT_MAX) || av == 0 || !(av <= DBL_MAX), 1))
+            r = (double)(float)r;
+        else
+            r = x87_round24_slow(c, r);
+        x87_set_st(c, dst, r);
+        if (pop) x87_pop(c);
+    } else {
+        x87_arith_slow(c, op, dst, src, pop);
+    }
+}
+/* Variant switch. With -DT123_X87_INLINE_BIG the three bodies above are expanded at each
+   of the ~230 000 call sites of the generated code (the Vita text grew from 18.8 to
+   26.5 MiB, and its build from 10 to 58 minutes). Without it they are ordinary functions
+   in guest.c that run the same fast path: one call per instruction, and a code size close
+   to the original on a CPU with a 32 KiB instruction cache. */
+#ifdef T123_X87_INLINE_BIG
+#define x87_fst_m32 x87_fst_m32_inl
+#define x87_fst_m64 x87_fst_m64_inl
+#define x87_arith x87_arith_inl
+#else
 void x87_fst_m32(Cpu *c, uint32_t a, int pop);
 void x87_fst_m64(Cpu *c, uint32_t a, int pop);
-void x87_fst_m80(Cpu *c, uint32_t a, int pop);
-void x87_fst_st(Cpu *c, unsigned i, int pop);
-void x87_fist(Cpu *c, uint32_t a, unsigned size, int pop, int truncate);
-void x87_arith(Cpu *c, int op, unsigned dst, x87_t src, int pop); /* st(dst) = st(dst) op src */
-x87_t x87_m32(uint32_t a);
-x87_t x87_m64(uint32_t a);
+void x87_arith(Cpu *c, int op, unsigned dst, x87_t src, int pop);
+#endif
 void x87_compare(Cpu *c, x87_t b, int pops, int unordered_ok);   /* st0 vs b -> C0 C2 C3 */
 void x87_comi(Cpu *c, unsigned i, int pop);                      /* fcomi/fucomi -> EFLAGS */
 void x87_fxch(Cpu *c, unsigned i);

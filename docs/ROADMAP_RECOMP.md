@@ -1,215 +1,167 @@
-# Propuesta y roadmap: Touhou 12.3 en PS Vita por recompilación estática
+# Roadmap: Touhou 12.3 Hisoutensoku en PS Vita por recompilación estática
 
-Fecha: 20 de octubre de 2026. **Aprobada el 21 de octubre de 2026**; sustituye la estrategia del [roadmap anterior](ROADMAP.md), que queda como historial.
+Reescrito el 4 de noviembre de 2026. Sustituye la versión del 21 de octubre. La estrategia no cambia (recompilación estática x86 → C → ARM, con el código original del juego); lo que cambia es el plan: qué está hecho, qué falta y cómo se prueba.
 
-**Estado: F0 completada; F1.1 (descubrimiento de funciones y switch) completada con 99,40 % de cobertura** ([F1_DISCOVERY.md](F1_DISCOVERY.md)). **F1.2 (lifter mínimo + modelo x87 explícito) completada**: el kernel de animación traducido pasa 2 048/2 048 casos, el x87 coincide con la FPU real en 2,7 M comprobaciones y 55/57 funciones x87 reales coinciden con el original ([F1_LIFTER.md](F1_LIFTER.md)). **F1.3 completada**: las 6 406 funciones se traducen, compilan y enlazan en PC, y el código del juego tiene **0 instrucciones sin soporte**; quedan 856 SSE2 del CRT, que no se ejecutan por la política de `cpuid` ([F1_COVERAGE.md](F1_COVERAGE.md)). **F1 cerrada.** **F2.0 completada**: el CRT y `WinMain` traducidos arrancan en PC, crean la ventana del juego, abren y parsean los tres DAT y llegan a `Direct3DCreate9` ([F2_BOOT.md](F2_BOOT.md)). **H1 / F3.0 conseguido**: el mismo código compilado para ARM arranca en Vita3K con una traza idéntica a la de PC ([H1_VITA_BOOT.md](H1_VITA_BOOT.md)). **H2 conseguido**: el código original dibuja la pantalla de título en PC con hilos reales y D3D9 sobre OpenGL ([H2_PC_TITLE.md](H2_PC_TITLE.md)). **H3 conseguido** en una Vita real con vitaGL. **En PC ya hay pelea:** Vs Com, Reimu contra Sanae, con HUD completo, controlada por pulsaciones por script ([H2_PC_TITLE.md](H2_PC_TITLE.md)). Siguiente: medir y acelerar la carga en la Vita (no llega al título en 60 s), y el audio.
+## 1. Dónde estamos hoy
 
-F0 (21 oct 2026). Detalles en [PE_INVENTORY.md](PE_INVENTORY.md): la ruta sigue adelante, con dos ajustes en F1 (descubrimiento propio de funciones y switch, y verificación del modo x87 que deja D3D9).
+Hechos medidos (fuentes: historial de `origin/main` hasta `1ae065d`, y el trace de la última sesión en Vita del 4 nov 2026):
 
-## Hitos visibles y cuánto falta (actualizado el 21 oct 2026)
-
-Hasta ahora todo el avance es invisible: el código original ya se traduce, compila y se valida contra el x86, pero todavía no dibuja nada. Estos son los primeros puntos en los que **se puede ver** algo, en el orden en que llegan.
-
-Las estimaciones van en **bloques de trabajo**, con la escala de hoy: F0, F1.1, F1.2 y F1.3 fueron un bloque cada uno. Son estimaciones, no compromisos. Cada hito tiene criterio de salida, y si un bloque destapa un problema mayor se dice.
-
-| # | Hito visible | Qué hace falta | Bloques desde hoy | Dónde se ve |
-|---|---|---|---|---|
-| H1 | **El código recompilado del juego corre en ARM.** El arranque del CRT y `WinMain` se ejecutan en Vita3K, con el progreso en una pantalla de texto | **Conseguido el 21 oct 2026** ([H1_VITA_BOOT.md](H1_VITA_BOOT.md)): traza idéntica a la de PC; **confirmado en una Vita real el 23 oct 2026** (2 723 ms hasta D3D) | — | Vita3K y Vita real |
-| H2 | **Primera imagen del juego en PC**: la pantalla de título dibujada por el código original | Ventana y bucle de mensajes, subconjunto de D3D9 (dispositivo, texturas, *vertex buffers*, `DrawPrimitive`) sobre OpenGL/SDL2, los 3 efectos D3DX reescritos, hilos reales (el juego carga en un hilo aparte), DirectInput/DirectSound mínimos, excepciones C++ si aparecen | **Conseguido el 23 oct 2026** ([H2_PC_TITLE.md](H2_PC_TITLE.md)): 600 fotogramas del título sin errores | PC |
-| H3 | **Primera imagen del juego en Vita3K / Vita** | La capa D3D9 de H2 sobre vitaGL, fuentes (sustituto de `GetGlyphOutlineA`) y presupuesto de memoria de texturas | **Conseguido el 24 oct 2026 en una Vita real** ([H2_PC_TITLE.md](H2_PC_TITLE.md), sección H3): la pantalla de carga «東方Project / Presented by» dibujada vía vitaGL, centrada en 4:3; en 60 s todavía no llega al título | Vita real |
-| H4 | **Menús y un combate jugable** con mando | Entrada completa, audio (DirectSound → SceAudio), ritmo de frames y rendimiento mínimo aceptable | **4–8** después de H3 | Vita |
-
-En resumen: lo primero que se verá **en Vita3K es H1**, a unos 2–3 bloques. Es un avance real (el código de Hisoutensoku ejecutándose en ARM), pero es texto, no gráficos. La **primera imagen del juego** llega con H2 en PC y con H3 en Vita.
-
-Riesgos que pueden mover estas cifras:
-
-- **Rendimiento del código traducido en el Cortex-A9.** Se mide en H1 con el arranque; si es muy lento, las optimizaciones de F5 se adelantan.
-- **Memoria de la Vita.** Se mide en H1 y H3.
-- **Excepciones de C++ (SEH)**, si el juego las usa en su flujo normal.
-- **Fallos de Vita3K** con un ejecutable de ese tamaño. Por eso conviene probar también en una Vita real desde H1.
-
-## 1. Diagnóstico del proyecto actual
-
-| Medida | Valor |
-|---|---|
-| Iteraciones documentadas | ~300 (`docs/ITERATION*.md`, 317 documentos) |
-| Runtime nativo (`src/` + `include/`) | ~3 900 líneas de C; `vita_main.c` sola tiene 2 000 |
-| Herramientas de análisis | 70 scripts Python, muchas sondas x86 de una sola función |
-| Avance que declara el propio proyecto | 27 % |
-| Suite C general | En rojo (fixture Suika 530) |
-
-El enfoque actual **reimplementa a mano** el motor: cada acción de cada personaje se redescubre en el PE, se reescribe en C y se contrasta con Unicorn. Es riguroso, pero no escala. Hisoutensoku tiene 20 personajes con cientos de handlers, objetos, cartas, clima, 20+ escenarios, Story, menús, audio y red. Después de 300 iteraciones siguen sin portar las rutas B/C, las skills, los objetos, las cartas, el clima, el audio y casi todos los escenarios. A este ritmo el juego completo no llega.
-
-Vagante2Vita llegó a la misma conclusión en [COMPARACION_RAMAS.md](../../Vagante2Vita/docs/COMPARACION_RAMAS.md): el motor que *imita* el juego (rama B) da una demo pronto pero «no escala al juego completo». Lo que sí escala es **traducir el código original**, sin redescubrir su comportamiento.
-
-**Conclusión: hay que cambiar de estrategia, no tirar el trabajo.** El objetivo deja de ser «reescribir Hisoutensoku» y pasa a ser «ejecutar el código original de Hisoutensoku en ARM».
-
-## 2. Lo que se toma de Vagante2Vita
-
-- **Precedente directo, [repentogxm](https://github.com/0xl0cal/repentogxm).** Traduce por adelantado *todas* las funciones del `.exe` x86 de *The Binding of Isaac: Repentance* a C (`guest_####.c`) y las compila con VitaSDK. Carga la imagen en una dirección fija mediante kubridge y redirige OpenGL a vitaGL. Según el proyecto, la v0.1.1-alpha corre a 60 FPS en menús, a 55–59 FPS en salas normales y a 33–34 FPS en salas densas. Sus decisiones clave:
-  - Cada función entra en una tabla de *dispatch*, así que las llamadas indirectas no requieren reescritura.
-  - El código que no se puede traducir falla de forma visible (`guest_fault(dirección, mnemónico)`) en vez de quedar silencioso.
-  - Las funciones calientes se reemplazan por versiones nativas, con *fallback* al código traducido.
-  - El código generado no se publica y el build comprueba el SHA-256 del `.exe` del usuario.
-- **Separar dos métricas:** el avance de la reconstrucción (funciones traducidas o reemplazadas) por un lado; el avance del port (qué se ve y se juega en Vita3K y en hardware) por otro.
-- **Validar en PC antes que en Vita3K.** Vagante perdió mucho tiempo con fallos de arranque de Vita3K que no tenían que ver con el juego. El mismo C generado debe compilar también para PC y compararse allí con el original.
-- **Procedencia y hashes** de cada entrada (`.exe`, DAT, versión de las herramientas), que este proyecto ya practica.
-
-## 3. Rutas evaluadas
-
-| Ruta | Juego completo | Fidelidad | Esfuerzo | Veredicto |
-|---|---|---|---|---|
-| A. Seguir reimplementando a mano (actual) | No realista | Aproximada salvo lo verificado | Enorme, lineal por cada función | Abandonar como ruta principal |
-| B. Decompilación *matching* (como [th06](https://github.com/GensokyoClub/th06)) | Sí, a muy largo plazo | Exacta | Años; exige el MSVC original | No, por ahora |
-| C. Decompilación manual no-matching guiada por SokuLib | Sí | Alta | Muy grande: miles de funciones a mano | Como pista secundaria y progresiva |
-| **D. Recompilación estática x86 → C + capas de plataforma** | **Sí, todo el código a la vez** | **Del original** | Grande, pero concentrado en el traductor y las capas Win32/D3D9 | **Recomendada** |
-| E. Emular x86/Windows en Vita (box86/Wine) | — | — | No existe en Vita y el coste por instrucción sería alto | Descartada |
-
-**Propuesta: D como columna vertebral, con C de forma progresiva encima.** Primero todo el juego corre traducido. Después se reemplazan funciones por C legible y nativo, con nombres de SokuLib, donde aporte rendimiento o claridad. Así la «decompilación» que pides se obtiene completa desde el principio (C generado para todo el ejecutable) y mejora de forma incremental.
-
-### Por qué Hisoutensoku es un buen candidato
-
-- `th123.exe` 1.10a (SHA-256 `f0db9366…a16731e`) pesa **4,8 MB**, unas 2,5 veces menos que el `.exe` de Vagante.
-- La superficie de importaciones es pequeña: unas **170 funciones** según `local/SokuLib/src/dlls`, de KERNEL32, USER32, GDI32, WINMM, WS2_32, OLE32, IMM32 e IMAGEHLP. De D3D9 solo importa `Direct3DCreate9`; el resto pasa por las vtables COM. De D3DX9_33 importa 4 funciones: `D3DXCreateEffect`, `D3DXCreateTexture` y dos de vectores.
-- Es un juego 2D de 640×480 que corría en PCs de 2008, así que hay margen frente al Cortex-A9 a 444 MHz, aunque hay que medirlo.
-- **SokuLib** (MIT, ya está en `local/SokuLib`, unas 25 000 líneas) nombra clases, campos, vtables y direcciones: BattleManager, Player, GameObject, Scenes, Renderer, TextureManager, SoundManager, InputManager, Weather y más. Eso da nombres y tipos al código generado y orienta las capas de plataforma.
-- **shady-packer** ya resuelve el formato de los DAT, y el oráculo **Unicorn** del proyecto permite comparar función por función el C generado con el x86 original.
-
-## 4. Objetivo correcto
-
-> **Touhou 12.3 Hisoutensoku 1.10a jugable en PS Vita a partir del `th123.exe` y los DAT del propio usuario, ejecutando el código original recompilado para ARM, con todos los modos offline, audio y guardado, a 60 FPS como objetivo.**
-
-**Fuera del alcance inicial:** netplay (Winsock/UDP, posible en v2), mods de SWRSToys, editor de mazos con ratón (se adapta a botones) y cualquier distribución de código generado o de recursos.
-
-**Reglas legales que se mantienen:** el repositorio contiene solo el traductor, el runtime, las capas y la documentación. El C generado, el `.exe`, los DAT y el VPK con recursos se quedan locales.
-
-## 5. Alcance por versiones
-
-| Versión | Contenido | Criterio de aceptación |
+| Área | Estado | Evidencia |
 |---|---|---|
-| **MVP** | Arranque → título → menús → VS CPU con cualquier personaje y escenario, con audio | Corre en Vita3K y en Vita física y completa un combate sin `guest_fault` |
-| **v1** | Arcade, Story (con Namazu), VS 2P local en PSTV, Practice, perfiles y mazos, replays, guardado en `ux0:data/touhou123vita/` | Replays grabados en PC se reproducen idénticos en Vita (determinismo) |
-| **v1.x** | Rendimiento: 60 FPS estables con clima y spells, cargas menores de 2 s | Medido en hardware con perfilador |
-| **v2** | Netplay compatible con PC (opcional), opciones de escala y filtros | Partida contra un PC 1.10a sin desync |
+| Lifter x86 → C | **Hecho.** 6 406 funciones, 0 instrucciones sin soporte en el código del juego | F1_COVERAGE.md |
+| Capas Win32 / D3D9 / DirectSound / DirectInput | **Hecho** (162 de 171 imports implementados) | trace: `imports: 171, implemented: 162` |
+| Render en Vita (vitaGL) | **Hecho.** Presupuesto de GPU con LRU, texturas deflate en memoria, 1024×1024, fondos a media resolución | commits 24–28 oct |
+| Audio | **Hecho.** DirectSound → mezclador PCM → `sceAudioOut`, vorbis nativo | commit 26 oct |
+| Combate en Vita real | **Funciona**, con FPS por debajo de 60 | ver abajo |
+| Traducción inglesa (`th123e.dat`) | **Hecho** como caché (426 recursos) | commit e9ad62d |
+| Roster 10.5 (`th105a/b.dat`) | Soportado por la ruta de `configex123.ini`; **sin verificar en Vita** | README |
+| Sockets (WS2_32) | **Stub**: todo falla con `WSAENETDOWN` | commit 862efaa |
 
-## 6. Arquitectura propuesta
+**Rendimiento (trace del 4 nov 2026, 315 s, 17 520 frames):**
 
-```
-th123.exe (del usuario, hash verificado)
-   │
-   ├─ análisis: límites de función (Ghidra + heurísticas), jump tables,
-   │            vtables, IAT, datos vs. código    → functions.json / bounds.json
-   │
-   ├─ lifter x86 → C (Capstone; x87 sobre double; SSE si aparece)
-   │      → guest_NNNN.c + tabla de dispatch + guest_fault para lo no soportado
-   │
-   └─ build ─┬─ PC host (x86/x64, SDL2 + OpenGL)    ← depuración y comparación
-             └─ Vita (VitaSDK, kubridge, vitaGL)    ← objetivo
-                   │
-     runtime "guest": memoria del PE en dirección fija, pila, registros,
-                      CRT de MSVC (traducido o sustituido)
-                   │
-     capas de plataforma (tamaño estimado, por medir):
-       KERNEL32  → archivos ux0:, hilos SceKernel, tiempo, heap
-       USER32/GDI32/IMM32 → ventana falsa, mensajes mínimos, fuentes
-       D3D9 COM (subconjunto que usa Soku) → vitaGL / GXM
-       D3DX9: texturas + efectos → shaders reescritos a mano
-       DirectSound (vía OLE32/COM) + WINMM → SceAudio / OpenAL
-       DirectInput / joystick WINMM → SceCtrl
-       WS2_32 → stub (v1), SceNet (v2)
-```
+- Menús y arranque: ~17,2 ms por frame (≈58 FPS), con casi todos los frames por encima de 16,7 ms.
+- Pelea: 17,8–19,6 ms por frame (≈51–56 FPS). La GPU no es el cuello de botella (draws ≈1–3 ms, swap ≈0,15 ms).
+- El coste extra en pelea son las subidas de textura: hasta 225 por ventana de ~10 s, 1 376 evicciones acumuladas, y hasta 591 ms de "small unpack/convert" por ventana. Cada textura expulsada se guarda deflate y se descomprime al volver a subirla.
+- Picos de frame de hasta 535 ms al cargar recursos.
 
-## 7. Riesgos principales y cómo se acotan
+**Trabajo perdido.** Las mejoras de FPS posteriores a `1ae065d` (temporizadores por fase, precarga de texturas, optimizaciones de unpack y de hacer espacio) estaban solo en el disco que se perdió y **no se subieron a GitHub**. Se reconstruyen en la fase P1. Comparando las cadenas del último `eboot.bin` anterior a la pérdida (VPK del 4 nov 2026) con el reconstruido, la versión perdida tenía, además: **teclado en pantalla y portapapeles** (nombre del perfil: `# keyboard: …`, `GetClipboardData`, `GlobalLock/GlobalUnlock`, `GetStringTypeExA`, 4 imports más: 162 contra 158), **precarga de texturas** (`T123_NO_PRELOAD`), **volcado de subidas** (`T123_UPLOADLOG`), la línea `# timing:` con desglose (`making room [free query, scan, delete]`, `batch flush`, `small unpack/convert`) y el aviso `texture pool full … dropping kept copies`. Esto sale de las cadenas del binario, no del código fuente. Ya hay una primera reconstrucción local (conversión de formatos sin `switch` por píxel y temporizadores de subida, en `recomp/host/render_gl.c`), sin compilar en Vita ni probar.
 
-| Riesgo | Mitigación / punto de decisión |
+## 2. Qué trae Hisoutensoku y qué falta en Vita
+
+Fuentes del contenido: [Wikipedia](https://en.wikipedia.org/wiki/Touhou_Hisoutensoku), [wiki Hisouten](https://hisouten.koumakan.jp/wiki/Touhou_Hisoutensoku) y el propio `th123.exe` (inventario en [PE_INVENTORY.md](PE_INVENTORY.md)). Como se ejecuta el código original, todo el contenido existe por construcción; lo que falta es **verificarlo y adaptarlo** (entrada, red, memoria, guardado). "Verificado" significa probado en una Vita real.
+
+| Contenido del juego | Qué necesita la Vita | Estado |
+|---|---|---|
+| **20 personajes** (9 propios, incluido Namazu, + roster de 10.5) | `th105a/b.dat` en la tarjeta; memoria de texturas por personaje | Combate Reimu vs. otros probado; **barrido de los 20 pendiente** |
+| **Escenarios** (muchos con fondos 640×640+) | Fondos a media resolución ya hecho | Pendiente barrido |
+| **Clima** (el de 10.5 más tipos nuevos) y **efectos D3DX** | Los 3 efectos reescritos; vértices XYZW de efectos corregidos el 28 oct | Pendiente verificar Utsuho y clima |
+| **Mazo de 20 cartas / Spell Cards** | Editor de mazos (ratón en PC) | **Pendiente: mapear a botones/táctil** |
+| **Story** (con diálogos y finales) | Texto japonés/inglés (FreeType + Noto); guardado | **Final alcanzado con el primer personaje**; faltan los demás |
+| **Arcade** | Igual que Story | **Crash total a media partida** (antes de las mejoras de rendimiento); hay que reproducirlo con el build actual |
+| **VS CPU** | — | **Funciona** |
+| **VS Player (2P local)** | Dos mandos. Una Vita tiene uno solo | **Inviable en una Vita sola → ADHOC (sección 4)** |
+| **Practice** | — | **Verificado completo** |
+| **Replay** (grabar y ver) | `FindFirstFile` (hecho), x87 determinista | **Verificado**; falta confirmar que sigue grabando replays nuevos y cómo acceder a más de los visibles; falta prueba de determinismo con replays de PC |
+| **Network** (cliente/servidor/espectador por UDP) | WS2_32 sobre SceNet | **Pendiente (sección 4)** |
+| **Perfiles, mazos, score, config** | Guardado en `ux0:data/touhou123vita/` | Rutas mapeadas; **escritura entre sesiones sin verificar** |
+| **Music Room, Result** | — | **Verificados completos** |
+| **Config** | — | **Verificado**; no se puede cambiar de ventana a pantalla completa (aceptado: la Vita siempre usa pantalla completa) |
+| **Audio** (BGM ogg, SFX) | Mezclador y vorbis nativo | Hecho; falta medir sincronía |
+| **Mods SWRSToys / SokuMods** | — | **Fuera de alcance** |
+| **Control**: 6 acciones por jugador | Mapa de botones de la Vita (incluye táctil trasero si hace falta) | Perfil predeterminado en README; falta revisar combos y Dash |
+
+## 3. Fases
+
+### Hecho
+
+- **F0** inventario y congelación del motor hecho a mano (`legacy/`).
+- **F1** lifter x86 → C, x87, 99,4 % de cobertura de funciones, equivalencia con el oráculo Unicorn.
+- **F2** arranque en PC, D3D9 sobre OpenGL, primera pelea en PC.
+- **F3 / H1 / H2 / H3** arranque en ARM, título en PC, imagen en Vita real con vitaGL.
+- **Audio** (T12), **fuentes** (FreeType), **traducción inglesa**, **hilos y prioridades**, **VPK alpha v0.1.0 y v0.1.1**.
+
+### P1 — Llegar a 60 FPS estables (hito actual)
+
+Objetivo: **60 FPS sostenidos en pelea**, medidos en Vita real con el trace. **El push a GitHub se hace al llegar a este hito**, no antes.
+
+1. **Medir primero.** Compilar con los temporizadores de subida (ya añadidos), correr una pelea de 5 min y pasar el trace. Decide dónde está el costo real: inflate, conversión, `glTexSubImage2D` o hacer espacio.
+2. **Reducir evicciones** (la causa más probable): subir el presupuesto de 44 MiB si la memoria libre lo permite, evitar expulsar texturas de la pelea en curso, precargar las del personaje y escenario al iniciar la pelea (no durante), y agrupar hojas pequeñas.
+3. **Eliminar el trabajo en el hilo principal:** inflate y conversión en los núcleos 1–2, con la textura lista antes de que haga falta.
+4. **Frame pacing:** revisar que ~270 de 580 frames pasan de 16,7 ms incluso en menús (parece un tope del pacing o del vsync, no de carga).
+5. **Spin del guest:** el trace muestra `WaitForSingleObject`, `PeekMessageA` y `EnterCriticalSection` en bucle; ceder CPU o esperar con tiempo.
+6. **Carga:** título a ~39 s; objetivo menor de 15 s (precarga en segundo plano, lectura de DAT por bloques).
+
+**Salida:** trace de 10 min en pelea con ≥ 95 % de frames dentro de 16,7 ms, sin crashes de GPU ni de memoria.
+
+### P2 — Cobertura de modos (v1 offline)
+
+Matriz de pruebas por modo, personaje y escenario, ejecutada en Vita3K y repartida entre las 5 Vitas.
+
+- Barrido de los 20 personajes y todos los escenarios en VS CPU (sin `guest_fault`, sin sprites perdidos, sin crash).
+- Story, Arcade, Practice, Music Room, Result, Config: arrancan, avanzan, guardan.
+- **Mazos:** decidir mapeo táctil/botones.
+- **Guardado:** perfiles, score, config y replays se escriben y se releen tras reiniciar.
+- **Replays:** reproducir replays grabados en PC y comparar el resultado (prueba de determinismo x87).
+- **Entrada:** revisar los 6 botones, repeticiones de los menús y salida con START+SELECT.
+
+**Salida:** versión v1 (todo el juego offline, un jugador por Vita).
+
+### P3 — Multijugador: ADHOC (ver sección 4)
+
+### P4 — Robustez y pulido
+
+- Sesiones largas (1 h) sin fuga de memoria, de hilos ni de pilas (ya se corrigió una fuga de pilas de 1 MiB por pelea).
+- Opciones de pantalla (4:3 centrado, 16:9 estirado), filtro, LiveArea.
+- Script de preparación que el usuario ejecuta con su `th123.exe` y sus DAT (el repositorio nunca incluye recursos comerciales).
+- Documentación de instalación (ya hay README bilingüe) y verificación del hash del `.exe`.
+
+### P5 — Decompilación progresiva (paralela)
+
+Reemplazar funciones calientes por C legible con nombres de SokuLib, con *fallback* al código traducido y pruebas de equivalencia. Solo donde aporte rendimiento.
+
+## 4. Multijugador con ADHOC (dos Vitas)
+
+**Idea.** Hisoutensoku hace netplay por UDP con `sendto`/`recvfrom` de WS2_32. En vez de reescribir el modo de red, se **implementa WS2_32 sobre `sceNetAdhoc`**: el juego sigue creyendo que habla UDP, y cada datagrama viaja por PDP de ad-hoc entre las dos Vitas. Así el modo **Network** del menú (y por extensión VS Player) funcionaría sin tocar la lógica del juego.
+
+Piezas (APIs de [vitasdk](https://docs.vitasdk.org/adhoc__matching_8h.html): `sceNetAdhocctl*`, `sceNetAdhocMatching*`, `sceNetAdhoc*`):
+
+1. **Descubrimiento y emparejamiento:** pantalla propia previa al juego (host o buscar) con `sceNetAdhocMatching` (modo parent/child), que entrega la dirección MAC del compañero.
+2. **Mapeo IP ↔ MAC:** una tabla en el shim traduce la "IP" que el juego cree usar (p. ej. 10.0.0.1 y 10.0.0.2) a la MAC real.
+3. **Datagramas:** `socket`, `bind`, `sendto`, `recvfrom`, `select`, `closesocket` sobre PDP (`sceNetAdhocPdpCreate/Send/Recv`), con el mismo puerto que usa el juego.
+4. **Integración con el menú:** autocompletar la dirección del servidor para que "Network → Client/Server" conecte sin escribir IP.
+5. **Latencia:** el juego usa retardo de entrada, no rollback. Hay que medir el RTT del ad-hoc en pelea y el retardo que impone al juego.
+
+**Riesgos:**
+
+- La semántica de PDP no es idéntica a UDP (tamaño de paquete, buffers); se prueba con capturas del tráfico del juego en PC.
+- El determinismo de x87 entre dos Vitas es el mismo código, así que no debería haber desincronización entre ellas; contra PC sí podría (v2).
+- Vita3K probablemente no soporta ad-hoc de forma útil; **esta fase se prueba solo en hardware**.
+
+**Pruebas con tus 5 Vitas.** Con 5 consolas se pueden probar varios pares (A–B, C–D) y una tercera Vita como espectador, además de probar la coexistencia de varias sesiones ad-hoc en la misma habitación.
+
+**Alternativas, por si ADHOC falla:**
+
+- **Infraestructura (Wi-Fi):** SceNet con sockets BSD y la misma capa WS2_32. Mantiene el shim, permite Vita↔PC y juego remoto, pero requiere router y manejo de IP.
+- **Segundo mando en una sola Vita (PSTV, DS4):** para 2P local en la misma pantalla, sin red.
+- **Vita↔PC:** solo vía infraestructura y con riesgo de desync por x87.
+
+**Salida:** dos Vitas juegan una pelea completa por ad-hoc y la repiten dos veces sin desincronizarse.
+
+## 5. Cómo se prueba
+
+| Herramienta | Para qué | Notas |
+|---|---|---|
+| **PC host** (gcc, SDL2) | Depurar con el mismo C que la Vita; capturas por script | Requiere el C generado (`discover.py` + `lift_all.py`, ya ejecutados) |
+| **Vita3K** | Arranque, regresiones, barridos de modos | Instalado en varias carpetas; versión por elegir (la 4170 funcionó para el prototipo viejo, la 4103 no) |
+| **5 PS Vita liberadas** | Rendimiento real, memoria, ad-hoc, sesiones largas | Reparto sugerido: 1 para rendimiento, 2 para ad-hoc, 1 de reserva, 1 para barridos de modos |
+| **Trace** (`recomp-trace.log`) | Medición continua | Incluye frames, temporizadores, memoria, evicciones |
+| **Pruebas Python** (`tests/`) | Lifter, formatos, mezclador, etc. | Se ejecutan con `local/python-deps` |
+
+Entorno actual de build (4 nov 2026): MSYS2 con gcc 15, VitaSDK 2026.08, Python 3.12, `libshacccg.suprx` en la Vita. El `.exe` verificado tiene SHA-256 `f0db9366…a16731e`.
+
+## 6. Riesgos
+
+| Riesgo | Mitigación |
 |---|---|
-| Precisión x87 (80 bits) contra double en ARM, con posibles desincronizaciones de replays | Se mide pronto con los replays reales y el oráculo Unicorn. Si hay divergencias, se emula la precisión solo en las funciones afectadas. |
-| Memoria: Vita tiene 512 MB de RAM + 128 MB de VRAM y `th123a.dat` pesa 1 GB | Soku carga los recursos bajo demanda. En F2 se mide el uso real en PC (heap y texturas). Si no cabe, se implementa streaming o compresión de texturas en la capa D3D9. |
-| Rendimiento del código traducido sin optimizar | `-O2`, tabla de dispatch directa, eliminar registros redundantes y luego reemplazos nativos de las funciones calientes (renderer, blits, matemáticas), como hace repentogxm. |
-| Funciones o patrones no traducibles (SEH, `thunks`, código en datos) | Fallo visible con `guest_fault`, contador de cobertura y corrección caso por caso. |
-| Shaders de `D3DXCreateEffect` | Inventariarlos en F0. Son pocos y se reescriben a mano para vitaGL. |
-| Vita3K inestable | Validar primero en PC host y en hardware. Vita3K es una ayuda, no un requisito para avanzar. |
-| Esfuerzo concentrado en el lifter | Reutilizar ideas (y código, si se acepta su licencia GPL-2.0+) de repentogxm, o escribir uno propio. Se decide en F1. |
+| Memoria: 44 MiB de presupuesto GPU y ~22 MiB de CDRAM libres tras vitaGL | Medir por fase; compresión y streaming |
+| Crashes de GPU por evicciones masivas (pasó a las 5 300) | Reducir evicciones; mantener el reintento tras `glTexImage2D` fallido |
+| Trabajo no subido a GitHub | Commit local frecuente; el push solo en el hito P1 |
+| Netplay: PDP distinto de UDP | Capturas de tráfico y pruebas con 2 Vitas antes de integrar |
+| x87 entre PC y Vita (replays/netplay) | Medir con replays; emular solo donde difiera |
+| Vita3K inestable | Validar primero en PC y en hardware |
+| Legal | El repositorio solo contiene código, nunca el `.exe`, los DAT, el C generado ni recursos; el README insiste en la copia legal |
 
-## 8. Roadmap por fases
+## 7. Próximos pasos concretos
 
-Cada fase tiene un criterio de salida. Si una fase se atasca, se reevalúa la ruta antes de seguir.
-
-### F0 — Congelar, rescatar e inventariar
-- Etiquetar el estado actual (`legacy-reimpl-2.199`) y mover el motor hecho a mano a `legacy/`. Sigue compilando como demo y como fuente de oráculos.
-- Inventario exacto del PE: secciones, compilador y versión del CRT de MSVC, si está empaquetado, IAT completa, objetos COM creados (`CoCreateInstance`: DirectSound, DirectInput), efectos D3DX embebidos e hilos.
-- Lista de funciones desde el proyecto Ghidra existente más heurísticas, con conteo y tamaño.
-- **Salida:** documento `docs/PE_INVENTORY.md` con la decisión de seguir o no seguir con D.
-- **Resultado:** completada. Se etiquetó `legacy-reimpl-2.199`, el motor está en `legacy/` y sigue compilando (host y VPK). Herramientas nuevas: `tools/pe_inventory.py` y `tools/export-functions.ps1`. Decisión: seguir. El proyecto Ghidra deja el 47 % de `.text` fuera de funciones (switch sin resolver), así que F1 empieza por el descubrimiento propio de funciones.
-
-### F1 — Lifter y cobertura
-- Traductor x86 → C para el conjunto de instrucciones que usa el PE: enteros, x87, SSE si existe y cadenas (`rep movs`).
-- Tabla de dispatch, jump tables, vtables y `guest_fault` para lo pendiente.
-- Las sondas Unicorn existentes (animación, matcher `NRNR`, transformación de cajas, Remilia 801, Suika 418) se convierten en **pruebas de equivalencia** del C generado.
-- **Salida:** al menos el 99 % de las funciones traducidas y compilando en PC, y todas las pruebas de equivalencia en verde.
-
-### F2 — Arranque en PC host
-- **F2.0** (completada): CRT y `WinMain` traducidos sobre una capa Win32 mínima y portable (`recomp/host/`: heap y memoria virtual guest, TLS en el TIB, archivos, perfiles `.ini`, código de página 932). Llega a `Direct3DCreate9` después de abrir y parsear los tres DAT ([F2_BOOT.md](F2_BOOT.md)).
-- **F2.1:** ventana, mensajes e hilos reales.
-- **F2.2:** D3D9 sobre OpenGL/SDL2 y los 3 efectos D3DX (hito **H2**: primera imagen en PC).
-- **F2.3:** entrada, audio y combate.
-- Se mide en PC el uso de memoria (heap y texturas) y el número de draw calls por frame.
-- **Salida:** combate completo en PC con el código traducido, y un replay de PC reproducido idéntico.
-
-### F3 — Primer arranque en Vita
-- **F3.0** (hito **H1**, se adelanta y va justo después de F2.0): el mismo C compilado para ARM con VitaSDK, con un mapa de memoria guest de 32 bits dentro de un único bloque de la Vita y la capa de host portable. Lo prueba el autotest de Vita3K y el progreso se ve en una pantalla de texto.
-- **F3.1** (hito **H3**): la capa D3D9 pasa a vitaGL y el audio a SceAudio.
-- Se valida en Vita3K y en hardware, con FPS, RAM y VRAM medidos.
-- **Salida:** MVP en Vita, es decir, título, menús y un combate VS CPU con audio.
-
-### F4 — Juego offline completo
-- Todos los modos (Arcade, Story, VS, Practice, replays), perfiles y mazos, guardado, mapeo de controles y 2P local en PSTV.
-- Pruebas: barrido de los 20 personajes × escenarios con el autotest de Vita3K reutilizado, y replays de PC como prueba de determinismo.
-- **Salida:** v1.
-
-### F5 — Rendimiento
-- Perfilado en hardware y reemplazos nativos de funciones calientes con *fallback*; caché de texturas y tiempos de carga.
-- **Salida:** 60 FPS estables en los casos pesados (clima y spells de pantalla completa).
-
-### F6 — Pulido y extras
-- LiveArea, opciones, distribución reproducible (el usuario aporta el `.exe` y los DAT; un script genera su VPK).
-- Pista paralela de decompilación progresiva: reemplazar funciones por C legible con nombres de SokuLib, sin romper la equivalencia.
-- Netplay opcional (v2).
-
-## 9. Qué se reutiliza del proyecto actual
-
-| Pieza actual | Uso en la nueva ruta |
-|---|---|
-| Oráculo Unicorn y sondas x86 | Pruebas de equivalencia del lifter (valor muy alto) |
-| Proyecto Ghidra, desensamblados y xrefs en `artifacts/` | Límites de función, jump tables y vtables |
-| SokuLib y shady-packer locales | Nombres, tipos y estructuras; validación de los DAT |
-| Lector de DAT / CV2 / PAL / PAT en C | Herramienta de inspección y verificación (el juego traducido lee los DAT por su cuenta) |
-| Infraestructura Vita3K (`vita3k-test.ps1`, autotest, VitaFS aislado) | Pruebas automáticas del VPK nuevo |
-| Empaquetado VPK, LiveArea, Title ID `THSV12301` | Directo |
-| Replays analizados (`replay.c`, layout) | Prueba de determinismo PC contra Vita |
-| Motor hecho a mano (`fight.c`, `stage.c`, …) | Se congela como demo `legacy/`; no se sigue extendiendo |
-| Documentación de iteraciones | Historial; el conocimiento del PE ayuda a depurar el código traducido |
-
-## 10. Próximos pasos concretos
-
-Hechos: F0 (inventario y congelación), F1.1 (descubrimiento), F1.2 (lifter y x87) y F1.3 (programa completo).
-
-1. ~~**F2.0:** llevar el arranque del CRT y `WinMain` traducidos tan lejos como permita una capa Win32 sin gráficos~~ (hecho: llega a `Direct3DCreate9`).
-2. ~~**F3.0 / H1:** build ARM del mismo programa con la ventana de memoria de 32 bits, y prueba en Vita3K~~ (hecho). Queda pendiente la prueba en una Vita real, con las instrucciones de [H1_VITA_BOOT.md](H1_VITA_BOOT.md).
-3. ~~**F2.1–F2.2 / H2:** ventana, hilos y D3D9 en PC hasta la pantalla de título~~ (hecho).
-4. En paralelo, Codex: T3 (censo de métodos COM, que fija el alcance de la capa D3D9), T4 (zlib/libpng/vorbis para Vita) y T5 (fuentes).
-
-## 11. Decisiones tomadas
-
-- Cambio de ruta aprobado el 21 oct 2026; el motor hecho a mano queda congelado en `legacy/`.
-- **Lifter propio:** no se copia código de repentogxm, solo ideas. La licencia del proyecto queda libre de elegir.
-- El C generado, el `.exe`, los DAT y los recursos no se publican.
+1. Terminar el build de Vita con las modificaciones de `render_gl.c` (en curso) y probar en una Vita real; devolver el trace nuevo.
+2. Con ese trace, escoger entre evicciones, precarga o conversión para la siguiente mejora (P1.2–P1.3).
+3. Preparar el barrido de los 20 personajes (P2) y repartirlo entre las Vitas.
+4. Diseñar el shim WS2_32 → `sceNetAdhoc` (P3), empezando por una prueba mínima de emparejamiento entre dos Vitas.
+5. Al cumplir 60 FPS: pulir, commit y **push a GitHub**.
 
 ## Fuentes
 
-- [repentogxm](https://github.com/0xl0cal/repentogxm): recompilación estática de un `.exe` x86 a C para Vita.
-- [M-HT/SR](https://github.com/M-HT/SR): recompilador estático de ejecutables DOS/Windows a llasm/LLVM, con builds ARM en Linux.
-- [SokuLib](https://github.com/SokuDev/SokuLib): estructuras y direcciones de Hisoutensoku reconstruidas por la comunidad de mods.
-- [Mods de Hisoutensoku (wiki)](https://hisouten.koumakan.jp/wiki/Mods): ecosistema SWRSToys/SokuMods.
-- [th06 decomp](https://github.com/GensokyoClub/th06) y [TH08-Platform](https://github.com/dwgx/TH08-Platform): decompilaciones de otros Touhou, como referencia de la ruta B.
-- Vagante2Vita: `docs/COMPARACION_RAMAS.md`, `docs/GITHUB_REFERENCE_REVIEW.md` y `docs/FEASIBILITY.md`.
+- [Touhou Hisoutensoku (Wikipedia)](https://en.wikipedia.org/wiki/Touhou_Hisoutensoku) y [wiki Hisouten](https://hisouten.koumakan.jp/wiki/Touhou_Hisoutensoku): contenido y modos del juego.
+- [vitasdk: sceNetAdhocMatching](https://docs.vitasdk.org/adhoc__matching_8h.html) y [sceNetAdhocctl](https://docs.vitasdk.org/pspnet__adhocctl_8h.html): API de ad-hoc.
+- [SokuLib](https://github.com/SokuDev/SokuLib): estructuras y direcciones del juego.
+- [repentogxm](https://github.com/0xl0cal/repentogxm) y [M-HT/SR](https://github.com/M-HT/SR): recompilación estática x86 de otros proyectos.

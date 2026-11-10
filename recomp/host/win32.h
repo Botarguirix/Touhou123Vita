@@ -58,8 +58,17 @@ void platform_texture_free(void *p);
 void platform_texture_shrink(void *p, size_t bytes); /* give back the tail of a block */
 #ifdef __vita__
 void texture_pool_reserve(void);      /* before vitaGL takes the remaining memory */
+void platform_clock_report(char *out, size_t size); /* Vita: clocks set at start-up and what they read back as */
 void platform_display_taken(void);    /* the renderer owns the screen: stop the text log */
 #endif
+int host_stats(void);
+void vprof_register(Cpu *c, uint32_t tag); /* vprof.c: sampling profiler (prof.txt) */         /* stats.txt (Vita) / always (PC): per-call timing of Win32 and COM calls for the trace summary; off = no timer reads in the call path */
+int host_nosound(void);      /* nosound.txt (Vita) / T123_NOSOUND (PC): no audio output, mixing or music decoding */
+/* Text input (the Vita keyboard): synthetic window messages and the text the IME returns */
+void host_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam); /* other.c */
+void host_ime_set_result(const uint8_t *sjis, size_t n);                /* other.c */
+void ime_poll(void);          /* once per presented frame; vita/ime_vita.c, a no-op on PC */
+int ime_dialog_active(void);  /* the common dialog is on screen: present with vglSwapBuffers(GL_TRUE) */
 void platform_finish(const char *summary);
 void platform_memory_report(char *out, size_t size);
 
@@ -85,6 +94,9 @@ void media_init(void);
 void crt_native_init(void);
 void d3d9_set_frame_limit(unsigned long long frames);
 extern unsigned long long d3d_frames, d3d_draws;
+/* per-thread time blocked in WaitForSingleObject / Sleep (microseconds), read by the
+   frame pacing report in render_gl.c */
+extern __thread uint64_t host_wait_us, host_sleep_us, host_wait_calls;
 extern const ApiEntry win32_kernel32[];
 extern const ApiEntry win32_other[];
 

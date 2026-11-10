@@ -25,6 +25,26 @@ void platform_sleep_ms(uint32_t ms) {
 
 void platform_memory_report(char *out, size_t size) { snprintf(out, size, "(no memory report on PC)"); }
 
+int host_stats(void) { return 1; }
+
+int host_nosound(void) { return getenv("T123_NOSOUND") != NULL; }
+
+/* PC: no networking behind the game's WS2_32 calls (they fail with WSAENETDOWN) */
+#include "net.h"
+int net_enabled(void) { return 0; }
+void net_poll(void) {}
+const char *net_own_ip(void) { return ""; }
+int net_open(void) { return -1; }
+int net_bind(int s, uint16_t port_be) { (void)s; (void)port_be; return -1; }
+int net_send(int s, const void *data, int len, uint32_t addr_be, uint16_t port_be) { (void)s; (void)data; (void)len; (void)addr_be; (void)port_be; return -1; }
+int net_recv(int s, void *buf, int len, uint32_t *addr_be, uint16_t *port_be) { (void)s; (void)buf; (void)len; (void)addr_be; (void)port_be; return -1; }
+int net_shutdown(int s) { (void)s; return -1; }
+int net_close(int s) { (void)s; return -1; }
+
+/* PC: the real keyboard reaches the game through SDL, so there is no on-screen one */
+void ime_poll(void) {}
+int ime_dialog_active(void) { return 0; }
+
 void *platform_texture_alloc(size_t bytes) { return calloc(1, bytes); }
 void platform_texture_free(void *p) { free(p); }
 

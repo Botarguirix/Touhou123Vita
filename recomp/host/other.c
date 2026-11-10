@@ -2,14 +2,23 @@
  * handles and their events come from the renderer (render_pump_events); MessageBoxA
  * texts are written to the trace. */
 #include "glyph.h"
+#include "net.h"
 #include "render.h"
 #include "sjis.h"
 #include "win32.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define MKDIR(p) _mkdir(p)
+#else
+#define MKDIR(p) mkdir(p, 0755)
+#endif
 
 #define API(name) static void name(Cpu *c)
 
@@ -74,18 +83,77 @@ API(MessageBoxA) {
 }
 /* Messages: SDL events are polled here; only closing the window produces a message
    (WM_QUIT), which ends the game's loop the way the original window would. */
+/* Synthetic window messages (the Vita keyboard in vita/ime_vita.c): PeekMessageA hands
+   them to the game's own message loop and DispatchMessageA runs its window procedure,
+   so the text is processed on the game's thread like a real keyboard's. */
+enum { POST_QUEUE = 512 };
+static struct { uint32_t msg, wparam, lparam; } post_queue[POST_QUEUE];
+static unsigned post_head, post_tail;
+static pthread_mutex_t post_lock = PTHREAD_MUTEX_INITIALIZER;
+void host_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam) {
+    pthread_mutex_lock(&post_lock);
+    if ((post_tail + 1) % POST_QUEUE != post_head) {
+        post_queue[post_tail].msg = msg; post_queue[post_tail].wparam = wparam; post_queue[post_tail].lparam = lparam;
+        post_tail = (post_tail + 1) % POST_QUEUE;
+    }
+    pthread_mutex_unlock(&post_lock);
+}
+
+/* Copies the first queued message into the guest's MSG; removes it when asked. */
+static int take_message(uint32_t msg, int remove) {
+    int have = 0;
+    pthread_mutex_lock(&post_lock);
+    if (post_head != post_tail) {
+        memset(G(msg), 0, 28);                       /* MSG: hwnd, message, wParam, lParam, time, pt */
+        wr32(msg, FAKE_HWND);
+        wr32(msg + 4, post_queue[post_head].msg);
+        wr32(msg + 8, post_queue[post_head].wparam);
+        wr32(msg + 12, post_queue[post_head].lparam);
+        wr32(msg + 16, (uint32_t)(platform_ticks_us() / 1000u));
+        if (remove) post_head = (post_head + 1) % POST_QUEUE;
+        have = 1;
+    }
+    pthread_mutex_unlock(&post_lock);
+    return have;
+}
+
 API(PeekMessageA) {
+    uint32_t msg = ARG(c, 0);
     if (render_pump_events()) {
-        uint32_t msg = ARG(c, 0);
         memset(G(msg), 0, 28);
         wr32(msg + 4, 0x0012 /* WM_QUIT */);
         ret_stdcall(c, 1, 5);
         return;
     }
-    ret_stdcall(c, 0, 5);
+    ret_stdcall(c, (uint32_t)take_message(msg, (ARG(c, 4) & 1) /* PM_REMOVE */), 5);
 }
-API(GetMessageA) { host_exit(c, 0, "GetMessageA: message loop reached (no window system yet)"); }
-API(DispatchMessageA) { ret_stdcall(c, 0, 1); }
+/* The game's main loop (0x407cf0) calls PeekMessageA with PM_NOREMOVE to see whether
+   anything is waiting and then GetMessageA to take it. Returns 1 for a message, 0 for
+   WM_QUIT; waits for one when the queue is empty, like the real one. */
+API(GetMessageA) { /* (msg, hwnd, min, max) */
+    uint32_t msg = ARG(c, 0);
+    for (;;) {
+        if (render_pump_events()) {
+            memset(G(msg), 0, 28);
+            wr32(msg + 4, 0x0012 /* WM_QUIT */);
+            ret_stdcall(c, 0, 4);
+            return;
+        }
+        if (take_message(msg, 1)) {
+            ret_stdcall(c, 1, 4);
+            return;
+        }
+        platform_sleep_ms(1);
+    }
+}
+API(DispatchMessageA) {
+    uint32_t msg = ARG(c, 0), result = 0;
+    if (window_proc && rd32(msg + 4) != 0x0012 /* WM_QUIT is not dispatched */) {
+        uint32_t argv[4] = {rd32(msg), rd32(msg + 4), rd32(msg + 8), rd32(msg + 12)};
+        result = guest_invoke(c, window_proc, 4, argv);
+    }
+    ret_stdcall(c, result, 1);
+}
 API(TranslateMessage) { ret_stdcall(c, 0, 1); }
 API(DefWindowProcA) { ret_stdcall(c, 0, 4); }
 API(PostQuitMessage) { ret_stdcall(c, 0, 1); }
@@ -273,31 +341,91 @@ API(GetGlyphOutlineA) {
 }
 
 /* -- IMM32 ----------------------------------------------------------------------------- */
-API(ImmGetContext) { ret_stdcall(c, 0, 1); }
+/* IME: the game reads the finished text of a composition with
+   ImmGetCompositionStringA(himc, GCS_RESULTSTR, buffer, size) when it gets
+   WM_IME_ENDCOMPOSITION (0x40ead0). The Vita keyboard supplies that text here and then
+   posts the message, which makes the game insert it at its cursor, whole and
+   Shift-JIS-aware. Every other part of a composition is reported empty. */
+enum { FAKE_HIMC = 0x00040040u };
+static uint8_t ime_result[1024];
+static unsigned ime_result_len;
+void host_ime_set_result(const uint8_t *sjis, size_t n) {
+    if (n > sizeof ime_result) n = sizeof ime_result;
+    memcpy(ime_result, sjis, n);
+    ime_result_len = (unsigned)n;
+}
+API(ImmGetContext) { ret_stdcall(c, FAKE_HIMC, 1); }
 API(ImmReleaseContext) { ret_stdcall(c, 1, 2); }
-API(ImmGetCompositionStringA) { ret_stdcall(c, 0, 4); }
+API(ImmGetCompositionStringA) { /* (himc, index, buffer, size) */
+    uint32_t index = ARG(c, 1), buf = ARG(c, 2), size = ARG(c, 3), n = 0;
+    if (index == 0x800 /* GCS_RESULTSTR */) {
+        n = ime_result_len;
+        if (buf && size) {
+            if (n > size) n = size;
+            memcpy(G(buf), ime_result, n);
+        }
+    }
+    ret_stdcall(c, n, 4);
+}
 API(ImmSetCandidateWindow) { ret_stdcall(c, 1, 2); }
 
 /* -- OLE32 (CoCreateInstance is in media.c) ---------------------------------------- */
 API(CoInitialize) { ret_stdcall(c, 0, 1); }
 API(CoUninitialize) { ret_stdcall(c, 0, 0); }
 
-/* -- WS2_32: networking stays off --------------------------------------------------------- */
+/* -- WS2_32 --------------------------------------------------------------------------------
+   Without adhoc.txt or wifi.txt (see net.h) every socket call fails with WSAENETDOWN, so
+   the network menu reports an error instead of the process stopping on an unimplemented
+   import. With one of them the calls go to net_*(), which on the Vita are SceNet sockets. */
+enum { WS_BASE = 0x400, WSAENETDOWN = 10050, WSAENOTSOCK = 10038, WSAEINTR = 10004 };
+static unsigned ws_error = WSAENETDOWN;
+static int ws_socket(uint32_t s) { return s >= WS_BASE ? (int)(s - WS_BASE) : -1; }
 API(WSAStartup) {
     memset(G(ARG(c, 1)), 0, 400);
     wr16(ARG(c, 1), 0x0202);
+    wr16(ARG(c, 1) + 2, 0x0202);
     ret_stdcall(c, 0, 2);
 }
 API(WSACleanup) { ret_stdcall(c, 0, 0); }
-/* Until SceNet lands every socket call fails with WSAENETDOWN, so the network menu
-   reports an error instead of the process stopping on an unimplemented import. */
-API(WSAGetLastError) { ret_stdcall(c, 10050 /* WSAENETDOWN */, 0); }
-API(socket) { trace("socket(): networking is not available yet"); ret_stdcall(c, 0xFFFFFFFFu, 3); }
-API(bind) { ret_stdcall(c, 0xFFFFFFFFu, 3); }
-API(closesocket) { ret_stdcall(c, 0, 1); }
-API(shutdown) { ret_stdcall(c, 0, 2); }
-API(sendto) { ret_stdcall(c, 0xFFFFFFFFu, 6); }
-API(recvfrom) { ret_stdcall(c, 0xFFFFFFFFu, 6); }
+API(WSAGetLastError) { ret_stdcall(c, ws_error, 0); }
+API(socket) { /* (af, type, protocol) */
+    if (!net_enabled()) { trace("socket(): networking is off (no adhoc.txt or wifi.txt)"); ws_error = WSAENETDOWN; ret_stdcall(c, 0xFFFFFFFFu, 3); return; }
+    int s = net_open();
+    if (s < 0) ws_error = WSAENETDOWN;
+    ret_stdcall(c, s < 0 ? 0xFFFFFFFFu : (uint32_t)(WS_BASE + s), 3);
+}
+API(bind) { /* (s, sockaddr_in*, len): family, port (network order), address */
+    int r = net_enabled() ? net_bind(ws_socket(ARG(c, 0)), rd16(ARG(c, 1) + 2)) : -1;
+    if (r) ws_error = WSAENETDOWN;
+    ret_stdcall(c, r ? 0xFFFFFFFFu : 0, 3);
+}
+API(closesocket) {
+    if (net_enabled()) net_close(ws_socket(ARG(c, 0)));
+    ret_stdcall(c, 0, 1);
+}
+API(shutdown) {
+    if (net_enabled()) net_shutdown(ws_socket(ARG(c, 0)));
+    ret_stdcall(c, 0, 2);
+}
+API(sendto) { /* (s, buf, len, flags, to, tolen) */
+    int n = net_enabled() ? net_send(ws_socket(ARG(c, 0)), G(ARG(c, 1)), (int)ARG(c, 2), rd32(ARG(c, 4) + 4), rd16(ARG(c, 4) + 2)) : -1;
+    if (n < 0) ws_error = WSAENETDOWN;
+    ret_stdcall(c, n < 0 ? 0xFFFFFFFFu : (uint32_t)n, 6);
+}
+API(recvfrom) { /* (s, buf, len, flags, from, fromlen*) */
+    uint32_t addr = 0;
+    uint16_t port = 0;
+    int n = net_enabled() ? net_recv(ws_socket(ARG(c, 0)), G(ARG(c, 1)), (int)ARG(c, 2), &addr, &port) : -1;
+    if (n < 0) { ws_error = WSAEINTR; ret_stdcall(c, 0xFFFFFFFFu, 6); return; }
+    if (ARG(c, 4)) {
+        memset(G(ARG(c, 4)), 0, 16);
+        wr16(ARG(c, 4), 2 /* AF_INET */);
+        wr16(ARG(c, 4) + 2, port);
+        wr32(ARG(c, 4) + 4, addr);
+        if (ARG(c, 5)) wr32(ARG(c, 5), 16);
+    }
+    ret_stdcall(c, (uint32_t)n, 6);
+}
 API(gethostbyname) { ret_stdcall(c, 0, 1); }
 static uint16_t swap16(uint16_t v) { return (uint16_t)(v >> 8 | v << 8); }
 API(htons) { ret_stdcall(c, swap16((uint16_t)ARG(c, 0)), 1); }
@@ -313,9 +441,30 @@ API(inet_addr) {
 
 
 /* -- IMAGEHLP ---------------------------------------------------------------------------- */
+/* The game saves a replay in replay\<players>\<date>\<time - ...>.rep and calls this with
+   the directory part first; as a stub that did nothing, CreateFileA of the .rep always
+   failed and no replay was ever saved. Every directory of the path is created (the part
+   after the last separator is a file name and is left alone), as the real one does. */
 API(MakeSureDirectoryPathExists) {
-    trace("MakeSureDirectoryPathExists(%s)", STR(ARG(c, 0)));
-    ret_stdcall(c, 1, 1);
+    char path[1200];
+    const char *guest = STR(ARG(c, 0));
+    path_to_host(guest, path, sizeof path);
+    size_t start = strlen(host_data_dir) + 1;
+    int ok = 1, made = 0;
+    int first_errno = 0;
+    for (char *q = path + (start < strlen(path) ? start : strlen(path)); *q; q++) {
+        if (*q != '/') continue;
+        *q = 0;
+        struct stat st;
+        if (stat(path, &st) != 0) {
+            if (MKDIR(path) == 0) made++;
+            else if (stat(path, &st) != 0) { ok = 0; if (!first_errno) first_errno = errno; }
+        }
+        *q = '/';
+    }
+    trace("MakeSureDirectoryPathExists(%s) = %d (%d created%s%s)", guest, ok, made,
+          ok ? "" : ", error: ", ok ? "" : strerror(first_errno));
+    ret_stdcall(c, (uint32_t)ok, 1);
 }
 
 #define E(name) {#name, name}

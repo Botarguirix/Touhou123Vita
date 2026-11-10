@@ -7,6 +7,7 @@
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/threadmgr.h>
+#include <psp2/power.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,58 @@ enum { W = 960, H = 544, LINES = 32, COLS = 104, CELL_W = 12, CELL_H = 16, ADVAN
    start-up and the 128 MiB guest window no longer fits (seen on real hardware;
    Vita3K is more permissive). The host itself only mallocs the .exe it loads. */
 int _newlib_heap_size_user = 32 * 1024 * 1024;
+
+/* Maximum clocks, set before main() so the 30 s of loading benefits too: the guest's
+   own code is CPU bound (~17 ms of "logic" per frame at the default 333 MHz) and the
+   user had been raising the clocks by hand from VitaShell. Values above the defaults
+   need the app installed as an unsafe homebrew; if the call is refused the result
+   shows in the trace line "# clocks" written by platform_clock_report. */
+static int clock_result[4], clock_before, clock_500;
+__attribute__((constructor)) static void set_max_clocks(void) {
+    /* Never lower a clock someone else already raised (PSVshell's 500 MHz): try 500
+       (refused without an overclock plugin), then 444 only when the CPU is below it. */
+    clock_before = scePowerGetArmClockFrequency();
+    clock_500 = scePowerSetArmClockFrequency(500);
+    clock_result[0] = clock_500;
+    if (clock_500 < 0 && clock_before < 444)
+        clock_result[0] = scePowerSetArmClockFrequency(444);
+    else if (clock_500 < 0)
+        clock_result[0] = 0; /* already at or above 444: left alone */
+    clock_result[1] = scePowerSetBusClockFrequency(222);
+    clock_result[2] = scePowerSetGpuClockFrequency(222);
+    clock_result[3] = scePowerSetGpuXbarClockFrequency(166);
+}
+
+void platform_clock_report(char *out, size_t size) {
+    uint32_t fpscr;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr)); /* FZ is bit 24, DN bit 25 */
+    snprintf(out, size, "fpscr %08x; was %d MHz, asking for 500 gave %08x; ARM %d MHz (set %d), bus %d MHz (set %d), GPU %d MHz (set %d), GPU xbar %d MHz (set %d)",
+             fpscr, clock_before, (unsigned)clock_500,
+             scePowerGetArmClockFrequency(), clock_result[0], scePowerGetBusClockFrequency(), clock_result[1],
+             scePowerGetGpuClockFrequency(), clock_result[2], scePowerGetGpuXbarClockFrequency(), clock_result[3]);
+}
+
+/* nosound.txt in the data directory: the game runs with no audio at all (to test whether
+   mixing and decoding the music cost frame rate or stability) */
+int host_stats(void) {
+    static int on = -1;
+    if (on < 0) {
+        FILE *f = fopen("ux0:data/touhou123vita/stats.txt", "rb");
+        on = f != NULL;
+        if (f) fclose(f);
+    }
+    return on;
+}
+
+int host_nosound(void) {
+    static int state = -1;
+    if (state < 0) {
+        FILE *f = fopen("ux0:data/touhou123vita/nosound.txt", "rb");
+        state = f != NULL;
+        if (f) fclose(f);
+    }
+    return state;
+}
 
 void platform_memory_report(char *out, size_t size) {
     SceKernelFreeMemorySizeInfo info = {sizeof info};

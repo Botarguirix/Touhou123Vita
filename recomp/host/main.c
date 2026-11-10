@@ -159,6 +159,7 @@ int main(int argc, char **argv) {
 
     static Cpu cpu;
     setup_thread_environment(&cpu);
+    vprof_register(&cpu, 0);
     uint32_t pe = guest_image_base + rd32(guest_image_base + 0x3C);
     uint32_t entry = guest_image_base + rd32(pe + 40);
     /* The generated code only matches th123.exe 1.10a (SHA-256 f0db9366...a16731e):

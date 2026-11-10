@@ -615,6 +615,101 @@ API(DeleteFileA) {
     path_to_host(STR(ARG(c, 0)), path, sizeof path);
     ret_stdcall(c, remove(path) == 0, 1);
 }
+/* CopyFileA(src, dst, failIfExists) and MoveFileA(src, dst): the game copies and
+   renames its replay and profile files (it ended a session with "import CopyFileA is
+   not implemented" the first time it saved one). */
+static int copy_host_file(const char *from, const char *to, int fail_if_exists) {
+    if (fail_if_exists) {
+        FILE *probe = fopen(to, "rb");
+        if (probe) { fclose(probe); last_error = 80; /* ERROR_FILE_EXISTS */ return 0; }
+    }
+    FILE *in = fopen(from, "rb");
+    if (!in) { last_error = 2; return 0; }
+    FILE *out = fopen(to, "wb");
+    if (!out) { fclose(in); last_error = 5; return 0; }
+    static uint8_t chunk[32768];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(chunk, 1, sizeof chunk, in)) > 0)
+        if (fwrite(chunk, 1, n, out) != n) { ok = 0; break; }
+    fclose(in);
+    if (fclose(out) != 0) ok = 0;
+    if (!ok) last_error = 29; /* ERROR_WRITE_FAULT */
+    return ok;
+}
+API(CopyFileA) {
+    char from[1200], to[1200];
+    path_to_host(STR(ARG(c, 0)), from, sizeof from);
+    path_to_host(STR(ARG(c, 1)), to, sizeof to);
+    int ok = copy_host_file(from, to, (int)ARG(c, 2));
+    trace("CopyFileA(%s, %s, %u) = %d", STR(ARG(c, 0)), STR(ARG(c, 1)), ARG(c, 2), ok);
+    ret_stdcall(c, (uint32_t)ok, 3);
+}
+API(MoveFileA) {
+    char from[1200], to[1200];
+    path_to_host(STR(ARG(c, 0)), from, sizeof from);
+    path_to_host(STR(ARG(c, 1)), to, sizeof to);
+    int ok = 0;
+    FILE *probe = fopen(to, "rb");
+    if (probe) { fclose(probe); last_error = 183; /* ERROR_ALREADY_EXISTS */ }
+    else if (rename(from, to) == 0) ok = 1;
+    else if (copy_host_file(from, to, 1)) { remove(from); ok = 1; }
+    trace("MoveFileA(%s, %s) = %d", STR(ARG(c, 0)), STR(ARG(c, 1)), ok);
+    ret_stdcall(c, (uint32_t)ok, 2);
+}
+/* The clipboard is empty (GetClipboardData returns 0), so a locked global never really
+   happens: the handle stands for its own pointer. */
+API(GlobalLock) { ret_stdcall(c, ARG(c, 0), 1); }
+API(GlobalUnlock) { ret_stdcall(c, 0, 1); }
+
+/* CT_CTYPE1 classification of single-byte characters (ASCII; the rest is not
+   classified), and ordinal string comparison with NORM_IGNORECASE. */
+static uint16_t ctype1(unsigned ch) {
+    uint16_t t = 0;
+    if (ch < 128) {
+        if (ch >= 'A' && ch <= 'Z') t |= 0x1 | 0x100;
+        if (ch >= 'a' && ch <= 'z') t |= 0x2 | 0x100;
+        if (ch >= '0' && ch <= '9') t |= 0x4 | 0x80;
+        if ((ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f')) t |= 0x80;
+        if (ch == ' ' || (ch >= 9 && ch <= 13)) t |= 0x8;
+        if (ch == ' ' || ch == 9) t |= 0x40;
+        if (ch < 32 || ch == 127) t |= 0x20;
+        if (ch > 32 && ch < 127 && !(t & (0x100 | 0x4))) t |= 0x10;
+    }
+    return t;
+}
+API(GetStringTypeExA) { /* (locale, infoType, src, cch, out) */
+    uint32_t type = ARG(c, 1), src = ARG(c, 2), out = ARG(c, 4);
+    int32_t cch = (int32_t)ARG(c, 3);
+    if (cch < 0) cch = (int32_t)strlen(STR(src)) + 1;
+    if (type != 1) { last_error = 87; ret_stdcall(c, 0, 5); return; } /* only CT_CTYPE1 */
+    for (int32_t i = 0; i < cch; i++) wr16(out + 2u * (uint32_t)i, ctype1(*(const uint8_t *)G(src + (uint32_t)i)));
+    ret_stdcall(c, 1, 5);
+}
+static int fold(int ch) { return ch >= 'A' && ch <= 'Z' ? ch + 32 : ch; }
+static uint32_t compare_units(uint32_t flags, const void *a, int32_t na, const void *b, int32_t nb, int wide) {
+    for (int32_t i = 0; ; i++) {
+        int ea = wide ? i >= na : i >= na || ((const uint8_t *)a)[i] == 0 ? 1 : 0;
+        int eb = wide ? i >= nb : i >= nb || ((const uint8_t *)b)[i] == 0 ? 1 : 0;
+        if (ea || eb) return ea && eb ? 2 : ea ? 1 : 3;
+        int x = wide ? ((const uint16_t *)a)[i] : ((const uint8_t *)a)[i];
+        int y = wide ? ((const uint16_t *)b)[i] : ((const uint8_t *)b)[i];
+        if (flags & 1 /* NORM_IGNORECASE */) { x = fold(x); y = fold(y); }
+        if (x != y) return x < y ? 1 : 3;
+    }
+}
+API(CompareStringA) { /* (locale, flags, s1, n1, s2, n2) */
+    const char *a = STR(ARG(c, 2)), *b = STR(ARG(c, 4));
+    int32_t na = (int32_t)ARG(c, 3), nb = (int32_t)ARG(c, 5);
+    ret_stdcall(c, compare_units(ARG(c, 1), a, na < 0 ? (int32_t)strlen(a) : na, b, nb < 0 ? (int32_t)strlen(b) : nb, 0), 6);
+}
+API(CompareStringW) {
+    const uint16_t *a = (const uint16_t *)G(ARG(c, 2)), *b = (const uint16_t *)G(ARG(c, 4));
+    int32_t na = (int32_t)ARG(c, 3), nb = (int32_t)ARG(c, 5);
+    if (na < 0) for (na = 0; a[na]; na++) {}
+    if (nb < 0) for (nb = 0; b[nb]; nb++) {}
+    ret_stdcall(c, compare_units(ARG(c, 1), a, na, b, nb, 1), 6);
+}
 API(SetCurrentDirectoryA) {
     trace("SetCurrentDirectoryA(%s)", STR(ARG(c, 0)));
     ret_stdcall(c, 1, 1);
@@ -729,6 +824,8 @@ const ApiEntry win32_kernel32[] = {
     E(WriteFile), E(SetFilePointer), E(GetFileSize), E(FlushFileBuffers), E(GetFileAttributesA),
     E(FindFirstFileA), E(FindNextFileA), E(FindClose),
     E(CreateDirectoryA), E(DeleteFileA), E(SetCurrentDirectoryA), E(GetCurrentDirectoryA), E(lstrlenA),
+    E(CopyFileA), E(MoveFileA), E(GlobalLock), E(GlobalUnlock), E(GetStringTypeExA),
+    {"GetStringTypeA", GetStringTypeExA}, E(CompareStringA), E(CompareStringW),
     E(GetPrivateProfileIntA), E(GetPrivateProfileStringA),
     E(GetConsoleCP), E(GetConsoleOutputCP), E(GetConsoleMode), E(RaiseException), E(UnhandledExceptionFilter),
     {NULL, NULL},

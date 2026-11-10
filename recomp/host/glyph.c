@@ -2,6 +2,8 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_SYNTHESIS_H
+#include FT_OUTLINE_H
+#include <math.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +52,12 @@ static Entry *raster(int height,int weight,uint16_t code) {
     if (FT_Request_Size(face,&request)
         || FT_Load_Char(face,code,FT_LOAD_NO_BITMAP|FT_LOAD_TARGET_NORMAL)) return NULL;
     if (weight>=600) FT_GlyphSlot_Embolden(face->glyph);
+    else if ((h<0 ? -h : h)<=18 && face->glyph->format==FT_GLYPH_FORMAT_OUTLINE)
+        /* The game's small text (14 px) is drawn with MS Gothic, whose bitmaps are crisp; the
+           thin Regular weight of Noto at that size spreads each stroke over two columns at
+           half coverage and looked washed out once stretched to the Vita's screen. A light
+           emboldening (0.375 px) plus the contrast curve below brings it close to that. */
+        FT_Outline_Embolden(&face->glyph->outline,24);
     if (FT_Render_Glyph(face->glyph,FT_RENDER_MODE_NORMAL)) return NULL;
     FT_GlyphSlot slot=face->glyph;FT_Bitmap *bitmap=&slot->bitmap;
     if (bitmap->width>4096 || bitmap->rows>4096) return NULL;
@@ -65,12 +73,19 @@ static Entry *raster(int height,int weight,uint16_t code) {
     entry->height=height;entry->weight=weight;entry->code=code;entry->bytes=bytes;
     entry->gm=(GlyphMetrics){bitmap->width,bitmap->rows,slot->bitmap_left,slot->bitmap_top,
                             (int16_t)advance_x,(int16_t)advance_y};
+    /* coverage 0..255 -> 4-bit gray 0..16 through a contrast curve (gamma 0.6, gain 1.2):
+       the plain linear mapping made thin strokes faint */
+    static uint8_t curve[256];
+    if (!curve[255]) for (unsigned i=0;i<256;++i) {
+        double v=pow(i/255.0,0.6)*1.2; if (v>1.0) v=1.0;
+        curve[i]=(uint8_t)(v*16.0+0.5);
+    }
     int source_pitch=bitmap->pitch;
     for (unsigned y=0;y<bitmap->rows;++y) {
         const uint8_t *row=bitmap->buffer + (source_pitch<0 ? bitmap->rows-1-y:y)
                                               *(size_t)(source_pitch<0 ? -source_pitch:source_pitch);
         for (unsigned x=0;x<bitmap->width;++x)
-            entry->pixels[y*pitch+x]=(uint8_t)((row[x]*16u+127u)/255u);
+            entry->pixels[y*pitch+x]=curve[row[x]];
     }
     return entry;
 }

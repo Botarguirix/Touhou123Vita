@@ -40,7 +40,10 @@ API(DID_GetDeviceState) {
 /* Each buffer is a voice of the mixer (audio_mix.c, Codex T12) reading its PCM straight
    from the guest heap; audio_out_*.c plays the mix. The buffer, its Buffer8 and 3D
    interfaces share one slot, freed when the last of them is released. */
-typedef struct { uint32_t bytes, data, rate, block; AudioVoice *voice; unsigned objects, next_free; } SoundBuffer;
+typedef struct { uint32_t bytes, data, rate, block; AudioVoice *voice; unsigned objects, next_free; int channels, bits; } SoundBuffer;
+/* The sound effects are a pool of mono 16-bit 44.1 kHz buffers of 256 KiB; anything else
+   is the music (or something new) and gets logged in detail for the audio diagnosis. */
+static int unusual_buffer(const SoundBuffer *b) { return b->voice && (b->channels != 1 || b->bytes != 262144); }
 enum { MAX_BUFFERS = 1024 };
 static SoundBuffer buffers[MAX_BUFFERS];
 static unsigned buffer_count = 1, free_buffer;
@@ -74,6 +77,11 @@ API(DS_CreateSoundBuffer) {
         b->rate = rd32(wfx + 4);
         b->block = rd16(wfx + 12);
         b->voice = audio_voice_new((const uint8_t *)G(b->data), bytes, b->rate, channels, bits);
+        b->channels = channels; b->bits = bits;
+        static unsigned logged;
+        if (logged++ < 3 || unusual_buffer(b) || !b->voice)
+            trace("# audio: buffer %u: %u bytes, %u Hz, %d channels, %d bits, block %u%s", i, bytes, b->rate, channels, bits,
+                  b->block, b->voice ? "" : " (rejected by the mixer)");
         audio_out_start();
     }
     wr32(ARG(c, 2), com_new(&dsbuffer_class, i, 0));
@@ -139,6 +147,23 @@ API(DSB_Lock) {
         off = write % (b->bytes ? b->bytes : 1);
     }
     if (flags & 2 /* DSBLOCK_ENTIREBUFFER */) { off = 0; n = b->bytes; }
+    if (unusual_buffer(b)) {
+        /* the music is refilled with Lock: does the game ever write where the play cursor
+           is (old data replayed or new data torn)? counted for every Lock, the first ones
+           printed in full */
+        static unsigned locks, overlaps, wraps;
+        uint32_t play, write;
+        audio_voice_position(b->voice, &play, &write);
+        uint32_t span = n > b->bytes ? b->bytes : n;
+        uint32_t rel = b->bytes ? (play + b->bytes - off % b->bytes) % b->bytes : 0; /* play cursor relative to the region start */
+        int overlap = rel < span;
+        if (off + n > b->bytes) wraps++;
+        if (overlap) overlaps++;
+        if (locks < 12 || (overlap && overlaps < 12) || (++locks % 400) == 0)
+            trace("# audio: lock buffer %u off %u n %u flags %x play %u: %s; %u locks counted, %u over the play cursor, %u wrapped",
+                  (unsigned)(b - buffers), off, n, flags, play, overlap ? "OVER THE PLAY CURSOR" : "behind/ahead", locks, overlaps, wraps);
+        locks++;
+    }
     uint32_t first = off + n > b->bytes ? b->bytes - off : n;
     wr32(ARG(c, 3), b->data + off);
     wr32(ARG(c, 4), first);
@@ -148,6 +173,9 @@ API(DSB_Lock) {
 }
 API(DSB_Play) {
     SoundBuffer *b = &buffers[com_index(ARG(c, 0))];
+    if (unusual_buffer(b)) /* the music streams, not the effects */
+        trace("# audio: play buffer %u (%u bytes, %u Hz, %d ch, %d bit) looping=%u", (unsigned)(b - buffers), b->bytes, b->rate,
+              b->channels, b->bits, ARG(c, 3) & 1);
     audio_voice_play(b->voice, ARG(c, 3) & 1 /* DSBPLAY_LOOPING */);
     ret_stdcall(c, S_OK, 4);
 }

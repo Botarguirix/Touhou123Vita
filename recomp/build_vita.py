@@ -31,7 +31,7 @@ RUNTIME, HOST, VITA = ROOT / "recomp/runtime", ROOT / "recomp/host", ROOT / "rec
 LIBS = ["-lvitaGL", "-lvitashark", "-lSceShaccCgExt", "-lmathneon", "-ltaihen_stub", "-lSceShaccCg_stub",
         "-lSceKernelDmacMgr_stub", "-lSceGxm_stub", "-lSceCommonDialog_stub", "-lSceAppUtil_stub",
         "-lSceSysmodule_stub", "-lSceIme_stub", "-lSceAppMgr_stub", "-lSceDisplay_stub", "-lSceCtrl_stub", "-lSceAudio_stub", "-lSceSysmem_stub", "-lSceLibKernel_stub", "-lSceKernelThreadMgr_stub",
-        "-lSceProcessmgr_stub", f"-L{VITA_LIBS / 'lib'}", "-lvorbisfile", "-lvorbis", "-logg", "-lfreetype", "-lpng", "-lz", "-lstdc++", "-lpthread", "-lm", "-lgcc", "-lpthread"]
+        "-lSceProcessmgr_stub", "-lScePower_stub", "-lSceNet_stub", "-lSceNetCtl_stub", "-lSceNetAdhocMatching_stub", "-lScePspnetAdhoc_stub", f"-L{VITA_LIBS / 'lib'}", "-lvorbisfile", "-lvorbis", "-logg", "-lfreetype", "-lpng", "-lz", "-lstdc++", "-lpthread", "-lm", "-lgcc", "-lpthread"]
 
 
 def run(cmd, **kw):

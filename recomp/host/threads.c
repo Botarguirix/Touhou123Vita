@@ -54,18 +54,50 @@ static void event_set(Event *e) {
     pthread_mutex_unlock(&e->m);
 }
 
+/* The game's frame clock is a thread that waits 16 or 17 ms on an event, forever (0x4192a0),
+   and wakes the game's threads each time: a timed wait that ends a few tenths of a
+   millisecond late costs the game its 60 Hz (the traces showed 59.0 steps per second even
+   in idle menus). Timed waits of 8 ms or more therefore sleep to ~1.5 ms before the
+   deadline and spin the rest. The lateness of those waits is reported every 10 s. */
+enum { SPIN_US = 1500, PRECISE_MIN_MS = 8 };
+static uint64_t tw_count, tw_late_sum, tw_late_max, tw_report_at;
+static void timed_wait_report(uint64_t now) {
+    if (!tw_report_at) tw_report_at = now + 10000000;
+    if (now < tw_report_at || !tw_count) return;
+    tw_report_at = now + 10000000;
+    trace("# timed waits (>= %d ms): %llu, ended %llu us late on average, worst %llu us", PRECISE_MIN_MS,
+          (unsigned long long)tw_count, (unsigned long long)(tw_late_sum / tw_count), (unsigned long long)tw_late_max);
+    tw_count = tw_late_sum = tw_late_max = 0;
+}
+
 /* 0 = signaled (WAIT_OBJECT_0), 0x102 = WAIT_TIMEOUT */
 static uint32_t event_wait(Event *e, uint32_t ms) {
     pthread_mutex_lock(&e->m);
     if (!e->signaled && ms != 0xFFFFFFFFu) {
+        uint64_t start = platform_ticks_us(), deadline = start + (uint64_t)ms * 1000u;
+        int precise = ms >= PRECISE_MIN_MS;
+        uint64_t coarse_us = precise ? (uint64_t)ms * 1000u - SPIN_US : (uint64_t)ms * 1000u;
         struct timespec until;
         clock_gettime(CLOCK_REALTIME, &until);
-        until.tv_sec += ms / 1000;
-        until.tv_nsec += (long)(ms % 1000) * 1000000L;
+        until.tv_sec += (time_t)(coarse_us / 1000000u);
+        until.tv_nsec += (long)(coarse_us % 1000000u) * 1000L;
         if (until.tv_nsec >= 1000000000L) { until.tv_sec++; until.tv_nsec -= 1000000000L; }
         while (!e->signaled)
             if (pthread_cond_timedwait(&e->cv, &e->m, &until) == ETIMEDOUT)
                 break;
+        if (precise && !e->signaled) {
+            /* fine part: poll with the lock released so SetEvent can still get in */
+            while (!e->signaled && platform_ticks_us() < deadline) {
+                pthread_mutex_unlock(&e->m);
+                pthread_mutex_lock(&e->m);
+            }
+            if (!e->signaled) {
+                uint64_t end = platform_ticks_us(), late = end > deadline ? end - deadline : 0;
+                tw_count++; tw_late_sum += late;
+                if (late > tw_late_max) tw_late_max = late;
+                timed_wait_report(end);
+            }
+        }
     } else {
         while (!e->signaled)
             pthread_cond_wait(&e->cv, &e->m);
@@ -119,15 +151,19 @@ API(SetEvent) {
     if (e) event_set(e);
     ret_stdcall(c, e != NULL, 1);
 }
+__thread uint64_t host_wait_us, host_sleep_us, host_wait_calls;
 API(WaitForSingleObject) {
     uint32_t h = ARG(c, 0), ms = ARG(c, 1), r = 0;
     Event *e = handle_get(h, H_EVENT);
     Thread *t = handle_get(h, H_THREAD);
+    uint64_t t0 = platform_ticks_us();
     if (e) r = event_wait(e, ms);
     else if (t) {
         r = event_wait(&t->done, ms);
         if (!r) event_set(&t->done); /* a finished thread stays signaled */
     }
+    host_wait_us += platform_ticks_us() - t0;
+    host_wait_calls++;
     ret_stdcall(c, r, 2);
 }
 API(CreateMutexA) {
@@ -163,6 +199,24 @@ static void *thread_main(void *arg) {
     t->uid = sceKernelGetThreadId();
     if (t->priority) apply_priority(t);
     pthread_mutex_unlock(&table_lock);
+    /* The on-Vita profile (v9) showed the game thread (0x4083d0, logic + drawing) idle
+       30-50 % of a fight in its frame wait, yet with 25-34 ms steps: it was being delayed,
+       not overloaded. It gets user core 1 to itself; every other guest thread runs on
+       cores 0 and 2. Measured in v10: no better, so it is now opt-in with cores.txt. */
+    {
+        static int off = -1;
+        if (off < 0) {
+            FILE *f = fopen("ux0:data/touhou123vita/cores.txt", "rb");
+            off = f == NULL;
+            if (f) fclose(f);
+        }
+        if (!off) {
+            int game = t->start == 0x004083d0u;
+            int mask = game ? 0x20000 : 0x10000 | 0x40000; /* SCE_KERNEL_CPU_MASK_USER_1 / _0|_2 */
+            int r = sceKernelChangeThreadCpuAffinityMask(t->uid, mask);
+            trace("# thread %u (start %08x): cores %s (%08x)", t->index, t->start, game ? "1" : "0+2", (unsigned)r);
+        }
+    }
 #else
     profile_register_thread(0x1004 + 4 * t->index);
 #endif
@@ -170,6 +224,7 @@ static void *thread_main(void *arg) {
     x87_reset(c);
     x87_set_cw(c, 0x027F);
     c->fs_base = t->tib;
+    vprof_register(c, t->start);
     uint32_t stack = THREAD_STACK_BASE + t->index * THREAD_STACK_SIZE;
     c->esp.d = stack + THREAD_STACK_SIZE - 16;
     jmp_buf trap;
@@ -269,7 +324,12 @@ API(SetThreadPriority) {
     ret_stdcall(c, 1, 2);
 }
 API(GetCurrentThreadId) { ret_stdcall(c, rd32(c->fs_base + 0x24), 0); }
-API(Sleep) { platform_sleep_ms(ARG(c, 0)); ret_stdcall(c, 0, 1); }
+API(Sleep) {
+    uint64_t t0 = platform_ticks_us();
+    platform_sleep_ms(ARG(c, 0));
+    host_sleep_us += platform_ticks_us() - t0;
+    ret_stdcall(c, 0, 1);
+}
 
 #define E(name) {#name, name}
 const ApiEntry win32_threads[] = {

@@ -19,6 +19,7 @@
 #endif
 
 #include "input_map.h"
+#include "net.h"
 #include "render.h"
 #include "win32.h"
 
@@ -32,7 +33,15 @@ static int mag_linear, min_linear;
 #ifdef __vita__
 /* The 640x480 game is stretched to the whole 16:9 screen (the user's choice); set
    VIEW_W to 725 for centred 4:3 with black side bars. */
-enum { VITA_W = 960, VITA_H = 544, VIEW_W = 960, VIEW_X = (VITA_W - VIEW_W) / 2 };
+/* Render resolution: the display unit scales 720x408, 640x368 and 480x272 to the
+   screen, so a lower one is cheaper to fill and just looks coarser. Chosen at start-up
+   (render resolution test: 640x368 by default; res.txt in the data directory holds
+   960, 720, 640 or 480 to pick another). */
+static int vita_w = 640, vita_h = 368;
+#define VITA_W vita_w
+#define VITA_H vita_h
+#define VIEW_W vita_w
+#define VIEW_X 0
 /* vitaGL has no per-thread context, but it is not thread-safe: the device is created
    on one guest thread and two others draw, so every call goes through one lock. */
 static pthread_mutex_t gl_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -45,13 +54,38 @@ static int platform_init(uint32_t width, uint32_t height) {
        ~32 MiB user RAM left (the rest is for ~20 thread stacks and file buffers), 64 MiB
        of CDRAM (the rest grows the texture pool) and 16 MiB of physically contiguous memory. */
     texture_pool_reserve();
-    char memory[160];
+    char memory[256];
+    platform_clock_report(memory, sizeof memory);
+    trace("# clocks: %s", memory);
     platform_memory_report(memory, sizeof memory);
     trace("# before vitaGL: %s", memory);
     /* Explicit pool sizes (the threshold variant derives them from the remaining
        budget). The return value is not a success flag: vitaGL returns whether it had
        to lower the resolution, i.e. GL_FALSE after a normal start, so it is ignored. */
+    /* Triple buffering (before vglInit): with two buffers and vsync a logic step of 17 ms
+       missed the 16.7 ms vblank and waited until 33 ms, which also tripped the frame skip
+       (heartbeats showed ~58 steps but only ~42 frames drawn per second). */
+    vglSetDisplayBufferCount(3);
+    {
+        FILE *rf = fopen("ux0:data/touhou123vita/res.txt", "rb");
+        int want = 0;
+        if (rf) { /* (fscanf pulled in libc code that vita-elf-create crashed on) */
+            char text[16] = "";
+            if (fgets(text, sizeof text, rf)) want = atoi(text);
+            fclose(rf);
+        }
+        if (want == 960) { vita_w = 960; vita_h = 544; }
+        else if (want == 720) { vita_w = 720; vita_h = 408; }
+        else if (want == 480) { vita_w = 480; vita_h = 272; }
+        else { vita_w = 640; vita_h = 368; }
+        trace("# display: render resolution %dx%d (res.txt: %d)", vita_w, vita_h, want);
+    }
     vglInitWithCustomSizes(0, VITA_W, VITA_H, 8 << 20, 64 << 20, 16 << 20, 0, SCE_GXM_MULTISAMPLE_NONE);
+    {   /* vsync-off.txt in the data directory: present without waiting for the vblank (tearing) */
+        FILE *vs = fopen("ux0:data/touhou123vita/vsync-off.txt", "rb");
+        if (vs) { fclose(vs); vglWaitVblankStart(GL_FALSE); }
+        trace("# display: 3 buffers, vsync %s", vs ? "off (vsync-off.txt)" : "on");
+    }
     platform_memory_report(memory, sizeof memory);
     trace("# after vitaGL: %s", memory);
     platform_display_taken();
@@ -66,7 +100,9 @@ static int platform_init(uint32_t width, uint32_t height) {
     (void)width; (void)height;
     return 0;
 }
-static void platform_swap(void) { vglSwapBuffers(GL_FALSE); }
+/* GL_TRUE while a system dialog (the keyboard) is on screen: vitaGL then lets the
+   common dialog draw over the frame and updates it */
+static void platform_swap(void) { vglSwapBuffers(ime_dialog_active() ? GL_TRUE : GL_FALSE); }
 int render_pump_events(void) { return 0; }
 void render_keyboard_state(uint8_t dik[256]) {
     SceCtrlData pad;
@@ -216,6 +252,7 @@ static void color4(uint32_t argb, float out[4]) {
    swapped), never twice in a row: the game keeps its speed and the screen shows at
    least 30 FPS. */
 static int skip_drawing;
+static uint64_t swap_us_sum, swap_count; /* time inside vglSwapBuffers, for the pacing report */
 
 void render_clear(uint32_t flags, uint32_t color, float z, uint32_t stencil) {
     if (skip_drawing) return;
@@ -283,6 +320,7 @@ static uint64_t gpu_budget = 44u << 20; /* of vitaGL's 64 MiB of CDRAM */
 static uint64_t gpu_budget = UINT64_MAX; /* T123_GPU_BUDGET_MB to test the Vita's eviction */
 #endif
 static uint64_t gpu_bytes, gpu_evictions;
+static uint64_t gpu_t_query, gpu_t_scan, gpu_t_delete, gpu_short_stops; /* microseconds, see up_report */
 
 static void gpu_forget(RenderTexture *t) { /* under the GL lock */
     if (!t->gl) return;
@@ -296,9 +334,19 @@ static void gpu_forget(RenderTexture *t) { /* under the GL lock */
    memory can be far below what the budget suggests: 5300 evictions in a long fight
    ended in a GPU crash on the Vita (52 MiB budget). Room is also made while vitaGL's
    own free memory is short. */
+/* vglMemFree walks vitaGL's allocator and cost ~4.5 ms per upload (24.9 s of 26.6 s of
+   "making room" in a 14 minute fight), so it is asked at most once every 6 frames; in
+   between the free memory is the last answer minus what was uploaded since (deferred
+   frees only make that estimate pessimistic). */
+static uint64_t gpu_free_cache, gpu_added_since, gpu_free_frame = ~0ull;
 static int gpu_memory_short(uint64_t need) {
 #ifdef __vita__
-    size_t free_now = vglMemFree(VGL_MEM_VRAM) + vglMemFree(VGL_MEM_PHYCONT);
+    if (gpu_free_frame == ~0ull || d3d_frames - gpu_free_frame >= 6) {
+        gpu_free_cache = (uint64_t)vglMemFree(VGL_MEM_VRAM) + vglMemFree(VGL_MEM_PHYCONT);
+        gpu_free_frame = d3d_frames;
+        gpu_added_since = 0;
+    }
+    uint64_t free_now = gpu_free_cache > gpu_added_since ? gpu_free_cache - gpu_added_since : 0;
     return free_now < need + (8u << 20);
 #else
     (void)need;
@@ -312,15 +360,33 @@ static void gpu_make_room(uint64_t need) {
     if (!read_env++ && getenv("T123_GPU_BUDGET_MB"))
         gpu_budget = strtoull(getenv("T123_GPU_BUDGET_MB"), NULL, 10) << 20;
 #endif
-    while (gpu_bytes + need > gpu_budget || (gpu_bytes && gpu_memory_short(need))) {
+    /* vitaGL frees a deleted texture late, so its free memory does not rise while this
+       loop evicts: with the short-memory test alone it kept dropping every older
+       texture (3500 evictions with ~11-30 MiB resident in a 10 minute fight, "making
+       room" 56 % of the upload time). When only that test asks for room, evict about
+       the size of the new texture and stop; glTexImage2D's retry in upload() still
+       evicts more if the allocation really fails. */
+    uint64_t freed = 0;
+    for (;;) {
+        uint64_t q0 = platform_ticks_us();
+        int over_budget = gpu_bytes + need > gpu_budget;
+        int short_mem = !over_budget && gpu_bytes && gpu_memory_short(need);
+        gpu_t_query += platform_ticks_us() - q0;
+        if (!over_budget && !short_mem) break;
+        if (!over_budget && freed >= need) { gpu_short_stops++; break; }
+        uint64_t s0 = platform_ticks_us();
         RenderTexture *oldest = NULL;
         for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
             RenderTexture *t = &textures[i];
             if (t->gl && t->used_frame < d3d_frames && (!oldest || t->used_frame < oldest->used_frame))
                 oldest = t;
         }
+        gpu_t_scan += platform_ticks_us() - s0;
         if (!oldest) return; /* everything was drawn this frame: go over budget */
+        freed += oldest->gpu_bytes;
+        uint64_t d0 = platform_ticks_us();
         gpu_forget(oldest);
+        gpu_t_delete += platform_ticks_us() - d0;
         if (++gpu_evictions % 100 == 1)
 #ifdef __vita__
             trace("# GPU texture budget: %llu evictions so far, %llu KiB uploaded, vitaGL free %u KiB VRAM %u KiB phycont",
@@ -334,42 +400,71 @@ static void gpu_make_room(uint64_t need) {
 }
 
 /* D3D formats -> RGBA8, n rows. */
+/* The format switch is outside the pixel loops (it ran once per pixel before), and the
+   5-bit channel expansion uses a table instead of a multiply and divide per channel. */
+static uint8_t expand5[32], expand6[64];
+static void init_expand_tables(void) {
+    for (unsigned i = 0; i < 32; i++) expand5[i] = (uint8_t)(i * 255 / 31);
+    for (unsigned i = 0; i < 64; i++) expand6[i] = (uint8_t)(i * 255 / 63);
+}
+
 static void convert_rows(const RenderTexture *t, const uint8_t *src, uint8_t *rgba, uint32_t n) {
+    if (!expand5[31]) init_expand_tables();
+    const uint32_t w = t->width, fmt = t->format;
     for (uint32_t y = 0; y < n; y++) {
-        for (uint32_t x = 0; x < t->width; x++) {
-            uint8_t *o = rgba + ((size_t)y * t->width + x) * 4;
-            const uint8_t *p = src + (size_t)y * t->pitch;
-            uint32_t v;
-            switch (t->format) {
-            case 21: case 22:
-                p += x * 4;
-                o[0] = p[2]; o[1] = p[1]; o[2] = p[0]; o[3] = t->format == 22 ? 255 : p[3];
-                break;
-            case 26: /* A4R4G4B4 */
-                v = p[x * 2] | p[x * 2 + 1] << 8;
-                o[0] = ((v >> 8) & 15) * 17; o[1] = ((v >> 4) & 15) * 17; o[2] = (v & 15) * 17; o[3] = (v >> 12) * 17;
-                break;
-            case 25: case 24: /* A1R5G5B5, X1R5G5B5 */
-                v = p[x * 2] | p[x * 2 + 1] << 8;
-                o[0] = ((v >> 10) & 31) * 255 / 31; o[1] = ((v >> 5) & 31) * 255 / 31; o[2] = (v & 31) * 255 / 31;
-                o[3] = t->format == 24 || (v >> 15) ? 255 : 0;
-                break;
-            case 23: /* R5G6B5 */
-                v = p[x * 2] | p[x * 2 + 1] << 8;
-                o[0] = ((v >> 11) & 31) * 255 / 31; o[1] = ((v >> 5) & 63) * 255 / 63; o[2] = (v & 31) * 255 / 31; o[3] = 255;
-                break;
-            case 28: /* A8 */
-                o[0] = o[1] = o[2] = 0; o[3] = p[x];
-                break;
-            case 50: /* L8 */
-                o[0] = o[1] = o[2] = p[x]; o[3] = 255;
-                break;
-            default:
-                o[0] = 255; o[1] = 0; o[2] = 255; o[3] = 255; /* unknown format: magenta */
-                break;
+        const uint8_t *p = src + (size_t)y * t->pitch;
+        uint8_t *o = rgba + (size_t)y * w * 4;
+        switch (fmt) {
+        case 21: case 22:
+            for (uint32_t x = 0; x < w; x++, p += 4, o += 4) {
+                o[0] = p[2]; o[1] = p[1]; o[2] = p[0]; o[3] = fmt == 22 ? 255 : p[3];
             }
+            break;
+        case 26: /* A4R4G4B4 */
+            for (uint32_t x = 0; x < w; x++, p += 2, o += 4) {
+                uint32_t v = p[0] | p[1] << 8;
+                o[0] = ((v >> 8) & 15) * 17; o[1] = ((v >> 4) & 15) * 17; o[2] = (v & 15) * 17; o[3] = (v >> 12) * 17;
+            }
+            break;
+        case 25: case 24: /* A1R5G5B5, X1R5G5B5 */
+            for (uint32_t x = 0; x < w; x++, p += 2, o += 4) {
+                uint32_t v = p[0] | p[1] << 8;
+                o[0] = expand5[(v >> 10) & 31]; o[1] = expand5[(v >> 5) & 31]; o[2] = expand5[v & 31];
+                o[3] = fmt == 24 || (v >> 15) ? 255 : 0;
+            }
+            break;
+        case 23: /* R5G6B5 */
+            for (uint32_t x = 0; x < w; x++, p += 2, o += 4) {
+                uint32_t v = p[0] | p[1] << 8;
+                o[0] = expand5[(v >> 11) & 31]; o[1] = expand6[(v >> 5) & 63]; o[2] = expand5[v & 31]; o[3] = 255;
+            }
+            break;
+        case 28: /* A8 */
+            for (uint32_t x = 0; x < w; x++, o += 4) { o[0] = o[1] = o[2] = 0; o[3] = p[x]; }
+            break;
+        case 50: /* L8 */
+            for (uint32_t x = 0; x < w; x++, o += 4) { o[0] = o[1] = o[2] = p[x]; o[3] = 255; }
+            break;
+        default:
+            for (uint32_t x = 0; x < w; x++, o += 4) { o[0] = 255; o[1] = 0; o[2] = 255; o[3] = 255; } /* unknown: magenta */
+            break;
         }
     }
+}
+
+/* Where upload time goes (microseconds), reported every 10 s while uploads happen. */
+static struct { uint64_t n, total, room, alloc, fill, last_report; } up_stats;
+static void up_report(uint64_t now) {
+    if (!up_stats.n || now - up_stats.last_report < 10000000) return;
+    trace("# texture uploads: %llu in %llu ms (making room %llu ms [free query %llu, scan %llu, delete %llu], GL alloc %llu ms, fill = inflate+convert+GL %llu ms), %llu evictions so far, %llu short-memory stops",
+          (unsigned long long)up_stats.n, (unsigned long long)(up_stats.total / 1000), (unsigned long long)(up_stats.room / 1000),
+          (unsigned long long)(gpu_t_query / 1000), (unsigned long long)(gpu_t_scan / 1000), (unsigned long long)(gpu_t_delete / 1000),
+          (unsigned long long)(up_stats.alloc / 1000), (unsigned long long)(up_stats.fill / 1000), (unsigned long long)gpu_evictions,
+          (unsigned long long)gpu_short_stops);
+    gpu_t_query = gpu_t_scan = gpu_t_delete = 0;
+    uint64_t last = now;
+    memset(&up_stats, 0, sizeof up_stats);
+    up_stats.last_report = last;
 }
 
 /* Upload in bands: the texture is created empty and filled row band by row band from
@@ -389,9 +484,30 @@ static int half_res_enabled = 1;
 #else
 static int half_res_enabled = -1; /* T123_HALF_RES=1 to see it on PC */
 #endif
+/* Only the 640+ backgrounds are halved by default. The resolution test that halved every
+   texture of 512x512 and up also halved the game's text (the result screen draws its
+   spell-card names into one of those big textures, and came out as 5-pixel smears) and
+   it gained no frame rate, so it is off now. half-sprites.txt in the data directory turns
+   it back on, for measuring. */
+static int half_min_side(void) {
+    static int min_side;
+    if (!min_side) {
+#ifdef __vita__
+        FILE *f = fopen("ux0:data/touhou123vita/half-sprites.txt", "rb");
+        min_side = f ? 512 : 640;
+        if (f) fclose(f);
+        trace("# textures: halving textures with both sides >= %d (half-sprites.txt present: %d)", min_side, f != NULL);
+#else
+        min_side = getenv("T123_HALF_SPRITES") ? 512 : 640;
+#endif
+    }
+    return min_side;
+}
 static int wants_half(const RenderTexture *t) {
     if (half_res_enabled < 0) half_res_enabled = getenv("T123_HALF_RES") != NULL;
-    return half_res_enabled && t->format == 21 && t->pitch == t->width * 4 && t->width >= 640 && t->height >= 640;
+    int m = half_min_side();
+    return half_res_enabled && t->format == 21 && t->pitch == t->width * 4 && !(t->width & 1) &&
+           t->width >= (uint32_t)m && t->height >= (uint32_t)m;
 }
 
 static void upload_band_half(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) {
@@ -408,6 +524,55 @@ static void upload_band_half(void *ctx, const uint8_t *rows, uint32_t y, uint32_
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)(y / 2), (GLsizei)w, (GLsizei)out_rows, GL_BGRA, GL_UNSIGNED_BYTE, band_rgba);
 }
 
+/* 16-bit upload (RGBA4444): half the GPU memory and half the upload traffic for the
+   large 32-bit sprite sheets. vitaGL copies 16-bit data raw into a U4U4U4U4_RGBA
+   texture, so the pixels are packed here as the GL type says (R in the top nibble).
+   On the Vita it is on unless tex32.txt exists in the data directory; on PC
+   T123_TEX16=1 turns it on to look at it. Only A8R8G8B8/X8R8G8B8 textures of at least
+   256x256 are packed: small UI textures keep their 32 bits. */
+static int tex16_enabled(void) {
+    static int state = -1;
+    if (state < 0) {
+#ifdef __vita__
+        FILE *f = fopen("ux0:data/touhou123vita/tex32.txt", "rb");
+        state = f == NULL;
+        if (f) fclose(f);
+        trace("# textures: 16-bit upload %s", state ? "on (tex32.txt turns it off)" : "off (tex32.txt present)");
+#else
+        state = getenv("T123_TEX16") != NULL;
+#endif
+    }
+    return state;
+}
+
+static uint8_t q4[256];
+static uint16_t band16[BAND_BYTES / 4]; /* a band of 32-bit rows holds at most BAND_BYTES/4 pixels */
+static void upload_band_16(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) {
+    RenderTexture *t = ctx;
+    if (!q4[255]) for (unsigned i = 0; i < 256; i++) q4[i] = (uint8_t)((i * 15 + 127) / 255);
+    const uint8_t *p = rows;
+    uint16_t *o = band16;
+    const int opaque = t->format == 22;
+    for (size_t i = 0, count = (size_t)n * t->width; i < count; i++, p += 4)
+        *o++ = (uint16_t)(q4[p[2]] << 12 | q4[p[1]] << 8 | q4[p[0]] << 4 | (opaque ? 15 : q4[p[3]]));
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)y, (GLsizei)t->width, (GLsizei)n, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4, band16);
+}
+
+/* what the game really creates, to decide what else is worth compressing */
+static struct { unsigned n, n16; uint64_t px; } fmt_census[64];
+static void census_report(uint64_t now) { /* once a minute: uploads per D3D format, and how many went out as 16 bits */
+    static uint64_t last;
+    if (now - last < 60000000) return;
+    last = now;
+    char line[300];
+    int len = snprintf(line, sizeof line, "# texture formats (uploads, Mpixels, as 16-bit):");
+    for (unsigned f = 0; f < 64 && len < (int)sizeof line - 40; f++)
+        if (fmt_census[f].n)
+            len += snprintf(line + len, sizeof line - len, " fmt%u %u/%u.%02u/%u;", f, fmt_census[f].n,
+                            (unsigned)(fmt_census[f].px / 1000000), (unsigned)(fmt_census[f].px / 10000 % 100), fmt_census[f].n16);
+    trace("%s", line);
+}
+
 static void upload_band(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) {
     RenderTexture *t = ctx;
     if (t->format == 21 && t->pitch == t->width * 4) { /* A8R8G8B8 is BGRA in memory: as is */
@@ -421,13 +586,23 @@ static void upload_band(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) 
 static void upload(RenderTexture *t) {
     int half = wants_half(t);
     uint32_t gw = half ? t->width / 2 : t->width, gh = half ? (t->height + 1) / 2 : t->height;
-    size_t out_bytes = (size_t)gw * gh * 4;
+    int use16 = !half && (t->format == 21 || t->format == 22) && t->pitch == t->width * 4 &&
+                (uint64_t)t->width * t->height >= 256 * 256 && tex16_enabled();
+    GLenum gtype = use16 ? GL_UNSIGNED_SHORT_4_4_4_4 : GL_UNSIGNED_BYTE;
+    size_t out_bytes = (size_t)gw * gh * (use16 ? 2 : 4);
+    if (t->format < 64) {
+        fmt_census[t->format].n++;
+        fmt_census[t->format].n16 += use16;
+        fmt_census[t->format].px += (uint64_t)t->width * t->height;
+    }
     if (t->pitch > BAND_BYTES || (size_t)t->width * 4 > sizeof band_rgba) {
         trace("# texture upload %ux%u: rows wider than the upload band", t->width, t->height);
         return;
     }
+    uint64_t t0 = platform_ticks_us();
     gpu_forget(t);
     gpu_make_room(out_bytes);
+    uint64_t t1 = platform_ticks_us();
     glGenTextures(1, &t->gl);
     glBindTexture(GL_TEXTURE_2D, t->gl);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -436,7 +611,7 @@ static void upload(RenderTexture *t) {
        pointer (a crash in write_rgba8888 in Story mode): evict and retry, and if there
        is still no room leave the texture empty for this frame. */
     while (glGetError()) {}
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)gw, (GLsizei)gh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)gw, (GLsizei)gh, 0, GL_RGBA, gtype, NULL);
     for (unsigned attempt = 0; glGetError() != GL_NO_ERROR; attempt++) {
         RenderTexture *oldest = NULL;
         for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
@@ -452,14 +627,20 @@ static void upload(RenderTexture *t) {
         }
         gpu_forget(oldest);
         glBindTexture(GL_TEXTURE_2D, t->gl);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)gw, (GLsizei)gh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (GLsizei)gw, (GLsizei)gh, 0, GL_RGBA, gtype, NULL);
     }
     /* band rows: bounded by both buffers (16-bit formats widen to 4 bytes per pixel);
        even, so a half-resolution band starts on a whole output row */
+    uint64_t t2 = platform_ticks_us();
     size_t rows = BAND_BYTES / t->pitch, rgba_rows = sizeof band_rgba / ((size_t)t->width * 4);
     if (rgba_rows < rows) rows = rgba_rows;
     if (rows > 1) rows &= ~(size_t)1;
-    render_texture_rows(t, band, rows * t->pitch, half ? upload_band_half : upload_band, t);
+    t->gpu16 = (uint8_t)use16;
+    render_texture_rows(t, band, rows * t->pitch, half ? upload_band_half : use16 ? upload_band_16 : upload_band, t);
+    uint64_t t3 = platform_ticks_us();
+    up_stats.n++; up_stats.total += t3 - t0; up_stats.room += t1 - t0; up_stats.alloc += t2 - t1; up_stats.fill += t3 - t2;
+    up_report(t3);
+    census_report(t3);
     t->half = (uint8_t)half;
     GLenum error = glGetError();
     if (error) {
@@ -470,6 +651,7 @@ static void upload(RenderTexture *t) {
     }
     t->gpu_bytes = (uint32_t)out_bytes;
     gpu_bytes += out_bytes;
+    gpu_added_since += out_bytes;
     t->dirty = 0;
 }
 void render_texture_free(RenderTexture *t) {
@@ -553,8 +735,48 @@ static void heartbeat(int drawn) {
     uint64_t now = platform_ticks_us();
     steps++;
     draws += drawn != 0;
+    /* Where a logic step goes: the interval between presents of this thread, split into
+       time blocked in WaitForSingleObject, Sleep and the swap; the rest is the guest's own
+       code plus the host calls it makes. The histogram shows whether the intervals sit at
+       the game's own limiter (~17 ms) or are spikes of work. */
+    static uint64_t last_present, w_wait, w_sleep, w_calls, sum_interval, intervals, hist[7];
+    static uint64_t prev_wait, prev_sleep, prev_calls, thread_switches;
+    static uint64_t *thread_tag; /* the wait counters are per thread: the address of one identifies the caller */
+    if (thread_tag != &host_wait_us) {
+        if (thread_tag) thread_switches++;
+        thread_tag = &host_wait_us;
+        prev_wait = host_wait_us; prev_sleep = host_sleep_us; prev_calls = host_wait_calls;
+        last_present = 0; /* a step measured across two threads is meaningless */
+    }
+    if (last_present) {
+        uint64_t iv = now - last_present;
+        sum_interval += iv;
+        intervals++;
+        hist[iv < 15000 ? 0 : iv < 16500 ? 1 : iv < 17500 ? 2 : iv < 20000 ? 3 : iv < 25000 ? 4 : iv < 34000 ? 5 : 6]++;
+        w_wait += host_wait_us - prev_wait;
+        w_sleep += host_sleep_us - prev_sleep;
+        w_calls += host_wait_calls - prev_calls;
+    }
+    prev_wait = host_wait_us; prev_sleep = host_sleep_us; prev_calls = host_wait_calls;
+    last_present = now;
     if (!next) next = now + 10000000;
     if (now < next) return;
+    if (intervals) {
+        uint64_t n = intervals;
+        uint64_t swap_avg = swap_count ? swap_us_sum / swap_count : 0;
+        long long other = (long long)(sum_interval / n) - (long long)(w_wait / n) - (long long)(w_sleep / n) - (long long)swap_avg;
+        trace("# pacing: %llu steps, interval %llu us avg = wait %llu us (%llu calls) + sleep %llu us + swap %llu us + other %lld us; "
+              "present thread changed %llu times; "
+              "intervals <15ms %llu, 15-16.5 %llu, 16.5-17.5 %llu, 17.5-20 %llu, 20-25 %llu, 25-34 %llu, >=34 %llu",
+              (unsigned long long)n, (unsigned long long)(sum_interval / n), (unsigned long long)(w_wait / n),
+              (unsigned long long)(w_calls / n), (unsigned long long)(w_sleep / n), (unsigned long long)swap_avg,
+              other, (unsigned long long)thread_switches,
+              (unsigned long long)hist[0], (unsigned long long)hist[1], (unsigned long long)hist[2], (unsigned long long)hist[3],
+              (unsigned long long)hist[4], (unsigned long long)hist[5], (unsigned long long)hist[6]);
+        swap_us_sum = swap_count = 0;
+    }
+    w_wait = w_sleep = w_calls = sum_interval = intervals = 0;
+    memset(hist, 0, sizeof hist);
     uint64_t us, bytes;
     vorbis_stats(&us, &bytes);
     char memory[128];
@@ -570,6 +792,9 @@ static void heartbeat(int drawn) {
 }
 
 void render_present(void) {
+    ime_poll();                                  /* the keyboard for text fields (Vita) */
+    net_poll();                                  /* SceNet + ad-hoc search, from the first frame (Vita) */
+    if (ime_dialog_active()) skip_drawing = 0;   /* the dialog needs a swap every frame */
     heartbeat(!skip_drawing);
 #ifdef __vita__
     static uint64_t last_swap, skipped;
@@ -612,26 +837,22 @@ void render_present(void) {
     glClearColor(clear[0], clear[1], clear[2], clear[3]);
     }
 #endif
-    platform_swap();
+    {
+        uint64_t s0 = platform_ticks_us();
+        platform_swap();
+        swap_us_sum += platform_ticks_us() - s0;
+        swap_count++;
+    }
 #ifdef __vita__
     {
-        uint64_t now = platform_ticks_us(); /* a frame slower than ~55 FPS: skip drawing the next */
-        if (last_swap && now - last_swap > 18000) skip_drawing = 1;
+        uint64_t now = platform_ticks_us(); /* a frame slower than ~50 FPS: skip drawing the next */
+        if (last_swap && now - last_swap > 20000) skip_drawing = 1;
         last_swap = now;
     }
 #endif
-#ifdef __vita__
-    if (d3d_frames % 60 == 0 && last_frame) { /* once a second: copy what is on screen */
-        SceDisplayFrameBuf fb;
-        memset(&fb, 0, sizeof fb);
-        fb.size = sizeof fb;
-        sceDisplayWaitVblankStart();
-        if (sceDisplayGetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME) >= 0 && fb.base)
-            for (uint32_t y = 0; y < VITA_H; y++) /* stored bottom-up, like GL rows */
-                memcpy(last_frame + (size_t)(VITA_H - 1 - y) * VITA_W * 4,
-                       (const uint8_t *)fb.base + (size_t)y * fb.pitch * 4, VITA_W * 4);
-    }
-#endif
+    /* (The screen used to be copied here once a second for the final BMP: reading 2 MiB of
+       uncached framebuffer and waiting for a vblank cost 20-50 ms, one slow logic step
+       every second. The copy now happens in render_capture_bmp, when it is needed.) */
     gl_leave();
 #ifndef __vita__
     /* T123_CAPTURE="n[,n...]" saves frame-<n>.bmp at those presented frames, so a
@@ -653,6 +874,22 @@ void render_present(void) {
 }
 
 int render_capture_bmp(const char *path) {
+#ifdef __vita__
+    /* the displayed buffer is copied only now (see render_present) */
+    if (!last_frame)
+        last_frame = malloc((size_t)VITA_W * VITA_H * 4);
+    capture_w = VITA_W;
+    capture_h = VITA_H;
+    if (last_frame) {
+        SceDisplayFrameBuf fb;
+        memset(&fb, 0, sizeof fb);
+        fb.size = sizeof fb;
+        if (sceDisplayGetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME) >= 0 && fb.base)
+            for (uint32_t y = 0; y < VITA_H; y++) /* stored bottom-up, like GL rows */
+                memcpy(last_frame + (size_t)(VITA_H - 1 - y) * VITA_W * 4,
+                       (const uint8_t *)fb.base + (size_t)y * fb.pitch * 4, VITA_W * 4);
+    }
+#endif
     if (!last_frame)
         return -1;
     char full[1200];

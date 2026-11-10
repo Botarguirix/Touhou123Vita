@@ -212,7 +212,7 @@ void guest_call(Cpu *c, uint32_t target) {
     GuestFn fn = find(target);
     if (!fn)
         guest_fault(c, target, "call to a function that is neither lifted nor intercepted");
-    guest_current_target = target;
+    c->current_target = target;
     fn(c);
 }
 
@@ -223,7 +223,7 @@ void guest_call(Cpu *c, uint32_t target) {
 void guest_call_import(Cpu *c, uint32_t iat_slot) {
     GuestFn fn = find(iat_slot);
     if (fn) {
-        guest_current_target = iat_slot;
+        c->current_target = iat_slot;
         fn(c);
         return;
     }
@@ -416,10 +416,6 @@ void x87_reset(Cpu *c) {
 
 void x87_set_cw(Cpu *c, uint16_t cw) { c->fpu.cw = cw; }
 
-uint16_t x87_get_sw(Cpu *c) {
-    return (uint16_t)((c->fpu.sw & ~0x3800) | ((c->fpu.top & 7) << 11));
-}
-
 static inline unsigned phys(Cpu *c, unsigned i) { return (c->fpu.top + i) & 7; }
 
 /* Conversions and integer rounding under a directed RC do not touch the host FPU:
@@ -506,6 +502,14 @@ static x87_t rint_rc(Cpu *c, x87_t v) {
 static double round24(Cpu *c, double v) {
     if (v == 0 || !isfinite(v))
         return to_float_rc(c, v);
+    /* Fast path: inside the normal range of a float the grid of 24 significant bits is
+       exactly the float grid, so rounding to float is the same as the scaled rounding
+       below (frexp + two ldexp + a conversion per operation: the guest runs in 24-bit
+       precision, so this was on every x87 operation). Subnormal floats and overflow
+       keep the extended exponent and take the slow path. */
+    double av = fabs(v);
+    if (av >= (double)FLT_MIN && av <= (double)FLT_MAX)
+        return to_float_rc(c, v);
     int e;
     frexp(v, &e);
     return ldexp((double)to_float_rc(c, ldexp(v, -e)), e);
@@ -519,18 +523,18 @@ x87_t x87_round_pc(Cpu *c, x87_t v) {
     }
 }
 
-x87_t x87_m32(uint32_t a) { float f; memcpy(&f, G(a), 4); return f; }
-x87_t x87_m64(uint32_t a) { double d; memcpy(&d, G(a), 8); return d; }
-
-void x87_fld_m32(Cpu *c, uint32_t a) { x87_push(c, x87_m32(a)); }
-void x87_fld_m64(Cpu *c, uint32_t a) { x87_push(c, x87_m64(a)); }
+double x87_round24_slow(Cpu *c, double v) { return round24(c, v); }
+#ifndef T123_X87_INLINE_BIG
+void x87_fst_m32(Cpu *c, uint32_t a, int pop) { x87_fst_m32_inl(c, a, pop); }
+void x87_fst_m64(Cpu *c, uint32_t a, int pop) { x87_fst_m64_inl(c, a, pop); }
+void x87_arith(Cpu *c, int op, unsigned dst, x87_t src, int pop) { x87_arith_inl(c, op, dst, src, pop); }
+#endif
+/* (x87_m32/m64, fld_m32/m64, fild, fst_st and get_sw are inline in guest.h) */
 
 static long double read80(uint32_t a);
 void x87_fld_m80(Cpu *c, uint32_t a) { x87_push(c, (x87_t)read80(a)); }
 
-void x87_fild(Cpu *c, int64_t v) { x87_push(c, (x87_t)v); }
-
-void x87_fld_const(Cpu *c, int which) {
+void x87_fld_const_slow(Cpu *c, int which) {
     static const long double k[] = {
         0.0L, 1.0L, 3.14159265358979323846264338327950288L, 1.44269504088896340735992468100189214L,
         3.32192809488736234787031942948939018L, 0.301029995663981195213738894724493027L,
@@ -540,13 +544,13 @@ void x87_fld_const(Cpu *c, int which) {
 
 void x87_fld_st(Cpu *c, unsigned i) { x87_push(c, x87_st(c, i)); }
 
-void x87_fst_m32(Cpu *c, uint32_t a, int pop) {
+void x87_fst_m32_slow(Cpu *c, uint32_t a, int pop) {
     float f = to_float_rc(c, x87_st(c, 0));
     memcpy(G(a), &f, 4);
     if (pop) x87_pop(c);
 }
 
-void x87_fst_m64(Cpu *c, uint32_t a, int pop) {
+void x87_fst_m64_slow(Cpu *c, uint32_t a, int pop) {
     double d = to_double_rc(c, x87_st(c, 0));
     memcpy(G(a), &d, 8);
     if (pop) x87_pop(c);
@@ -628,10 +632,6 @@ void x87_frstor(Cpu *c, uint32_t a) {
         c->fpu.st[phys(c, i)] = (x87_t)read80(a + 28 + 10 * i);
 }
 
-void x87_fst_st(Cpu *c, unsigned i, int pop) {
-    x87_set_st(c, i, x87_st(c, 0));
-    if (pop) x87_pop(c);
-}
 
 void x87_fist(Cpu *c, uint32_t a, unsigned size, int pop, int truncate) {
     x87_t v = x87_st(c, 0);
@@ -682,7 +682,7 @@ static x87_t apply(Cpu *c, int op, x87_t a, x87_t b) {
     return pc == 0 ? round24(c, r) : r;
 }
 
-void x87_arith(Cpu *c, int op, unsigned dst, x87_t src, int pop) {
+void x87_arith_slow(Cpu *c, int op, unsigned dst, x87_t src, int pop) {
     x87_set_st(c, dst, apply(c, op, x87_st(c, dst), src));
     if (pop) x87_pop(c);
 }

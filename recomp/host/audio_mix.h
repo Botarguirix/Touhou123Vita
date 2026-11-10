@@ -22,4 +22,15 @@ int audio_voice_playing(const AudioVoice *v);
  * out_rate=0 produce silencio sin avanzar. No usar punteros tras free; el
  * propietario coordina la vida de cada handle con los demás hilos de control. */
 void audio_mix(int16_t *out, uint32_t frames, uint32_t out_rate);
+/* Diagnóstico de nivel desde la última lectura (se reinicia al leer): fotogramas
+ * mezclados con alguna voz sonando, fotogramas con el limitador reduciendo la
+ * ganancia (limited), fotogramas cuya suma no cabe en 16 bits (clipped), pico de la
+ * suma antes de limitar y máximo de voces sonando a la vez. El limitador de
+ * sobrecarga no toca nada mientras la suma cabe. */
+/* Sin sonido (nosound.txt): hace avanzar las posiciones de las voces como si se hubieran
+ * mezclado `frames` fotogramas a out_rate, sin calcular ni producir muestras. El juego
+ * sigue viendo cursores que avanzan (rellena la música por ellos). */
+void audio_advance(uint32_t frames, uint32_t out_rate);
+typedef struct { uint64_t frames, limited, clipped; int peak, max_voices; } AudioStats;
+void audio_mix_stats(AudioStats *out);
 #endif
