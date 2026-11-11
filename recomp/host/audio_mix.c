@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+uint64_t platform_ticks_us(void);
 
 struct AudioVoice {
     struct AudioVoice *next;
@@ -50,9 +51,14 @@ void audio_voice_free(AudioVoice *v) {
     if (*p) { *p = v->next; free(v); }
     pthread_mutex_unlock(&mutex);
 }
+uint64_t audio_play_wait_max, audio_play_wait_sum, audio_play_calls; /* lock wait in Play (us) */
 void audio_voice_play(AudioVoice *v, int looping) {
     if (!v) return;
+    uint64_t t0 = platform_ticks_us();
     pthread_mutex_lock(&mutex);
+    uint64_t w = platform_ticks_us() - t0;
+    audio_play_calls++; audio_play_wait_sum += w;
+    if (w > audio_play_wait_max) audio_play_wait_max = w;
     if (v->position >= v->count) v->position = 0;
     v->looping = !!looping; v->playing = 1; v->gen++;
     pthread_mutex_unlock(&mutex);

@@ -62,6 +62,10 @@ void platform_clock_report(char *out, size_t size); /* Vita: clocks set at start
 void platform_display_taken(void);    /* the renderer owns the screen: stop the text log */
 #endif
 int host_stats(void);
+int vprof_active(void);
+void render_draw_stats(char *out, size_t size, int reset); /* render_gl.c: DrawPrimitiveUP breakdown */
+void vprof_set_game(Cpu *c);
+void vprof_window(uint64_t from, uint64_t to, uint64_t work);
 void vprof_register(Cpu *c, uint32_t tag); /* vprof.c: sampling profiler (prof.txt) */         /* stats.txt (Vita) / always (PC): per-call timing of Win32 and COM calls for the trace summary; off = no timer reads in the call path */
 int host_nosound(void);      /* nosound.txt (Vita) / T123_NOSOUND (PC): no audio output, mixing or music decoding */
 /* Text input (the Vita keyboard): synthetic window messages and the text the IME returns */

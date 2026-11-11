@@ -26,7 +26,41 @@ typedef struct {
     pthread_mutex_t m;
     pthread_cond_t cv;
     int manual, signaled;
+    uint64_t set_at;     /* when SetEvent last ran (wake-up latency probe, prof.txt only) */
 } Event;
+
+/* Wake-up latency: time from SetEvent to the waiter running again, per waiting thread.
+   Only measured while the sampling profiler is on. */
+/* NOTE: VitaSDK's __thread is one address for all threads, so wake_tag is only right on
+   PC; the per-thread labels of "# wake-ups" are unreliable on the Vita (the totals are
+   fine). The game thread is identified by its Cpu instead. */
+static __thread uint32_t wake_tag;
+static Cpu *game_cpu;
+static pthread_mutex_t table_lock_wake = PTHREAD_MUTEX_INITIALIZER;
+static struct { uint32_t tag; uint64_t n, sum, max, over1, over4, over8; } wake[16];
+static uint64_t wake_report_at;
+static void wake_record(uint64_t lat) {
+    pthread_mutex_lock(&table_lock_wake);
+    unsigned i = 0;
+    while (i < 15 && wake[i].tag && wake[i].tag != wake_tag) i++;
+    wake[i].tag = wake_tag;
+    wake[i].n++; wake[i].sum += lat;
+    if (lat > wake[i].max) wake[i].max = lat;
+    wake[i].over1 += lat > 1000; wake[i].over4 += lat > 4000; wake[i].over8 += lat > 8000;
+    uint64_t now = platform_ticks_us();
+    if (!wake_report_at) wake_report_at = now + 10000000;
+    if (now >= wake_report_at) {
+        wake_report_at = now + 10000000;
+        for (unsigned k = 0; k < 16; k++)
+            if (wake[k].n > 50)
+                trace("# wake-ups: thread %08x: %llu, %llu us avg, worst %llu us, >1 ms %llu, >4 ms %llu, >8 ms %llu",
+                      wake[k].tag, (unsigned long long)wake[k].n, (unsigned long long)(wake[k].sum / wake[k].n),
+                      (unsigned long long)wake[k].max, (unsigned long long)wake[k].over1,
+                      (unsigned long long)wake[k].over4, (unsigned long long)wake[k].over8);
+        memset(wake, 0, sizeof wake);
+    }
+    pthread_mutex_unlock(&table_lock_wake);
+}
 
 typedef struct {
     Event done;          /* signaled when the guest thread returns */
@@ -49,6 +83,7 @@ static void event_init(Event *e, int manual, int signaled) {
 
 static void event_set(Event *e) {
     pthread_mutex_lock(&e->m);
+    if (vprof_active()) e->set_at = platform_ticks_us();
     e->signaled = 1;
     pthread_cond_broadcast(&e->cv);
     pthread_mutex_unlock(&e->m);
@@ -73,6 +108,7 @@ static void timed_wait_report(uint64_t now) {
 /* 0 = signaled (WAIT_OBJECT_0), 0x102 = WAIT_TIMEOUT */
 static uint32_t event_wait(Event *e, uint32_t ms) {
     pthread_mutex_lock(&e->m);
+    int blocked = !e->signaled && ms != 0; /* had to wait for a SetEvent */
     if (!e->signaled && ms != 0xFFFFFFFFu) {
         uint64_t start = platform_ticks_us(), deadline = start + (uint64_t)ms * 1000u;
         int precise = ms >= PRECISE_MIN_MS;
@@ -103,9 +139,15 @@ static uint32_t event_wait(Event *e, uint32_t ms) {
             pthread_cond_wait(&e->cv, &e->m);
     }
     uint32_t r = e->signaled ? 0 : 0x102;
+    uint64_t lat = 0;
+    if (e->signaled && blocked && e->set_at && vprof_active()) {
+        uint64_t now = platform_ticks_us();
+        lat = now > e->set_at ? now - e->set_at : 0;
+    }
     if (e->signaled && !e->manual)
         e->signaled = 0;
     pthread_mutex_unlock(&e->m);
+    if (lat || (blocked && r == 0 && vprof_active() && e->set_at)) wake_record(lat);
     return r;
 }
 
@@ -162,8 +204,48 @@ API(WaitForSingleObject) {
         r = event_wait(&t->done, ms);
         if (!r) event_set(&t->done); /* a finished thread stays signaled */
     }
-    host_wait_us += platform_ticks_us() - t0;
+    uint64_t dur = platform_ticks_us() - t0;
+    host_wait_us += dur;
     host_wait_calls++;
+    if (c == game_cpu && vprof_active()) { /* long steps: what ran between two waits */
+        static uint64_t last_end, window_at;
+        static unsigned dumped;
+        char draws[320];
+        render_draw_stats(draws, sizeof draws, 1); /* drawing done in this step, then reset */
+        if (t0 >= window_at) { /* one ordinary step every 10 s, for comparison */
+            window_at = t0 + 10000000; dumped = 0;
+            trace("# step (reference): %llu us of work, drew %s",
+                  (unsigned long long)(last_end ? t0 - last_end : 0), draws);
+        }
+        if (last_end && t0 - last_end > 20000 && dumped < 25) {
+            dumped++;
+            vprof_window(last_end, t0, t0 - last_end);
+            trace("#   that step drew %s", draws);
+        }
+        /* after the trace writes: their SD card time is the profiler's, not the game's
+           (v19 charged ~12 ms of it to the next step, which chained long steps) */
+        last_end = platform_ticks_us();
+    }
+    if (c == game_cpu && vprof_active()) { /* the game thread's waits, by kind */
+        static struct { uint32_t h, ms, r; uint64_t n, sum, max; } w[8];
+        static uint64_t at;
+        unsigned i = 0;
+        while (i < 7 && w[i].n && !(w[i].h == h && w[i].ms == ms && w[i].r == r)) i++;
+        w[i].h = h; w[i].ms = ms; w[i].r = r; w[i].n++; w[i].sum += dur;
+        if (dur > w[i].max) w[i].max = dur;
+        uint64_t now = t0 + dur;
+        if (!at) at = now + 10000000;
+        if (now >= at) {
+            at = now + 10000000;
+            for (unsigned k = 0; k < 8; k++)
+                if (w[k].n)
+                    trace("# game waits: handle %08x (%s) ms %d -> %s: %llu, %llu us avg, worst %llu us", w[k].h,
+                          handle_get(w[k].h, H_EVENT) ? "event" : handle_get(w[k].h, H_THREAD) ? "thread" : "other",
+                          (int)w[k].ms, w[k].r ? "timeout" : "signaled", (unsigned long long)w[k].n,
+                          (unsigned long long)(w[k].sum / w[k].n), (unsigned long long)w[k].max);
+            memset(w, 0, sizeof w);
+        }
+    }
     ret_stdcall(c, r, 2);
 }
 API(CreateMutexA) {
@@ -178,9 +260,22 @@ API(CreateMutexA) {
    loaders to IDLE (-15). The Vita scheduler is strictly by priority, so ignoring that
    let the loading threads starve the music refill, and the looping stream buffer
    replayed stale chunks (robotic first music). Lower Vita numbers run first. */
+static int host_file_exists(const char *name) {
+    char path[1100];
+    snprintf(path, sizeof path, "%s/%s", host_data_dir, name);
+    FILE *f = fopen(path, "rb");
+    if (f) fclose(f);
+    return f != NULL;
+}
+
 static void apply_priority(Thread *t) {
     int win = t->priority, delta = win >= 15 ? -40 : win <= -15 ? 24 : -4 * win;
     int p = 160 + delta; /* 160: the user default (SCE_KERNEL_DEFAULT_PRIORITY_USER) */
+    /* The frame clock (0x4192a0) is TIME_CRITICAL like the music threads, and at the same
+       Vita priority a music decode kept it off the CPU: its 16/17 ms waits ended up to
+       13 ms late (v15 trace), the game thread then waited 17-26 ms for a tick and steps
+       were lost. It now runs above them (the audio output stays at 96). */
+    if (t->start == 0x004192a0u && !host_file_exists("oldclock.txt")) p = 100;
     p = p < 64 ? 64 : p > 191 ? 191 : p;
     /* 120 came back 0x80028021 (illegal priority) on hardware: the application's
        range is narrower than 64..191, so step towards the default until one is taken */
@@ -225,6 +320,8 @@ static void *thread_main(void *arg) {
     x87_set_cw(c, 0x027F);
     c->fs_base = t->tib;
     vprof_register(c, t->start);
+    wake_tag = t->start;
+    if (t->start == 0x004083d0u) { game_cpu = c; vprof_set_game(c); }
     uint32_t stack = THREAD_STACK_BASE + t->index * THREAD_STACK_SIZE;
     c->esp.d = stack + THREAD_STACK_SIZE - 16;
     jmp_buf trap;

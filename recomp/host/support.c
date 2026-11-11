@@ -12,40 +12,79 @@ static FILE *trace_file;
 unsigned long long import_calls;
 char trace_path[256] = "host-trace.log";
 
+/* Lines go to a memory buffer; a writer thread puts them on the card every 250 ms.
+   Writing from the caller cost 6-10 ms per '#' line on the Vita (fflush to the SD
+   card), on the game thread: every sound effect's Play line was a dropped frame. */
+enum { TB_SIZE = 256 * 1024 };
+static char tb[2][TB_SIZE];
+static size_t tb_len;
+static unsigned tb_cur;
+static pthread_mutex_t trace_lock = PTHREAD_MUTEX_INITIALIZER, write_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void *trace_writer(void *arg) {
+    (void)arg;
+    for (;;) {
+        platform_sleep_ms(250);
+        pthread_mutex_lock(&trace_lock); /* never held while waiting for write_lock: trace() takes them in this order */
+        unsigned full = tb_cur;
+        size_t n = tb_len;
+        tb_cur ^= 1;
+        tb_len = 0;
+        pthread_mutex_unlock(&trace_lock);
+        pthread_mutex_lock(&write_lock);
+        if (trace_file && n) {
+            fwrite(tb[full], 1, n, trace_file);
+            fflush(trace_file);
+        }
+        pthread_mutex_unlock(&write_lock);
+    }
+    return NULL;
+}
+
 void trace(const char *fmt, ...) {
     char line[1024];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
-    static pthread_mutex_t trace_lock = PTHREAD_MUTEX_INITIALIZER;
     pthread_mutex_lock(&trace_lock);
     if (!trace_file) {
         trace_file = fopen(trace_path, "w");
         if (trace_file)
             setvbuf(trace_file, NULL, _IOFBF, 64 * 1024);
     }
-    if (trace_file) {
-        fputs(line, trace_file);
-        fputc('\n', trace_file);
-        /* Flushing every line cost ~10 ms per line on the Vita's card (8.7 s of
-           CreateFileA alone). Milestones and errors ('#') still go out at once, so a
-           crash report keeps them; plain call lines go out at least once a second. */
-        static uint64_t last_flush;
-        uint64_t now = platform_ticks_us();
-        /* flush.txt in the data directory: every line goes out at once (to find where a hang is) */
-        static int every = -1;
-        if (every < 0) {
+    /* flush.txt in the data directory: every line goes out at once (to find where a hang is) */
+    static int every = -1;
+    if (trace_file && every < 0) {
             char p[300];
             snprintf(p, sizeof p, "%.*s", (int)(strrchr(trace_path, '/') ? strrchr(trace_path, '/') - trace_path + 1 : 0), trace_path);
             strncat(p, "flush.txt", sizeof p - strlen(p) - 1);
             FILE *t = fopen(p, "rb");
             every = t != NULL;
             if (t) fclose(t);
-        }
-        if (every || line[0] == '#' || now - last_flush > 1000000u) {
+            if (!every) {
+                pthread_t id;
+                pthread_attr_t attr;
+                pthread_attr_init(&attr);
+                pthread_attr_setstacksize(&attr, 16 * 1024);
+                if (pthread_create(&id, &attr, trace_writer, NULL)) every = 1; /* no writer: write in place */
+                pthread_attr_destroy(&attr);
+            }
+    }
+    if (trace_file) {
+        size_t n = strlen(line);
+        if (every || tb_len + n + 1 > TB_SIZE) { /* in place: flush.txt, or the buffer is full */
+            pthread_mutex_lock(&write_lock);
+            fwrite(tb[tb_cur], 1, tb_len, trace_file);
+            tb_len = 0;
+            fputs(line, trace_file);
+            fputc('\n', trace_file);
             fflush(trace_file);
-            last_flush = now;
+            pthread_mutex_unlock(&write_lock);
+        } else {
+            memcpy(tb[tb_cur] + tb_len, line, n);
+            tb[tb_cur][tb_len + n] = '\n';
+            tb_len += n + 1;
         }
     }
     platform_log(line);
@@ -53,10 +92,14 @@ void trace(const char *fmt, ...) {
 }
 
 void trace_close(void) {
+    pthread_mutex_lock(&write_lock);
     if (trace_file) {
+        fwrite(tb[tb_cur], 1, tb_len, trace_file);
+        tb_len = 0;
         fclose(trace_file);
         trace_file = NULL;
     }
+    pthread_mutex_unlock(&write_lock);
 }
 
 /* -- guest heap -------------------------------------------------------------------------

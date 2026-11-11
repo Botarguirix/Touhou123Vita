@@ -173,7 +173,8 @@ API(DSB_Lock) {
 }
 API(DSB_Play) {
     SoundBuffer *b = &buffers[com_index(ARG(c, 0))];
-    if (unusual_buffer(b)) /* the music streams, not the effects */
+    static unsigned plays_logged;
+    if (unusual_buffer(b) && plays_logged++ < 20) /* the first ones only: effects play many times a second */
         trace("# audio: play buffer %u (%u bytes, %u Hz, %d ch, %d bit) looping=%u", (unsigned)(b - buffers), b->bytes, b->rate,
               b->channels, b->bits, ARG(c, 3) & 1);
     audio_voice_play(b->voice, ARG(c, 3) & 1 /* DSBPLAY_LOOPING */);

@@ -17,6 +17,7 @@
 
 enum { MAX_CPUS = 12, SLOTS = 4096, TOP = 20 };
 const char *com_name(uint32_t fake, char *buf, unsigned size); /* com.c */
+static void ring_push(void);
 
 typedef struct {
     Cpu *cpu;
@@ -84,10 +85,62 @@ static void *sampler(void *arg) {
         pthread_mutex_lock(&lock);
         for (unsigned i = 0; i < MAX_CPUS; i++)
             if (slots[i].cpu) sample(&slots[i]);
+        ring_push();
         if (platform_ticks_us() >= next) { report(); next += 10000000; }
         pthread_mutex_unlock(&lock);
     }
     return NULL;
+}
+
+int vprof_active(void) { return active; }
+
+/* Samples of the game thread with their time, to explain single long steps. */
+enum { RING = 4096 };
+static Cpu *game;
+static uint32_t ring_fn[RING];
+static uint64_t ring_t[RING];
+static unsigned ring_pos;
+void vprof_set_game(Cpu *c) { game = c; }
+static void ring_push(void) {
+    if (!game) return;
+    ring_fn[ring_pos % RING] = game->cur_fn;
+    ring_t[ring_pos % RING] = platform_ticks_us();
+    ring_pos++;
+}
+/* One trace line: the functions sampled on the game thread between from and to. */
+void vprof_window(uint64_t from, uint64_t to, uint64_t work) {
+    if (!active) return;
+    static uint32_t key[64], cnt[64];
+    unsigned n = 0, total = 0;
+    memset(cnt, 0, sizeof cnt);
+    pthread_mutex_lock(&lock);
+    for (unsigned k = 0; k < RING && k < ring_pos; k++) {
+        unsigned i = (ring_pos - 1 - k) % RING;
+        if (ring_t[i] < from) break;
+        if (ring_t[i] > to) continue;
+        uint32_t fn = ring_fn[i];
+        unsigned j = 0;
+        while (j < n && key[j] != fn) j++;
+        if (j == n && n < 64) key[n++] = fn;
+        if (j < 64) cnt[j]++;
+        total++;
+    }
+    pthread_mutex_unlock(&lock);
+    char line[512];
+    int len = snprintf(line, sizeof line, "# long step: %llu us of work, %u samples:", (unsigned long long)work, total);
+    for (unsigned r = 0; r < 6; r++) {
+        unsigned best = 64;
+        for (unsigned j = 0; j < n; j++) if (cnt[j] && (best == 64 || cnt[j] > cnt[best])) best = j;
+        if (best == 64) break;
+        char buf[96];
+        const char *name = api_name(key[best]);
+        if (!name) name = com_name(key[best], buf, sizeof buf);
+        if (name) len += snprintf(line + len, sizeof line - len, " %s %u", name, cnt[best]);
+        else len += snprintf(line + len, sizeof line - len, " f_%08x %u", key[best], cnt[best]);
+        cnt[best] = 0;
+        if (len >= (int)sizeof line - 100) break;
+    }
+    trace("%s", line);
 }
 
 void vprof_register(Cpu *c, uint32_t tag) {

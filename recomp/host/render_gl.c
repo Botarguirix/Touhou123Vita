@@ -18,6 +18,7 @@
 #include <SDL2/SDL_opengl.h>
 #endif
 
+#include "dxt.h"
 #include "input_map.h"
 #include "net.h"
 #include "render.h"
@@ -80,7 +81,17 @@ static int platform_init(uint32_t width, uint32_t height) {
         else { vita_w = 640; vita_h = 368; }
         trace("# display: render resolution %dx%d (res.txt: %d)", vita_w, vita_h, want);
     }
-    vglInitWithCustomSizes(0, VITA_W, VITA_H, 8 << 20, 64 << 20, 16 << 20, 0, SCE_GXM_MULTISAMPLE_NONE);
+    /* CDRAM for vitaGL: 64 MiB left fights evicting and re-uploading ~100 textures every
+       10 s (vitaGL free memory stayed at ~8 MiB, the 8 MiB safety margin of
+       gpu_memory_short) while ~30 MiB of CDRAM sat unused (v17 trace). 80 MiB now;
+       gpu64.txt brings back the old size. */
+    {
+        FILE *g = fopen("ux0:data/touhou123vita/gpu64.txt", "rb");
+        int cdram_mb = g ? 64 : 80;
+        if (g) fclose(g);
+        trace("# vitaGL: %d MiB of CDRAM", cdram_mb);
+        vglInitWithCustomSizes(0, VITA_W, VITA_H, 8 << 20, cdram_mb << 20, 16 << 20, 0, SCE_GXM_MULTISAMPLE_NONE);
+    }
     {   /* vsync-off.txt in the data directory: present without waiting for the vblank (tearing) */
         FILE *vs = fopen("ux0:data/touhou123vita/vsync-off.txt", "rb");
         if (vs) { fclose(vs); vglWaitVblankStart(GL_FALSE); }
@@ -315,7 +326,7 @@ void render_fvf(uint32_t value) { fvf = value; }
    again from its stored copy the next time it is drawn. */
 extern RenderTexture textures[RENDER_MAX_TEXTURES];
 #ifdef __vita__
-static uint64_t gpu_budget = 44u << 20; /* of vitaGL's 64 MiB of CDRAM */
+static uint64_t gpu_budget = 56u << 20; /* of vitaGL's 80 MiB of CDRAM */
 #else
 static uint64_t gpu_budget = UINT64_MAX; /* T123_GPU_BUDGET_MB to test the Vita's eviction */
 #endif
@@ -347,7 +358,7 @@ static int gpu_memory_short(uint64_t need) {
         gpu_added_since = 0;
     }
     uint64_t free_now = gpu_free_cache > gpu_added_since ? gpu_free_cache - gpu_added_since : 0;
-    return free_now < need + (8u << 20);
+    return free_now < need + (4u << 20); /* 8 MiB of margin evicted constantly (v17) */
 #else
     (void)need;
     return 0;
@@ -583,11 +594,152 @@ static void upload_band(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) 
     }
 }
 
+#ifdef __vita__
+/* DXT5 (v23): 1 byte per pixel, a quarter of RGBA8 and half of RGBA4444, for the 32-bit
+   textures of 256x256 and up whose sides are multiples of 4. nodxt.txt turns it off. */
+enum { DXT_MAX = 2048 * 1024 }; /* bytes of blocks = pixels: up to 2048x1024 */
+static uint8_t dxt_buf[DXT_MAX];
+static int dxt_enabled(void) {
+    static int state = -1;
+    if (state < 0) {
+        FILE *f = fopen("ux0:data/touhou123vita/nodxt.txt", "rb");
+        state = f == NULL;
+        if (f) fclose(f);
+        trace("# textures: DXT5 compression %s", state ? "on (nodxt.txt turns it off)" : "off (nodxt.txt present)");
+    }
+    return state;
+}
+static void upload_band_dxt(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n) {
+    RenderTexture *t = ctx;
+    dxt5_encode_rows(rows, t->pitch, t->width, n, t->format == 22, dxt_buf + (size_t)(y / 4) * (t->width / 4) * 16);
+}
+static int upload_dxt(RenderTexture *t) {
+    size_t bytes = (size_t)t->width * t->height;
+    uint64_t t0 = platform_ticks_us();
+    gpu_forget(t);
+    gpu_make_room(bytes);
+    uint64_t t1 = platform_ticks_us();
+    size_t rows = (BAND_BYTES / t->pitch) & ~(size_t)3;
+    if (!rows) return 0;
+    render_texture_rows(t, band, rows * t->pitch, upload_band_dxt, t);
+    uint64_t t2 = platform_ticks_us();
+    glGenTextures(1, &t->gl);
+    glBindTexture(GL_TEXTURE_2D, t->gl);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    while (glGetError()) {}
+    glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, (GLsizei)t->width, (GLsizei)t->height, 0,
+                           (GLsizei)bytes, dxt_buf);
+    for (unsigned attempt = 0; glGetError() != GL_NO_ERROR; attempt++) {
+        RenderTexture *oldest = NULL;
+        for (unsigned i = 1; i < RENDER_MAX_TEXTURES; i++) {
+            RenderTexture *o = &textures[i];
+            if (o != t && o->gl && (!oldest || o->used_frame < oldest->used_frame)) oldest = o;
+        }
+        if (!oldest || attempt == 64) {
+            trace("# texture upload %ux%u (DXT5): no GPU memory, skipped", t->width, t->height);
+            glDeleteTextures(1, &t->gl);
+            t->gl = 0;
+            return 1;
+        }
+        gpu_forget(oldest);
+        glBindTexture(GL_TEXTURE_2D, t->gl);
+        glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, (GLsizei)t->width, (GLsizei)t->height, 0,
+                               (GLsizei)bytes, dxt_buf);
+    }
+    uint64_t t3 = platform_ticks_us();
+    static uint64_t n, enc_us, gl_us, px, at;
+    n++; enc_us += t2 - t1; gl_us += t3 - t2; px += bytes;
+    if (t3 >= at) {
+        if (at)
+            trace("# textures: %llu DXT5 uploads (%llu Mpixels): encode %llu ms, GL %llu ms", (unsigned long long)n,
+                  (unsigned long long)(px / 1000000), (unsigned long long)(enc_us / 1000), (unsigned long long)(gl_us / 1000));
+        n = enc_us = gl_us = px = 0;
+        at = t3 + 10000000;
+    }
+    up_stats.n++; up_stats.total += t3 - t0; up_stats.room += t1 - t0; up_stats.fill += t3 - t1;
+    up_report(t3);
+    t->half = 0;
+    t->gpu16 = 0;
+    t->gpu_bytes = (uint32_t)bytes;
+    gpu_bytes += bytes;
+    gpu_added_since += bytes;
+    t->dirty = 0;
+    return 1;
+}
+#endif
+
+#ifdef __vita__
+int render_texture_dxt_ok(const RenderTexture *t) {
+    /* v26 took everything from 64x64 up, the large backgrounds included, and the stage
+       loading never finished on the Vita. v28: v25's rule (256x256 to 1024x1024, not the
+       halved backgrounds) plus the small ones from 64x64; dxtall.txt brings back v26's. */
+    static int all = -1;
+    if (all < 0) {
+        FILE *f = fopen("ux0:data/touhou123vita/dxtall.txt", "rb");
+        all = f != NULL;
+        if (f) fclose(f);
+        trace("# textures: DXT5 for %s", all ? "everything up to 2048x1024 (dxtall.txt)" : "64x64 to 1024x1024, halved backgrounds apart");
+    }
+    if (!all && (wants_half(t) || (uint64_t)t->width * t->height < 256 * 256)) return 0; /* v25: the last stable rule */
+    return (t->format == 21 || t->format == 22) && t->pitch == t->width * 4 && !(t->width & 3) &&
+           !(t->height & 3) && (uint64_t)t->width * t->height >= 64 * 64 && (size_t)t->width * t->height <= DXT_MAX &&
+           dxt_enabled();
+}
+void render_gl_begin(void) { gl_enter(); }
+void render_gl_end(void) { gl_leave(); }
+/* v25, from the texture packing workers (d3d9.c) with render_gl_begin held: the blocks
+   were encoded there from the uncompressed copy at UnlockRect, so the first draw finds
+   the texture on the GPU (v24: inflating and encoding on the game thread cost ~70 ms
+   per 1024x1024 texture in the first seconds of a fight). Only while it fits without
+   evicting anything. */
+int render_texture_install_dxt(RenderTexture *t, const uint8_t *blocks) {
+    size_t bytes = (size_t)t->width * t->height;
+    static uint64_t n, skipped, at;
+    uint64_t now = platform_ticks_us();
+    if (now >= at) {
+        if (at && (n || skipped))
+            trace("# textures: %llu DXT5 encoded in the background, %llu left for the first draw (GPU full)",
+                  (unsigned long long)n, (unsigned long long)skipped);
+        n = skipped = 0;
+        at = now + 10000000;
+    }
+    if (gpu_bytes + bytes > gpu_budget || gpu_memory_short(bytes)) { skipped++; return 0; }
+    gpu_forget(t);
+    glGenTextures(1, &t->gl);
+    glBindTexture(GL_TEXTURE_2D, t->gl);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    while (glGetError()) {}
+    glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, (GLsizei)t->width, (GLsizei)t->height, 0,
+                           (GLsizei)bytes, blocks);
+    if (glGetError() != GL_NO_ERROR) {
+        glDeleteTextures(1, &t->gl);
+        t->gl = 0;
+        skipped++;
+        return 0;
+    }
+    t->half = 0;
+    t->gpu16 = 0;
+    t->gpu_bytes = (uint32_t)bytes;
+    t->used_frame = d3d_frames; /* not the first to be evicted */
+    gpu_bytes += bytes;
+    gpu_added_since += bytes;
+    t->dirty = 0;
+    n++;
+    return 1;
+}
+#endif
+
 static void upload(RenderTexture *t) {
     int half = wants_half(t);
+#ifdef __vita__
+    if (render_texture_dxt_ok(t) && upload_dxt(t))
+        return;
+#endif
     uint32_t gw = half ? t->width / 2 : t->width, gh = half ? (t->height + 1) / 2 : t->height;
-    int use16 = !half && (t->format == 21 || t->format == 22) && t->pitch == t->width * 4 &&
-                (uint64_t)t->width * t->height >= 256 * 256 && tex16_enabled();
+    /* v23: every 32-bit texture goes out as 16 bits (it was 256x256 and up) */
+    int use16 = !half && (t->format == 21 || t->format == 22) && t->pitch == t->width * 4 && tex16_enabled();
     GLenum gtype = use16 ? GL_UNSIGNED_SHORT_4_4_4_4 : GL_UNSIGNED_BYTE;
     size_t out_bytes = (size_t)gw * gh * (use16 ? 2 : 4);
     if (t->format < 64) {
@@ -654,6 +806,44 @@ static void upload(RenderTexture *t) {
     gpu_added_since += out_bytes;
     t->dirty = 0;
 }
+/* UnlockRect: upload at once, while the uncompressed copy is still at hand, instead of on
+   the first draw (v20: first uploads in a fight cost 10-13 ms of a 16.7 ms step). Only
+   while it fits the budget without evicting anything; nopreload.txt turns it off. */
+void render_texture_preload(RenderTexture *t) {
+    static int state = -1;
+    if (state < 0) {
+#ifdef __vita__
+        /* off by default since v23: in v22 it filled the GPU with menu textures and the
+           fight then evicted constantly; preload.txt turns it on */
+        FILE *f = fopen("ux0:data/touhou123vita/preload.txt", "rb");
+        state = f != NULL;
+        if (f) fclose(f);
+#else
+        state = getenv("T123_PRELOAD") != NULL;
+#endif
+        trace("# textures: upload on UnlockRect %s", state ? "on (preload.txt)" : "off (preload.txt turns it on)");
+    }
+    if (!state || !t->width || !t->height) return;
+    static uint64_t n, us, skipped, report_at;
+    gl_enter();
+    if (gpu_bytes + (uint64_t)t->width * t->height * 4 <= gpu_budget) {
+        uint64_t t0 = platform_ticks_us();
+        upload(t);
+        us += platform_ticks_us() - t0;
+        n++;
+    } else {
+        skipped++;
+    }
+    uint64_t now = platform_ticks_us();
+    if (now >= report_at) {
+        if (report_at && (n || skipped))
+            trace("# textures: %llu uploaded on UnlockRect in %llu ms, %llu left for the first draw (budget full)",
+                  (unsigned long long)n, (unsigned long long)(us / 1000), (unsigned long long)skipped);
+        n = us = skipped = 0;
+        report_at = now + 10000000;
+    }
+    gl_leave();
+}
 void render_texture_free(RenderTexture *t) {
     if (!t->gl) return;
     gl_enter();
@@ -666,8 +856,21 @@ void render_texture(uint32_t stage, RenderTexture *t) {
         bound = t;
 }
 
+/* Where DrawPrimitiveUP spends its time (phase 1 of the 60 FPS roadmap): waiting for the
+   GL lock, copying the vertices, uploading a texture, setting states, and glDrawArrays
+   itself (vitaGL copying the arrays and possibly waiting for the GPU). Totals since the
+   last call of render_draw_stats; the slowest single draw is kept as well. */
+static uint64_t dr_n, dr_lock, dr_copy, dr_upload, dr_state, dr_gl, dr_worst, dr_worst_gl, dr_verts;
+void render_draw_stats(char *out, size_t size, int reset) {
+    snprintf(out, size, "%llu draws (%llu vertices): lock %llu us, copy %llu, upload %llu, states %llu, glDrawArrays %llu (worst draw %llu us, worst glDrawArrays %llu us)",
+             (unsigned long long)dr_n, (unsigned long long)dr_verts, (unsigned long long)dr_lock,
+             (unsigned long long)dr_copy, (unsigned long long)dr_upload, (unsigned long long)dr_state,
+             (unsigned long long)dr_gl, (unsigned long long)dr_worst, (unsigned long long)dr_worst_gl);
+    if (reset) dr_n = dr_lock = dr_copy = dr_upload = dr_state = dr_gl = dr_worst = dr_worst_gl = dr_verts = 0;
+}
 void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t stride) {
     if (skip_drawing) return;
+    uint64_t q0 = platform_ticks_us(), q1, q2, q3 = 0, q4 = 0, q5;
     static const GLenum modes[] = {0, GL_POINTS, GL_LINES, GL_LINE_STRIP, GL_TRIANGLES, GL_TRIANGLE_STRIP, GL_TRIANGLE_FAN};
     uint32_t n = type == 1 ? count : type == 2 ? count * 2 : type == 3 ? count + 1
                : type == 4 ? count * 3 : count + 2;
@@ -683,6 +886,7 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
     if (fvf & 0x080) off += 4;
     uint32_t tex = ((fvf >> 8) & 15) ? off : 0xFFFFFFFFu;
     gl_enter(); /* the vertex arrays below are shared by the drawing threads */
+    q1 = platform_ticks_us();
     static float pos[65536 * 3], uv[65536 * 2];
     static uint8_t col[65536 * 4];
     for (uint32_t i = 0; i < n; i++) {
@@ -698,10 +902,13 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
         if (tex != 0xFFFFFFFFu)
             memcpy(&uv[i * 2], G(v + tex), 8);
     }
+    q2 = platform_ticks_us();
     apply_states();
     if (bound && tex != 0xFFFFFFFFu) {
+        q3 = platform_ticks_us();
         if (bound->dirty || !bound->gl)
             upload(bound);
+        q4 = platform_ticks_us();
         bound->drawn++;
         bound->used_frame = d3d_frames;
         glEnable(GL_TEXTURE_2D);
@@ -719,8 +926,16 @@ void render_draw_up(uint32_t type, uint32_t count, uint32_t data, uint32_t strid
     glVertexPointer(3, GL_FLOAT, 0, pos);
     glEnableClientState(GL_COLOR_ARRAY);
     glColorPointer(4, GL_UNSIGNED_BYTE, 0, col);
+    uint64_t g0 = platform_ticks_us();
     glDrawArrays(modes[type], 0, (GLsizei)n);
+    q5 = platform_ticks_us();
     gl_leave();
+    uint64_t upload_us = q4 - q3;
+    dr_n++; dr_verts += n;
+    dr_lock += q1 - q0; dr_copy += q2 - q1; dr_upload += upload_us;
+    dr_state += (g0 - q2) - upload_us; dr_gl += q5 - g0;
+    if (q5 - q0 > dr_worst) dr_worst = q5 - q0;
+    if (q5 - g0 > dr_worst_gl) dr_worst_gl = q5 - g0;
 }
 
 /* The last frame is kept for the capture written at exit. Reading it back stalls the

@@ -42,6 +42,12 @@ static void *audio_thread(void *arg) {
         if (t2 >= report_at) {
             AudioStats s;
             audio_mix_stats(&s);
+            extern uint64_t audio_play_wait_max, audio_play_wait_sum, audio_play_calls;
+            if (audio_play_calls)
+                trace("# audio: Play waited for the mixer lock %llu us avg, worst %llu us (%llu calls)",
+                      (unsigned long long)(audio_play_wait_sum / audio_play_calls),
+                      (unsigned long long)audio_play_wait_max, (unsigned long long)audio_play_calls);
+            audio_play_wait_max = audio_play_wait_sum = audio_play_calls = 0;
             if (s.max_voices)
                 trace("# audio: %llu periods, %llu late (worst %llu us, nominal 21333), mix %llu us avg / %llu us max, "
                       "peak %d, %llu frames in the limiter zone, %llu past full scale, up to %d voices",

@@ -31,6 +31,13 @@ void render_state(uint32_t state, uint32_t value);
 uint32_t render_get_state(uint32_t state);
 void render_texture(uint32_t stage, RenderTexture *t);
 void render_texture_free(RenderTexture *t);
+void render_texture_preload(RenderTexture *t); /* UnlockRect: upload now if it fits the GPU budget */
+#ifdef __vita__
+int render_texture_dxt_ok(const RenderTexture *t);                     /* goes to the GPU as DXT5 */
+void render_gl_begin(void);
+void render_gl_end(void);
+int render_texture_install_dxt(RenderTexture *t, const uint8_t *blocks); /* between begin/end */
+#endif
 void render_texture_pixels(RenderTexture *t, uint8_t *out); /* level 0 as stored by the game (d3d9.c) */
 void render_texture_rows(RenderTexture *t, uint8_t *buf, size_t size,
                          void (*sink)(void *ctx, const uint8_t *rows, uint32_t y, uint32_t n), void *ctx);

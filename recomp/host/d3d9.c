@@ -3,6 +3,7 @@
  * render/sampler/stage state, effects. Rendering goes through render.h; this file
  * owns the COM surface and the guest-visible data (caps, descriptors, locks). */
 #include "com.h"
+#include "dxt.h"
 #include "render.h"
 
 #include <math.h>
@@ -200,6 +201,82 @@ static PackJob jobs[MAX_JOBS];
 static unsigned job_head, job_tail, pending_bytes;
 static pthread_cond_t job_ready = PTHREAD_COND_INITIALIZER;
 
+#ifdef __vita__
+/* v27: texture cache on the memory card. The game hands over finished pixels, not file
+   names, so each texture is identified by a hash of its pixels, size and format; its
+   DXT5 blocks are kept in ux0:data/touhou123vita/texcache/ and read back instead of
+   encoded on later loads (this run or any later one). Built only from the user's own
+   files, on their card. nocache.txt turns it off; deleting the folder rebuilds it. */
+#include <sys/stat.h>
+static uint64_t texture_hash(const uint8_t *p, size_t n, uint32_t w, uint32_t h, uint32_t fmt) {
+    uint64_t a = 0x9E3779B97F4A7C15ull ^ w, b = 0xC2B2AE3D27D4EB4Full ^ ((uint64_t)h << 32 | fmt);
+    const uint32_t *q = (const uint32_t *)p;
+    for (size_t i = 0, words = n / 4; i < words; i += 2) {
+        a = (a ^ q[i]) * 0x100000001B3ull;
+        b = (b ^ (i + 1 < words ? q[i + 1] : 0)) * 0x100000001B3ull;
+    }
+    return a ^ (b >> 1) ^ (b << 31);
+}
+static void dxt_cached_encode(const uint8_t *raw, uint32_t w, uint32_t h, uint32_t fmt, uint8_t *blocks) {
+    static int state = -1;
+    static uint64_t hits, misses, read_us, encode_us, write_us, report_at;
+    const char *dir = "ux0:data/touhou123vita/texcache";
+    if (state < 0) {
+        /* off by default: v27/v28 with it never finished loading a stage (cause not found);
+           texcache.txt turns it on for testing */
+        FILE *f = fopen("ux0:data/touhou123vita/texcache.txt", "rb");
+        state = f != NULL;
+        if (f) fclose(f);
+        if (state) mkdir(dir, 0777);
+        trace("# texture cache: %s", state ? "on (texcache.txt)" : "off (texcache.txt turns it on)");
+    }
+    size_t bytes = (size_t)w * h;
+    uint64_t t0 = platform_ticks_us();
+    char path[160];
+    path[0] = 0;
+    if (state) {
+        uint64_t k = texture_hash(raw, bytes * 4, w, h, fmt);
+        snprintf(path, sizeof path, "%s/%016llx_%ux%u.dxt", dir, (unsigned long long)k, w, h);
+        FILE *f = fopen(path, "rb");
+        if (f) {
+            size_t got = fread(blocks, 1, bytes, f);
+            fclose(f);
+            if (got == bytes) {
+                hits++;
+                read_us += platform_ticks_us() - t0;
+                goto report;
+            }
+        }
+    }
+    {
+        uint64_t e0 = platform_ticks_us();
+        dxt5_encode_rows(raw, w * 4, w, h, fmt == 22, blocks);
+        uint64_t e1 = platform_ticks_us();
+        encode_us += e1 - e0;
+        misses++;
+        if (state) {
+            FILE *f = fopen(path, "wb");
+            if (f) {
+                size_t put = fwrite(blocks, 1, bytes, f);
+                fclose(f);
+                if (put != bytes) remove(path); /* card full: no half files */
+            }
+            write_us += platform_ticks_us() - e1;
+        }
+    }
+report:;
+    uint64_t now = platform_ticks_us();
+    if (now >= report_at) {
+        if (report_at && (hits || misses))
+            trace("# texture cache: %llu read from the card in %llu ms, %llu encoded in %llu ms (+%llu ms writing them)",
+                  (unsigned long long)hits, (unsigned long long)(read_us / 1000), (unsigned long long)misses,
+                  (unsigned long long)(encode_us / 1000), (unsigned long long)(write_us / 1000));
+        hits = misses = read_us = encode_us = write_us = 0;
+        report_at = now + 10000000;
+    }
+}
+#endif
+
 static void *pack_worker(void *arg) {
     (void)arg;
     for (;;) {
@@ -221,7 +298,29 @@ static void *pack_worker(void *arg) {
             platform_texture_free(packed);
         }
         pending_bytes -= job.bytes;
+#ifdef __vita__
+        int dxt = current && t->gen == job.gen && render_texture_dxt_ok(t) && w * h <= 1024 * 1024; /* v25 */
+#endif
         pthread_mutex_unlock(&texture_lock);
+#ifdef __vita__
+        if (dxt) { /* v25: DXT5 on this core and onto the GPU, off the game thread */
+            static uint8_t blocks[1024 * 1024]; /* the largest the background path takes */
+            static pthread_mutex_t blocks_lock = PTHREAD_MUTEX_INITIALIZER;
+            pthread_mutex_lock(&blocks_lock);
+            int big = w * h > 1024 * 1024; /* where v26 hung: say where it stops */
+            if (big) trace("# dxt worker: %ux%u encode", w, h);
+            dxt_cached_encode(job.raw, w, h, t->format, blocks);
+            if (big) trace("# dxt worker: %ux%u install", w, h);
+            render_gl_begin(); /* the GL lock before texture_lock, as upload() takes them */
+            pthread_mutex_lock(&texture_lock);
+            if (t->gen == job.gen)
+                render_texture_install_dxt(t, blocks);
+            pthread_mutex_unlock(&texture_lock);
+            render_gl_end();
+            if (big) trace("# dxt worker: %ux%u done", w, h);
+            pthread_mutex_unlock(&blocks_lock);
+        }
+#endif
         platform_texture_free(job.raw);
     }
     return NULL;
@@ -570,6 +669,7 @@ API(Texture_UnlockRect) {
         t->pixels = 0;
     }
     t->dirty = 1;
+    render_texture_preload(t);
     ret_stdcall(c, S_OK, 2);
 }
 
